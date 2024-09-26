@@ -1,11 +1,24 @@
-TO-DO
-start_streaming.py 
-is in working order, but still has one disadvantage that the broadcast is interrupted when a device is added or removed from the available streams. That would be great to fix but if that is too complicated could potentially also be fixed by running some javascript in the on the crying by the sea page to restart the stream.
+# Project Documentation
 
-audio_stream_recorder.py
-should be working but I'm not sure if the part that adds new files to the playlist is really working.
+## Files and Descriptions
 
-config.json is where you set the streams and the port so they don't have to be typed in every time.
+### `start_streaming.py`
+- **Status**: Functional, but with a limitation.
+- **Issue**: The broadcast is interrupted when a device is added or removed from the available streams.
+  - **Potential Fix**: Ideally, this issue should be resolved within the Python code itself. However, a workaround could be implemented using JavaScript on the "Crying by the Sea" page to automatically restart the stream when a device change is detected.
 
-fiveminutesago.txt
-is just the little ascii art that shows the title and version number in the terminal.
+### `audio_stream_recorder.py`
+- **Status**: Should be functional, but needs verification.
+- **Uncertainty**: The section that adds new files to the playlist may not be working as expected. Further testing is recommended.
+
+### `config.json`
+- **Purpose**: Contains stream and port settings.
+- **Usage**: This file allows you to set the streams and port so they don’t need to be manually entered every time you run the program.
+
+### `fiveminutesago.txt`
+- **Description**: A simple ASCII art file.
+- **Purpose**: Displays the title and version number in the terminal when the program is run.
+
+## Notes
+- If you encounter any issues or have feedback, please feel free to reach out.
+
