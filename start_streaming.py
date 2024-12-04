@@ -6,6 +6,7 @@ import socket
 import os
 import json
 
+
 # Function to run command without waiting for it to complete.
 def run_command(command):
     try:
@@ -22,10 +23,12 @@ def run_command(command):
         print(f"Failed to run command: {' '.join(command)}\nError: {e}")
         return None
 
+
 # Function to read and print the output of a subprocess
 def read_process_output(process):
     for line in process.stdout:
         print(line, end='')
+
 
 def check_stream(stream_url):
     try:
@@ -41,11 +44,12 @@ def check_stream(stream_url):
         print(f"Error checking stream {stream_url}: {e}")
         return False
 
+
 # Continuously check for the availability of streams and update the available_streams list.
-def monitor_streams(LOCAL_IP, PORT, STREAM_NAMES, available_streams, lock):
+def monitor_streams(LOCAL_IP, clients, available_streams, lock):
     while True:
-        for stream in STREAM_NAMES:
-            STREAM_URL = f"http://{LOCAL_IP}:{PORT}/{stream}"
+        for client in clients:
+            STREAM_URL = f"http://{LOCAL_IP}:{client.port}/{client.name}"
             try:
                 is_available = check_stream(STREAM_URL)
                 with lock:
@@ -58,6 +62,7 @@ def monitor_streams(LOCAL_IP, PORT, STREAM_NAMES, available_streams, lock):
                     print(f"Exception in monitor_streams for {STREAM_URL}: {e}")
         time.sleep(5)
 
+
 # Retrieves the local IP address of the machine.
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -69,6 +74,7 @@ def get_local_ip():
     finally:
         s.close()
     return LOCAL_IP
+
 
 # Builds the ffmpeg command to merge and stream whatever streams are currently available
 def build_ffmpeg_command(streams, radio_stream_output_url):
@@ -112,6 +118,31 @@ def build_ffmpeg_command(streams, radio_stream_output_url):
 
     return cmd
 
+
+class Client:
+    port = 0
+    name = ""
+
+    def __init__(self, port, name):
+        self.port = port
+        self.name = name
+
+
+def load_config(config_path):
+    try:
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+    except:
+        print("Configuration file config.json not found. Exiting.")
+    else:
+        clients = []
+        port = config.get('port', 8000)  # Default to 8000 if not specified
+        stream_names = config.get('stream_names', [])
+        for name in stream_names:
+            clients.append(Client(port, name))
+        return clients
+
+
 def main():
     # Clear the terminal
     os.system('clear')
@@ -133,23 +164,17 @@ def main():
         total_lines_printed += 1
 
     # Load configuration from config.json
-    config_file = 'config.json'
-    if os.path.exists(config_file):
-        with open(config_file, 'r') as f:
-            config = json.load(f)
-        PORT = config.get('port', 8000)  # Default to 8000 if not specified
-        STREAM_NAMES = config.get('stream_names', [])
-    else:
-        print("Configuration file config.json not found. Exiting.")
-        return
+    clients = load_config('config.json')
 
     # Display the configuration
-    print(f"Using port: {PORT}")
-    print(f"Monitoring streams: {', '.join(STREAM_NAMES)}")
+    print(f"Using port: {clients[0].port}")
+    print(f"Monitoring streams:")
+    for client in clients:
+        print(", " + client.name)
     total_lines_printed += 2  # For the two lines printed above
 
     # Reserve space for stream statuses
-    num_status_lines = len(STREAM_NAMES)
+    num_status_lines = len(clients)
     print("\n" * num_status_lines)  # Reserve lines for stream statuses
     total_lines_printed += num_status_lines  # Account for the reserved lines
 
@@ -164,7 +189,8 @@ def main():
     lock = threading.Lock()
 
     # Start a background thread to monitor the streams
-    monitor_thread = threading.Thread(target=monitor_streams, args=(get_local_ip(), PORT, STREAM_NAMES, available_streams, lock))
+    monitor_thread = threading.Thread(target=monitor_streams,
+                                      args=(get_local_ip(), clients, available_streams, lock))
     monitor_thread.daemon = True
     monitor_thread.start()
 
@@ -180,16 +206,16 @@ def main():
         sys.stdout.flush()
 
         # Display the status of each stream
-        for stream_name in STREAM_NAMES:
-            stream_url = f"http://{get_local_ip()}:{PORT}/{stream_name}"
+        for client in clients:
+            stream_url = f"http://{get_local_ip()}:{client.port}/{client.name}"
             # Clear the line before writing
             sys.stdout.write('\033[K')
             if stream_url in streams:
                 # Available - print in green
-                print(f"\033[32m{stream_name}: Available\033[0m")
+                print(f"\033[32m{client.name}: Available\033[0m")
             else:
                 # Not available - print in red
-                print(f"\033[31m{stream_name}: Not Available\033[0m")
+                print(f"\033[31m{client.name}: Not Available\033[0m")
 
         # After printing statuses, move the cursor to the line after the statuses
         output_line = total_lines_printed + 2  # Line after the statuses
@@ -198,14 +224,14 @@ def main():
 
         # Check for changes in the stream list
         if set(streams) != set(previous_streams):
-            if ffmpeg_process:
+            if ffmpeg_process and set(streams) != set(previous_streams):
                 print("Stream list changed. Restarting FFmpeg process.")
                 ffmpeg_process.terminate()
                 ffmpeg_process.wait()
                 ffmpeg_process = None
 
             ffmpeg_cmd = build_ffmpeg_command(streams, radio_stream_output_url)
-            if ffmpeg_cmd:
+            if ffmpeg_cmd and set(streams) != set(previous_streams):
                 print("Starting FFmpeg process with updated streams.")
                 print(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
                 ffmpeg_process = run_command(ffmpeg_cmd)
@@ -214,12 +240,10 @@ def main():
 
             # Update the previous_streams list
             previous_streams = streams.copy()
-        else:
-            # No change in streams; do nothing
-            pass
 
         # Wait before checking again
         time.sleep(5)
+
 
 if __name__ == "__main__":
     main()
