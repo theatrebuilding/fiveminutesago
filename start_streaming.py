@@ -144,59 +144,46 @@ def load_config(config_path):
 
 
 def main():
-    # Clear the terminal
-    os.system('clear')
-
-    # Initialize total lines printed
-    total_lines_printed = 0
-
-    # Read and display ASCII art from the text file
-    ascii_art_file = 'fiveminutesago.txt'  # Using the specified ASCII art file
-    if os.path.exists(ascii_art_file):
-        with open(ascii_art_file, 'r') as f:
-            ascii_art = f.read()
-        print(ascii_art)
-        ascii_art_lines = ascii_art.count('\n') + 2  # +1 to account for the last line
-        total_lines_printed += ascii_art_lines
-    else:
-        print("ASCII art file not found.")
-        ascii_art_lines = 1
-        total_lines_printed += 1
+    total_lines_printed = print_welcome_message()
 
     # Load configuration from config.json
     clients = load_config('config.json')
 
     # Display the configuration
-    print(f"Using port: {clients[0].port}")
-    print(f"Monitoring streams:")
-    for client in clients:
-        print(", " + client.name)
-    total_lines_printed += 2  # For the two lines printed above
+    total_lines_printed = display_configuration(clients, total_lines_printed)
 
+    monitor_stream_statuses(clients, total_lines_printed)
+
+
+def display_configuration(clients, total_lines_printed):
+    print(f"Using port: {clients[0].port}")
+    stream_list = f"Monitoring streams:"
+    for client in clients:
+        stream_list.append(", " + client.name)
+    print(stream_list)
+    total_lines_printed += 2  # For the two lines printed above
+    return total_lines_printed
+
+
+def monitor_stream_statuses(clients, total_lines_printed):
     # Reserve space for stream statuses
     num_status_lines = len(clients)
     print("\n" * num_status_lines)  # Reserve lines for stream statuses
     total_lines_printed += num_status_lines  # Account for the reserved lines
-
     # Calculate the line number where statuses start
     status_start_line = total_lines_printed - num_status_lines + 1  # +1 because line numbers start at 1
-
     # External radio stream output URL
     radio_stream_output_url = "icecast://source:5e4ThU3VW@s40.myradiostream.com:23058/stream"
-
     # List of available streams
     available_streams = []
     lock = threading.Lock()
-
     # Start a background thread to monitor the streams
     monitor_thread = threading.Thread(target=monitor_streams,
                                       args=(get_local_ip(), clients, available_streams, lock))
     monitor_thread.daemon = True
     monitor_thread.start()
-
     ffmpeg_process = None
     previous_streams = []
-
     while True:
         with lock:
             streams = list(available_streams)
@@ -223,26 +210,45 @@ def main():
         sys.stdout.flush()
 
         # Check for changes in the stream list
-        if set(streams) != set(previous_streams):
-            if ffmpeg_process and set(streams) != set(previous_streams):
-                print("Stream list changed. Restarting FFmpeg process.")
-                ffmpeg_process.terminate()
-                ffmpeg_process.wait()
-                ffmpeg_process = None
+        if ffmpeg_process and set(streams) != set(previous_streams):
+            print("Stream list changed. Restarting FFmpeg process.")
+            ffmpeg_process.terminate()
+            ffmpeg_process.wait()
+            ffmpeg_process = None
 
-            ffmpeg_cmd = build_ffmpeg_command(streams, radio_stream_output_url)
-            if ffmpeg_cmd and set(streams) != set(previous_streams):
-                print("Starting FFmpeg process with updated streams.")
-                print(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
-                ffmpeg_process = run_command(ffmpeg_cmd)
-            else:
-                print("No streams available to start FFmpeg process.")
+        ffmpeg_cmd = build_ffmpeg_command(streams, radio_stream_output_url)
+        if ffmpeg_cmd and set(streams) != set(previous_streams):
+            print("Starting FFmpeg process with updated streams.")
+            print(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
+            ffmpeg_process = run_command(ffmpeg_cmd)
+        else:
+            print("No streams available to start FFmpeg process.")
 
-            # Update the previous_streams list
-            previous_streams = streams.copy()
+        # Update the previous_streams list
+        previous_streams = streams.copy()
 
         # Wait before checking again
         time.sleep(5)
+
+
+def print_welcome_message():
+    # Clear the terminal
+    os.system('clear')
+    # Initialize total lines printed
+    total_lines_printed = 0
+    # Read and display ASCII art from the text file
+    ascii_art_file = 'fiveminutesago.txt'  # Using the specified ASCII art file
+    if os.path.exists(ascii_art_file):
+        with open(ascii_art_file, 'r') as f:
+            ascii_art = f.read()
+        print(ascii_art)
+        ascii_art_lines = ascii_art.count('\n') + 2  # +1 to account for the last line
+        total_lines_printed += ascii_art_lines
+    else:
+        print("ASCII art file not found.")
+        ascii_art_lines = 1
+        total_lines_printed += 1
+    return total_lines_printed
 
 
 if __name__ == "__main__":
