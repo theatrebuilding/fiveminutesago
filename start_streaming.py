@@ -6,6 +6,8 @@ import socket
 import os
 import json
 import ngrok
+from saveNgrokUrl import update_ngrok_url
+from loadEnv import load_env
 
 
 # Function to run command without waiting for it to complete.
@@ -167,16 +169,21 @@ def run_gstream(clients, total_lines_printed):
 
 
 def create_listener():
-    # create session
-    # Establish connectivity
-    f = open("/home/kevintf/ngrok/authtoken", "r")
-    authtoken = f.read()
-    authtoken = authtoken.split('\n')[0]
+    # Create ngrok session and update the ngrok url
+    pathToEnv = "/home/theatrebuilding/env.json"
+    env = load_env(pathToEnv)
+    authtoken = env.get("NGROK_AUTH_TOKEN")
+    if not authtoken:
+        print("NGROK_AUTH_TOKEN not found in env.json. Exiting.")
+        return
     ngrok.set_auth_token(authtoken)
     listener = ngrok.forward(8000, "tcp")
 
     # Output ngrok url to console
     print(f"Ingress established at {listener.url()}")
+
+    ngrok_url = listener.url() 
+    update_ngrok_url(ngrok_url, env_path=pathToEnv)
 
     # Keep the listener alive
     try:
