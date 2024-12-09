@@ -155,6 +155,26 @@ def main():
     monitor_stream_statuses(clients, total_lines_printed)
 
 
+def print_welcome_message():
+    # Clear the terminal
+    os.system('clear')
+    # Initialize total lines printed
+    total_lines_printed = 0
+    # Read and display ASCII art from the text file
+    ascii_art_file = 'fiveminutesago.txt'  # Using the specified ASCII art file
+    if os.path.exists(ascii_art_file):
+        with open(ascii_art_file, 'r') as f:
+            ascii_art = f.read()
+        print(ascii_art)
+        ascii_art_lines = ascii_art.count('\n') + 2  # +1 to account for the last line
+        total_lines_printed += ascii_art_lines
+    else:
+        print("ASCII art file not found.")
+        ascii_art_lines = 1
+        total_lines_printed += 1
+    return total_lines_printed
+
+
 def display_configuration(clients, total_lines_printed):
     print(f"Using port: {clients[0].port}")
     stream_list = f"Monitoring streams:"
@@ -229,26 +249,6 @@ def monitor_stream_statuses(clients, total_lines_printed):
 
         # Wait before checking again
         time.sleep(5)
-
-
-def print_welcome_message():
-    # Clear the terminal
-    os.system('clear')
-    # Initialize total lines printed
-    total_lines_printed = 0
-    # Read and display ASCII art from the text file
-    ascii_art_file = 'fiveminutesago.txt'  # Using the specified ASCII art file
-    if os.path.exists(ascii_art_file):
-        with open(ascii_art_file, 'r') as f:
-            ascii_art = f.read()
-        print(ascii_art)
-        ascii_art_lines = ascii_art.count('\n') + 2  # +1 to account for the last line
-        total_lines_printed += ascii_art_lines
-    else:
-        print("ASCII art file not found.")
-        ascii_art_lines = 1
-        total_lines_printed += 1
-    return total_lines_printed
 
 
 if __name__ == "__main__":
