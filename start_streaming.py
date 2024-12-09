@@ -5,6 +5,7 @@ import threading
 import socket
 import os
 import json
+import ngrok
 
 
 # Function to run command without waiting for it to complete.
@@ -146,13 +147,44 @@ def load_config(config_path):
 def main():
     total_lines_printed = print_welcome_message()
 
+    gstream = True
+
     # Load configuration from config.json
     clients = load_config('config.json')
 
     # Display the configuration
     total_lines_printed = display_configuration(clients, total_lines_printed)
 
-    monitor_stream_statuses(clients, total_lines_printed)
+    if gstream:
+        run_gstream(clients, total_lines_printed)
+    else:
+        monitor_stream_statuses(clients, total_lines_printed)
+
+
+def run_gstream(clients, total_lines_printed):
+    create_listener()
+
+
+
+def create_listener():
+    # create session
+    # Establish connectivity
+    f = open("/home/kevintf/ngrok/authtoken", "r")
+    authtoken = f.read()
+    authtoken = authtoken.split('\n')[0]
+    ngrok.set_auth_token(authtoken)
+    listener = ngrok.forward(8000, "tcp")
+
+    # Output ngrok url to console
+    print(f"Ingress established at {listener.url()}")
+
+    # Keep the listener alive
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Closing listener")
+
 
 
 def print_welcome_message():
@@ -179,7 +211,7 @@ def display_configuration(clients, total_lines_printed):
     print(f"Using port: {clients[0].port}")
     stream_list = f"Monitoring streams:"
     for client in clients:
-        stream_list.append(", " + client.name)
+        stream_list.join([", " + client.name])
     print(stream_list)
     total_lines_printed += 2  # For the two lines printed above
     return total_lines_printed
