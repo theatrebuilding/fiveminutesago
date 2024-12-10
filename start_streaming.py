@@ -9,6 +9,17 @@ import ngrok
 from saveNgrokUrl import update_ngrok_url
 from loadEnv import load_env
 
+def gstreamer_receiver():
+    # Start the receiver pipeline
+    print("Starting gstreamer receiver...")
+    
+    receiver_pipeline = (
+        f"gst-launch-1.0 "
+        f"fdsrc fd=1 ! tcpserversink port=8000"
+    )
+
+    os.system(receiver_pipeline)
+
 
 # Function to run command without waiting for it to complete.
 def run_command(command):
@@ -159,6 +170,7 @@ def main():
 
     if gstream:
         run_gstream(clients, total_lines_printed)
+        gstreamer_receiver()
     else:
         monitor_stream_statuses(clients, total_lines_printed)
 
