@@ -195,7 +195,7 @@ def create_listener():
 
     ngrok_url = listener.url() 
     update_ngrok_url(ngrok_url, env_path=pathToEnv)
-    gstreamer_receiver()
+    # gstreamer_receiver()
 
     # Keep the listener alive
     try:
