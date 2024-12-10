@@ -170,7 +170,6 @@ def main():
 
     if gstream:
         run_gstream(clients, total_lines_printed)
-        gstreamer_receiver()
     else:
         monitor_stream_statuses(clients, total_lines_printed)
 
@@ -196,6 +195,7 @@ def create_listener():
 
     ngrok_url = listener.url() 
     update_ngrok_url(ngrok_url, env_path=pathToEnv)
+    gstreamer_receiver()
 
     # Keep the listener alive
     try:
