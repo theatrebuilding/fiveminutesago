@@ -12,7 +12,7 @@ from loadEnv import load_env
 def main():
     total_lines_printed = print_welcome_message()
 
-    run_gstream(clients, total_lines_printed)
+    run_gstream(total_lines_printed)
 
 
 
@@ -78,7 +78,7 @@ def print_subprocess_output(process):
 
 
 
-def run_gstream(clients, total_lines_printed):
+def run_gstream(total_lines_printed):
     create_listener()
 
 
