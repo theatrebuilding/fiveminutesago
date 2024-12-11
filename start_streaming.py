@@ -15,7 +15,7 @@ def gstreamer_receiver():
     
     receiver_pipeline = (
         f"gst-launch-1.0 "
-        f"fdsrc fd=1 ! tcpserversink port=8000"
+        f"fdsrc fd=1 ! tcpserversink port=9000"
     )
 
     os.system(receiver_pipeline)
