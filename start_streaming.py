@@ -30,14 +30,14 @@ def run_pinggy_tunnel(token, port):
         f"-R0:localhost:{port}",
         "-o", "StrictHostKeyChecking=no",
         "-o", "ServerAliveInterval=30",
-        f"{token}+tcp@a.pinggy.io ",
-        "&",
+        f"{token}+tcp@a.pinggy.io"
     ]
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     threading.Thread(target=print_subprocess_output, args=(process,)).start()
 
     return process
+
 
 
 def print_subprocess_output(process):
@@ -205,28 +205,31 @@ def run_gstream(clients, total_lines_printed):
 
 
 def create_listener():
-    # Create ngrok session and update the ngrok url
     pathToEnv = "/home/theatrebuilding/env.json"
     env = load_env(pathToEnv)
     authtoken1 = env.get("PINGGY_TOKEN_ONE")
     authtoken2 = env.get("PINGGY_TOKEN_TWO")
     authtoken3 = env.get("PINGGY_TOKEN_THREE")
-    port1 = 8000
-    port2 = 9000
-    port3 = 9001
+
     if not authtoken1 or not authtoken2 or not authtoken3:
         print("No Pinggy auth token found. Exiting.")
         return
+
+    # Start GStreamer first
+    # If gstreamer_receiver blocks, consider running it in a thread
+    # Or start it in background with subprocess if needed
+    threading.Thread(target=gstreamer_receiver, daemon=True).start()
+
+    # Now start pinggy tunnels
+    port1 = 8000
+    port2 = 9000
+    port3 = 9001
+
     run_pinggy_tunnel(authtoken1, port1)
     run_pinggy_tunnel(authtoken2, port2)
     run_pinggy_tunnel(authtoken3, port3)
 
-    # Output ngrok url to console
     print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
-
-    # ngrok_url = listener.url() 
-    # update_ngrok_url(ngrok_url, env_path=pathToEnv)
-    gstreamer_receiver()
 
     # Keep the listener alive
     try:
