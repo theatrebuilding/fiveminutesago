@@ -38,7 +38,7 @@ def run_pinggy_tunnel(token):
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     # Optionally, read output in a separate thread
-    threading.Thread(target=print_subprocess_output, args=(process,)).start()
+    threading.Thread(target=read_process_output, args=(process,)).start()
 
     return process
 
