@@ -27,7 +27,7 @@ def gstreamer_receiver():
 
 def run_pinggy_tunnel(token):
     command = [
-        "./pinggy",
+        "../pinggy",
         "-p", "443",
         "-R0:localhost:8000",
         "-o", "StrictHostKeyChecking=no",
