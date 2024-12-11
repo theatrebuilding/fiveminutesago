@@ -49,7 +49,7 @@ def gstreamer_receiver():
 
     receiver_pipeline = (
         f"gst-launch-1.0 "
-        f"tcpclientsrc host=localhost port=8000 ! "
+        f"tcpclientsrc host=192.168.0.128 port=8000 ! "
         f"application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
         f"rtph264depay ! avdec_h264 ! videoconvert ! autovideosink sync=false"
     )
