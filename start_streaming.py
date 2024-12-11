@@ -40,7 +40,7 @@ def gstreamer_receiver():
     
     receiver_pipeline = (
         f"gst-launch-1.0 "
-        f"tcpserversrc host=127.0.0.1 port=8000 ! queue ! "
+        f"tcpserversrc host=0.0.0.0 port=8000 ! queue ! "
         f"application/x-rtp,media=video,encoding-name=H264,payload=96 "
         f"! rtph264depay ! tee name=t "
         f"t. ! queue ! rtph264pay ! tcpserversink host=0.0.0.0 port=9000 recover-policy=keyframe "
@@ -74,44 +74,41 @@ def print_subprocess_output(process):
 def run_gstream(total_lines_printed):
     create_listener()
 
-# def create_listener():
-#     pathToEnv = "/home/theatrebuilding/env.json"
-#     env = load_env(pathToEnv)
-#     authtoken1 = env.get("PINGGY_TOKEN_ONE")
-#     authtoken2 = env.get("PINGGY_TOKEN_TWO")
-#     authtoken3 = env.get("PINGGY_TOKEN_THREE")
-# 
-#     if not authtoken1 or not authtoken2 or not authtoken3:
-#         print("No Pinggy auth token found. Exiting.")
-#         return
-# 
-#     # Start GStreamer first
-#     # If gstreamer_receiver blocks, consider running it in a thread
-#     # Or start it in background with subprocess if needed
-#     threading.Thread(target=gstreamer_receiver, daemon=False).start()
-# 
-#     # Now start pinggy tunnels
-#     port1 = 8000
-#     port2 = 9000
-#     port3 = 9001
-# 
-#     run_pinggy_tunnel(authtoken1, port1)
-#     run_pinggy_tunnel(authtoken2, port2)
-#     run_pinggy_tunnel(authtoken3, port3)
-# 
-#     print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
-# 
-#     # Keep the listener alive
-#     try:
-#         while True:
-#             time.sleep(1)
-#     except KeyboardInterrupt:
-#         print("Closing listener")
-
 def create_listener():
-    # Skip loading env and starting pinggy tunnels
-    # Just run GStreamer:
-    gstreamer_receiver()
+    pathToEnv = "/home/theatrebuilding/env.json"
+    env = load_env(pathToEnv)
+    authtoken1 = env.get("PINGGY_TOKEN_ONE")
+    authtoken2 = env.get("PINGGY_TOKEN_TWO")
+    authtoken3 = env.get("PINGGY_TOKEN_THREE")
+
+    if not authtoken1 or not authtoken2 or not authtoken3:
+        print("No Pinggy auth token found. Exiting.")
+        return
+
+    # Start GStreamer first
+    # If gstreamer_receiver blocks, consider running it in a thread
+    # Or start it in background with subprocess if needed
+    threading.Thread(target=gstreamer_receiver, daemon=False).start()
+
+    # Now start pinggy tunnels
+    port1 = 8000
+    port2 = 9000
+    port3 = 9001
+
+    run_pinggy_tunnel(authtoken1, port1)
+    run_pinggy_tunnel(authtoken2, port2)
+    run_pinggy_tunnel(authtoken3, port3)
+
+    print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
+
+    # Keep the listener alive
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Closing listener")
+
+
 
 
 if __name__ == "__main__":
