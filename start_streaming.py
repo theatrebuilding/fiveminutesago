@@ -15,10 +15,38 @@ def gstreamer_receiver():
     
     receiver_pipeline = (
         f"gst-launch-1.0 "
-        f"fdsrc fd=1 ! tcpserversink port=9000"
+        f"tcpserversrc host=0.0.0.0 port=8000 ! queue ! "
+        f"application/x-rtp,media=video,encoding-name=H264,payload=96 "
+        f"! rtph264depay ! tee name=t "
+        f"t. ! queue ! rtph264pay ! tcpserversink host=0.0.0.0 port=9000 recover-policy=keyframe "
+        f"t. ! queue ! rtph264pay ! tcpserversink host=0.0.0.0 port=9001 recover-policy=keyframe"
     )
 
     os.system(receiver_pipeline)
+
+
+def run_pinggy_tunnel(token):
+    command = [
+        "./pinggy",
+        "-p", "443",
+        "-R0:localhost:8000",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", "ServerAliveInterval=30",
+        f"{token}+tcp@a.pinggy.io"
+    ]
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+    # Optionally, read output in a separate thread
+    threading.Thread(target=print_subprocess_output, args=(process,)).start()
+
+    return process
+
+
+def print_subprocess_output(process):
+    for line in process.stdout:
+        print(line, end='')
+
 
 
 # Function to run command without waiting for it to complete.
@@ -183,18 +211,21 @@ def create_listener():
     # Create ngrok session and update the ngrok url
     pathToEnv = "/home/theatrebuilding/env.json"
     env = load_env(pathToEnv)
-    authtoken = env.get("NGROK_AUTH_TOKEN")
-    if not authtoken:
-        print("NGROK_AUTH_TOKEN not found in env.json. Exiting.")
+    authtoken1 = env.get("PINGGY_TOKEN_ONE")
+    authtoken2 = env.get("PINGGY_TOKEN_TWO")
+    authtoken3 = env.get("PINGGY_TOKEN_THREE")
+    if not authtoken1 or not authtoken2 or not authtoken3:
+        print("No Pinggy auth token found. Exiting.")
         return
-    ngrok.set_auth_token(authtoken)
-    listener = ngrok.forward(8000, "tcp")
+    run_pinggy_tunnel(authtoken1)
+    run_pinggy_tunnel(authtoken2)
+    run_pinggy_tunnel(authtoken3)
 
     # Output ngrok url to console
-    print(f"Ingress established at {listener.url()}")
+    print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
 
-    ngrok_url = listener.url() 
-    update_ngrok_url(ngrok_url, env_path=pathToEnv)
+    # ngrok_url = listener.url() 
+    # update_ngrok_url(ngrok_url, env_path=pathToEnv)
     gstreamer_receiver()
 
     # Keep the listener alive
