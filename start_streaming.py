@@ -38,14 +38,21 @@ def gstreamer_receiver():
     # Start the receiver pipeline
     print("Starting gstreamer receiver...")
     
-
-
     receiver_pipeline = (
-        "gst-launch-1.0 "
-        "tcpserversrc port=8000 ! queue ! "
-        "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
-        "rtph264depay ! avdec_h264 ! videoconvert ! autovideosink"
+        f"gst-launch-1.0 "
+        f"tcpserversrc port=8000 ! queue ! "
+        f"application/x-rtp,media=video,encoding-name=H264,payload=96 "
+        f"! rtph264depay ! tee name=t "
+        f"t. ! queue ! rtph264pay ! tcpserversink port=9000 recover-policy=keyframe "
+        f"t. ! queue ! rtph264pay ! tcpserversink port=9001 recover-policy=keyframe"
     )
+
+#    receiver_pipeline = (
+#        "gst-launch-1.0 "
+#        "tcpserversrc port=8000 ! queue ! "
+#        "application/x-rtp,media=video,encoding-name=H264,payload=96 ! "
+#        "rtph264depay ! avdec_h264 ! videoconvert ! autovideosink"
+#    )
 
 
     os.system(receiver_pipeline)
