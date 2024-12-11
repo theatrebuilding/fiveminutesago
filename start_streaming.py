@@ -25,20 +25,19 @@ def gstreamer_receiver():
     os.system(receiver_pipeline)
 
 
-def run_pinggy_tunnel(token):
+def run_pinggy_tunnel(token, port):
     command = [
         "../pinggy",
         "-p", "443",
-        "-R0:localhost:8000",
+        f"-R0:localhost:{port}",
         "-o", "StrictHostKeyChecking=no",
         "-o", "ServerAliveInterval=30",
-        f"{token}+tcp@a.pinggy.io"
+        f"{token}+tcp@a.pinggy.io ",
+        "&",
     ]
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-    # Optionally, read output in a separate thread
-    threading.Thread(target=read_process_output, args=(process,)).start()
+    threading.Thread(target=print_subprocess_output, args=(process,)).start()
 
     return process
 
@@ -214,12 +213,15 @@ def create_listener():
     authtoken1 = env.get("PINGGY_TOKEN_ONE")
     authtoken2 = env.get("PINGGY_TOKEN_TWO")
     authtoken3 = env.get("PINGGY_TOKEN_THREE")
+    port1 = 8000
+    port2 = 9000
+    port3 = 9001
     if not authtoken1 or not authtoken2 or not authtoken3:
         print("No Pinggy auth token found. Exiting.")
         return
-    run_pinggy_tunnel(authtoken1)
-    run_pinggy_tunnel(authtoken2)
-    run_pinggy_tunnel(authtoken3)
+    run_pinggy_tunnel(authtoken1, port1)
+    run_pinggy_tunnel(authtoken2, port2)
+    run_pinggy_tunnel(authtoken3, port3)
 
     # Output ngrok url to console
     print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
