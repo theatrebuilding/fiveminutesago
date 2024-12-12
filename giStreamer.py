@@ -20,7 +20,6 @@ def gstreamer_receiver():
 
     # Start playing
     pipeline.set_state(Gst.State.PLAYING)
-    print("Playing...")
 
     # Main loop for handling GStreamer events
     loop = GLib.MainLoop()
@@ -37,7 +36,11 @@ def gstreamer_receiver():
         elif msg_type == Gst.MessageType.EOS:
             print("End-Of-Stream reached")
             loop.quit()
-
+        elif msg_type == Gst.MessageType.STATE_CHANGED:
+            old_state, new_state, pending_state = message.parse_state_changed()
+            if message.src == pipeline:
+                print(f"Pipeline state changed from {old_state.value_name} to {new_state.value_name}")
+    
     bus.connect("message", on_message)
 
     try:
