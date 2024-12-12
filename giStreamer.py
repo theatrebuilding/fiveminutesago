@@ -20,6 +20,7 @@ def gstreamer_receiver():
 
     # Start playing
     pipeline.set_state(Gst.State.PLAYING)
+    print("Playing...")
 
     # Main loop for handling GStreamer events
     loop = GLib.MainLoop()
