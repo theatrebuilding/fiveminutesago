@@ -1,19 +1,20 @@
 import gi
-import sys
 gi.require_version('Gst', '1.0')
 from gi.repository import Gst, GLib
 
-def gstreamer_receiver():
+def gstreamer_receiver(port):
     # Initialize GStreamer
     Gst.init(None)
 
-    # Build the pipeline
+    # This pipeline:
+    # 1. Listens on `port` for TCP connections.
+    # 2. Receives an MPEG-TS stream containing H.264.
+    # 3. Demuxes the TS, parses H.264, decodes it, then sends it to fakesink.
+    # Using fakesink means it won't display anything, but it will still verify
+    # that data is being received and processed.
     pipeline_description = (
-        "tcpserversrc port=8000 ! queue ! "
-        "application/x-rtp,media=video,encoding-name=H264,payload=96 "
-        "! rtph264depay ! tee name=t "
-        "t. ! queue ! rtph264pay ! tcpserversink port=9000 recover-policy=keyframe "
-        "t. ! queue ! rtph264pay ! tcpserversink port=9001 recover-policy=keyframe"
+        f"tcpserversrc port={port} ! tsdemux name=demux "
+        "demux. ! queue ! h264parse ! avdec_h264 ! fakesink"
     )
 
     pipeline = Gst.parse_launch(pipeline_description)
@@ -37,14 +38,14 @@ def gstreamer_receiver():
             print("End-Of-Stream reached")
             loop.quit()
         elif msg_type == Gst.MessageType.STATE_CHANGED:
-            old_state, new_state, pending_state = message.parse_state_changed()
             if message.src == pipeline:
+                old_state, new_state, pending_state = message.parse_state_changed()
                 print(f"Pipeline state changed from {old_state.value_name} to {new_state.value_name}")
-    
+
     bus.connect("message", on_message)
 
     try:
-        print("Starting GStreamer receiver...")
+        print(f"Starting GStreamer receiver on port {port}...")
         loop.run()
     except KeyboardInterrupt:
         print("Exiting...")
@@ -52,4 +53,5 @@ def gstreamer_receiver():
         pipeline.set_state(Gst.State.NULL)
 
 if __name__ == "__main__":
-    gstreamer_receiver()
+    # Make sure this matches the sender's port.
+    gstreamer_receiver(port=8000)
