@@ -21,7 +21,6 @@ def print_welcome_message():
             ascii_art = f.read()
         print(ascii_art)
         total_lines_printed += ascii_art.count('\n') + 2
-        total_lines_printed += ascii_art_lines
     else:
         print("ASCII art file not found.")
         total_lines_printed += 1
