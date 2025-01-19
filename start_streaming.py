@@ -8,43 +8,37 @@ from loadEnv import load_env
 
 def main():
     total_lines_printed = print_welcome_message()
-
-    run_gstream(total_lines_printed)
+    run_gstream()
 
 
 
 def print_welcome_message():
-    # Clear the terminal
     os.system('clear')
-    # Initialize total lines printed
     total_lines_printed = 0
-    # Read and display ASCII art from the text file
-    ascii_art_file = 'fiveminutesago.txt'  # Using the specified ASCII art file
+    ascii_art_file = 'fiveminutesago.txt'
     if os.path.exists(ascii_art_file):
         with open(ascii_art_file, 'r') as f:
             ascii_art = f.read()
         print(ascii_art)
-        ascii_art_lines = ascii_art.count('\n') + 2  # +1 to account for the last line
+        total_lines_printed += ascii_art.count('\n') + 2
         total_lines_printed += ascii_art_lines
     else:
         print("ASCII art file not found.")
-        ascii_art_lines = 1
         total_lines_printed += 1
     return total_lines_printed
 
 
 
 def gstreamer_receiver():
-    # Start the receiver pipeline
     print("Starting gstreamer receiver...")
     
     receiver_pipeline = (
-        f"gst-launch-1.0 "
-        f"tcpserversrc port=8000 ! queue ! "
-        f"application/x-rtp,media=video,encoding-name=H264,payload=96 "
-        f"! rtph264depay ! tee name=t "
-        f"t. ! queue ! rtph264pay ! tcpserversink port=9000 recover-policy=keyframe "
-        f"t. ! queue ! rtph264pay ! tcpserversink port=9001 recover-policy=keyframe"
+        "gst-launch-1.0 "
+        "tcpserversrc port=8000 ! queue ! "
+        "application/x-rtp,media=video,encoding-name=H264,payload=96 "
+        "! rtph264depay ! tee name=t "
+        "t. ! queue ! rtph264pay ! tcpserversink port=9000 recover-policy=keyframe "
+        "t. ! queue ! rtph264pay ! tcpserversink port=9001 recover-policy=keyframe"
     )
 
 #    receiver_pipeline = (
@@ -79,12 +73,12 @@ def print_subprocess_output(process):
     for line in process.stdout:
         print(line, end='')
 
-def run_gstream(total_lines_printed):
+def run_gstream():
     create_listener()
 
 def create_listener():
-    pathToEnv = "/home/theatrebuilding/env.json"
-    env = load_env(pathToEnv)
+    path_to_env = "/home/theatrebuilding/env.json"
+    env = load_env(path_to_env)
     authtoken1 = env.get("PINGGY_TOKEN_ONE")
     authtoken2 = env.get("PINGGY_TOKEN_TWO")
     authtoken3 = env.get("PINGGY_TOKEN_THREE")
@@ -93,19 +87,14 @@ def create_listener():
         print("No Pinggy auth token found. Exiting.")
         return
 
-    # Start GStreamer first
-    # If gstreamer_receiver blocks, consider running it in a thread
-    # Or start it in background with subprocess if needed
     threading.Thread(target=gstreamer_receiver, daemon=False).start()
 
     # Now start pinggy tunnels
-    port1 = 8000
-    port2 = 9000
-    port3 = 9001
+    ports = [8000, 9000, 9001]
+    tokens = [authtoken1, authtoken2, authtoken3]
 
-    run_pinggy_tunnel(authtoken1, port1)
-    run_pinggy_tunnel(authtoken2, port2)
-    run_pinggy_tunnel(authtoken3, port3)
+    for token, port in zip(tokens, ports):
+        run_pinggy_tunnel(token, port)
 
     print(f"Ingress established with Pinggy using tokens {authtoken1}, {authtoken2}, and {authtoken3}")
 
