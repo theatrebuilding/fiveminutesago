@@ -10,17 +10,26 @@ def load_config():
     with open(CONFIG_FILE, "r") as file:
         return yaml.safe_load(file)
 
-# Flask app setup
 app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*")
 
-# Global process reference
+# Global references
 gstreamer_process = None
 config = load_config()
 
+# Track node connection status
+# We'll store the latest from gstreamer_pipeline.py here
+node_status = {
+    "A": False,
+    "B": False,
+    "C": False,
+    "D": False
+}
+
 @app.route("/")
 def index():
-    return render_template("index.html", config=config)
+    # We pass the config and also the node_status to the template
+    return render_template("index.html", config=config, node_status=node_status)
 
 @app.route("/update_config", methods=["POST"])
 def update_config():
@@ -37,6 +46,7 @@ def run_gstreamer():
     global gstreamer_process
     if gstreamer_process:
         gstreamer_process.terminate()
+    # Start the pipeline as a separate process
     gstreamer_process = subprocess.Popen(["python3", "gstreamer_pipeline.py"])
 
 @app.route("/restart_pipeline", methods=["POST"])
@@ -46,8 +56,24 @@ def restart_pipeline():
 
 @socketio.on("connect")
 def handle_connect():
+    """When a client connects, immediately send them the config and the latest node status."""
     socketio.emit("config_updated", config)
+    socketio.emit("status_update", node_status)
+
+@socketio.on("update_status")
+def handle_update_status(data):
+    """
+    gstreamer_pipeline.py will emit("update_status", {...}) with A/B/C/D statuses.
+    We'll store that and re-broadcast to all clients as 'status_update'.
+    """
+    global node_status
+    node_status = data
+    socketio.emit("status_update", node_status, broadcast=True)
 
 if __name__ == "__main__":
+    # Start the pipeline automatically
     threading.Thread(target=run_gstreamer).start()
+
+    # Run Flask on port 7799
+    # Access at http://<server-ip>:7799
     socketio.run(app, host="0.0.0.0", port=7799, debug=True)

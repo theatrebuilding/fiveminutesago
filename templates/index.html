@@ -1,48 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GStreamer Dashboard</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.min.js"></script>
-    <script>
-        var socket = io();
+  <meta charset="UTF-8">
+  <title>GStreamer Dashboard</title>
 
-        function updateConfig() {
-            let newConfig = {
-                "encoding": {
-                    "video": {
-                        "bitrate": document.getElementById("bitrate").value,
-                        "key_int_max": document.getElementById("key_int_max").value
-                    }
-                }
-            };
-            fetch("/update_config", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(newConfig)
-            });
-        }
-
-        function restartPipeline() {
-            fetch("/restart_pipeline", { method: "POST" });
-        }
-
-        socket.on("config_updated", function (data) {
-            document.getElementById("bitrate").value = data.encoding.video.bitrate;
-            document.getElementById("key_int_max").value = data.encoding.video.key_int_max;
-        });
-    </script>
+  <!-- Socket.IO library -->
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@4.5.4/dist/socket.io.min.js"></script>
 </head>
 <body>
-    <h1>GStreamer Monitoring Dashboard</h1>
-    <label>Bitrate:</label>
-    <input type="number" id="bitrate" value="1500">
-    <br>
+  <h1>GStreamer Dashboard</h1>
+
+  <!-- Config Section -->
+  <div>
+    <h2>Config</h2>
+    <label>Video Bitrate:</label>
+    <input type="number" id="bitrate" value="{{ config['encoding']['video']['bitrate'] }}"><br>
+
     <label>Key Int Max:</label>
-    <input type="number" id="key_int_max" value="30">
-    <br>
+    <input type="number" id="key_int_max" value="{{ config['encoding']['video']['key_int_max'] }}"><br>
+
     <button onclick="updateConfig()">Update Config</button>
     <button onclick="restartPipeline()">Restart Pipeline</button>
+  </div>
+  <hr>
+
+  <!-- Node Status Section -->
+  <div>
+    <h2>Connection Status</h2>
+    <p id="node_A">Node A: {% if node_status.A %}✅ Connected{% else %}❌ Disconnected{% endif %}</p>
+    <p id="node_B">Node B: {% if node_status.B %}✅ Connected{% else %}❌ Disconnected{% endif %}</p>
+    <p id="node_C">Node C: {% if node_status.C %}✅ Connected{% else %}❌ Disconnected{% endif %}</p>
+    <p id="node_D">Node D: {% if node_status.D %}✅ Connected{% else %}❌ Disconnected{% endif %}</p>
+  </div>
+
+  <!-- JavaScript Logic -->
+  <script>
+    const socket = io();
+
+    socket.on("connect", () => {
+      console.log("Connected to Socket.IO server");
+    });
+
+    // When config is updated from server side or on connect
+    socket.on("config_updated", (newConfig) => {
+      console.log("Config Updated: ", newConfig);
+      document.getElementById("bitrate").value = newConfig.encoding.video.bitrate;
+      document.getElementById("key_int_max").value = newConfig.encoding.video.key_int_max;
+    });
+
+    // Realtime Node Status updates
+    socket.on("status_update", (data) => {
+      console.log("status_update event:", data);
+      updateNodeStatus("A", data.A);
+      updateNodeStatus("B", data.B);
+      updateNodeStatus("C", data.C);
+      updateNodeStatus("D", data.D);
+    });
+
+    function updateNodeStatus(node, isConnected) {
+      const elem = document.getElementById("node_" + node);
+      if (!elem) return;
+      elem.innerHTML = `Node ${node}: ` + (isConnected ? "✅ Connected" : "❌ Disconnected");
+      elem.style.color = isConnected ? "green" : "red";
+    }
+
+    // Update config on the server
+    function updateConfig() {
+      const bitrate = document.getElementById("bitrate").value;
+      const key_int_max = document.getElementById("key_int_max").value;
+
+      const newConfig = {
+        "encoding": {
+          "video": {
+            "bitrate": parseInt(bitrate),
+            "key_int_max": parseInt(key_int_max)
+          }
+        }
+      };
+
+      fetch("/update_config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newConfig)
+      })
+      .then(res => res.json())
+      .then(data => console.log("Config update result:", data));
+    }
+
+    // Restart pipeline
+    function restartPipeline() {
+      fetch("/restart_pipeline", { method: "POST" })
+      .then(res => res.json())
+      .then(data => console.log("Restart pipeline result:", data));
+    }
+  </script>
 </body>
 </html>
