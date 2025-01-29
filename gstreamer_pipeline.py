@@ -42,6 +42,7 @@ def update_status(node, is_connected: bool):
     """Update local dictionary and emit to the Flask dashboard."""
     connection_status[node] = is_connected
     # Emit the entire dictionary so the dashboard can see all states
+    print(f"Updating status: {node} -> {'Connected' if is_connected else 'Disconnected'}")  # Debug Print
     sio.emit("update_status", connection_status)
 
 # ----- END SOCKET.IO SECTION -----
