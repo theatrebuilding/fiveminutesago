@@ -36,7 +36,8 @@
   <!-- JavaScript Logic -->
   <script>
     // Connect to the Socket.IO server on port 7799
-    const socket = io("http://localhost:7799");
+    const socket = io("http://178.249.52.14:7799");
+    console.log(socket);
 
     socket.on("connect", () => {
       console.log("Connected to Socket.IO server");
