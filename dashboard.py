@@ -50,4 +50,4 @@ def handle_connect():
 
 if __name__ == "__main__":
     threading.Thread(target=run_gstreamer).start()
-    socketio.run(app, host="0.0.0.0", port=7798, debug=True)
+    socketio.run(app, host="0.0.0.0", port=7799, debug=True)
