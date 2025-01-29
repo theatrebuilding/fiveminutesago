@@ -127,13 +127,13 @@ def main():
             # Check if st_new == Gst.State.PLAYING => means it's connected and playing
             # If it transitions away from PLAYING => lost connection
             if "srtsrc" in name.lower():
-                if "7001" in name or "demuxa" in name.lower():
+                if "7701" in name or "demuxa" in name.lower():
                     # Node A input
                     if st_new == Gst.State.PLAYING:
                         update_status("A", True)
                     elif st_new < Gst.State.PLAYING:
                         update_status("A", False)
-                elif "7002" in name or "demuxc" in name.lower():
+                elif "7702" in name or "demuxc" in name.lower():
                     # Node C input
                     if st_new == Gst.State.PLAYING:
                         update_status("C", True)
@@ -142,13 +142,13 @@ def main():
 
             elif "srtsink" in name.lower():
                 # Node B or D
-                if "8001" in name:
+                if "8801" in name:
                     # Node B
                     if st_new == Gst.State.PLAYING:
                         update_status("B", True)
                     elif st_new < Gst.State.PLAYING:
                         update_status("B", False)
-                elif "8002" in name:
+                elif "8802" in name:
                     # Node D
                     if st_new == Gst.State.PLAYING:
                         update_status("D", True)
