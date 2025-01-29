@@ -3,11 +3,12 @@ import yaml
 import sys
 import socketio
 import os
+import threading
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
 
-# Ensure GStreamer is initialized
+# Initialize GStreamer
 Gst.init(None)
 
 # Load settings from config.yaml
@@ -20,39 +21,29 @@ def load_config():
 # ----- SOCKET.IO CLIENT FOR DASHBOARD COMMUNICATION -----
 sio = socketio.Client()
 
-# Try connecting to the Flask dashboard's Socket.IO server
-# Adjust host/port if your dashboard is elsewhere
 DASHBOARD_URL = "http://127.0.0.1:7799"
 
 try:
     sio.connect(DASHBOARD_URL)
-    print(f"Connected to dashboard at {DASHBOARD_URL}")
+    print(f"✅ Connected to dashboard at {DASHBOARD_URL}")
 except Exception as e:
-    print(f"Could not connect to dashboard: {e}")
+    print(f"⚠️ Could not connect to dashboard: {e}")
 
-# We'll track connection states in a dictionary: Node A, B, C, D
 connection_status = {
-    "A": False,  # Is Node A input streaming?
-    "C": False,  # Is Node C input streaming?
-    "B": False,  # Is Node B output receiving?
-    "D": False,  # Is Node D output receiving?
+    "A": False,  # Node A input
+    "C": False,  # Node C input
+    "B": False,  # Node B output
+    "D": False   # Node D output
 }
 
 def update_status(node, is_connected: bool):
     """Update local dictionary and emit to the Flask dashboard."""
     connection_status[node] = is_connected
-    # Emit the entire dictionary so the dashboard can see all states
-    print(f"Updating status: {node} -> {'Connected' if is_connected else 'Disconnected'}")  # Debug Print
+    print(f"🔄 Updating status: {node} -> {'✅ Connected' if is_connected else '❌ Disconnected'}")  # Debug Print
     sio.emit("update_status", connection_status)
 
-# ----- END SOCKET.IO SECTION -----
-
+# ----- BUILD GStreamer PIPELINE -----
 def build_pipeline(config):
-    """
-    Build the GStreamer pipeline string from the config dict.
-    Same as your earlier code, just with a few lines referencing the dictionary.
-    """
-
     node_A_in = config["srt"]["input"]["node_A"]["uri"]
     node_C_in = config["srt"]["input"]["node_C"]["uri"]
     node_B_out = config["srt"]["output"]["node_B"]["uri"]
@@ -101,75 +92,73 @@ def main():
     config = load_config()
     pipeline_str = build_pipeline(config)
 
-    print("Starting GStreamer pipeline with config:\n", pipeline_str)
+    print("🚀 Starting GStreamer pipeline with config:\n", pipeline_str)
 
     pipeline = Gst.parse_launch(pipeline_str)
     bus = pipeline.get_bus()
     bus.add_signal_watch()
 
-    # We'll connect a callback to interpret messages.
-    # We'll detect srtsrc or srtsink states to see if nodes are connected.
+    # ----- MESSAGE HANDLER -----
     def on_message(bus, msg):
-        print(f"Received GStreamer Message: {msg.type}")  # Debug Print
-        print(f"Received GStreamer Message: {msg}")
+        print(f"📩 Received GStreamer Message: {msg.type}")  # Debug Print
+
         if msg.type == Gst.MessageType.ERROR:
             err, debug = msg.parse_error()
-            print("GStreamer ERROR:", err, debug)
+            print("❌ GStreamer ERROR:", err, debug)
         elif msg.type == Gst.MessageType.EOS:
-            print("EOS reached. Stream ended.")
+            print("⚠️ EOS reached. Stream ended.")
         elif msg.type == Gst.MessageType.STATE_CHANGED:
-            # We can check if the message src is a srtsrc or srtsink
             src = msg.src
             if not src:
                 return
             name = src.get_name()
             st_old, st_new, st_pending = msg.parse_state_changed()
-            # We'll interpret node A input as srtsrc with port=7001, node C with port=7002, etc.
-            # Similarly for srtsink with port=8001 => node B, port=8002 => node D
+            print(f"🔄 State changed for {name}: {st_old} -> {st_new}")  # Debug Print
 
-            # Check if st_new == Gst.State.PLAYING => means it's connected and playing
-            # If it transitions away from PLAYING => lost connection
+            # Check state of SRT sources
             if "srtsrc" in name.lower():
                 if "7701" in name or "demuxa" in name.lower():
                     # Node A input
-                    if st_new == Gst.State.PLAYING:
-                        update_status("A", True)
-                    elif st_new < Gst.State.PLAYING:
-                        update_status("A", False)
+                    update_status("A", st_new == Gst.State.PLAYING)
                 elif "7702" in name or "demuxc" in name.lower():
                     # Node C input
-                    if st_new == Gst.State.PLAYING:
-                        update_status("C", True)
-                    elif st_new < Gst.State.PLAYING:
-                        update_status("C", False)
+                    update_status("C", st_new == Gst.State.PLAYING)
 
+            # Check state of SRT sinks
             elif "srtsink" in name.lower():
-                # Node B or D
                 if "8801" in name:
-                    # Node B
-                    if st_new == Gst.State.PLAYING:
-                        update_status("B", True)
-                    elif st_new < Gst.State.PLAYING:
-                        update_status("B", False)
+                    # Node B output
+                    update_status("B", st_new == Gst.State.PLAYING)
                 elif "8802" in name:
-                    # Node D
-                    if st_new == Gst.State.PLAYING:
-                        update_status("D", True)
-                    elif st_new < Gst.State.PLAYING:
-                        update_status("D", False)
+                    # Node D output
+                    update_status("D", st_new == Gst.State.PLAYING)
 
         return True
 
+    # Attach message handler
     bus.connect("message", on_message)
 
+    # 🔥 Continuous monitoring to prevent dropped messages
+    def watch_bus():
+        while True:
+            msg = bus.timed_pop_filtered(5000 * Gst.MSECOND, Gst.MessageType.ANY)
+            if msg:
+                on_message(bus, msg)
+
+    threading.Thread(target=watch_bus, daemon=True).start()
+
+    # Start pipeline
     pipeline.set_state(Gst.State.PLAYING)
+    state_return = pipeline.get_state(5 * Gst.SECOND)
+    if state_return.state != Gst.State.PLAYING:
+        print("❌ ERROR: Pipeline failed to start!")
 
+    # Keep the pipeline running
     loop = GLib.MainLoop()
-
     try:
         loop.run()
     except KeyboardInterrupt:
-        print("Shutting down GStreamer pipeline...")
+        print("🛑 Shutting down GStreamer pipeline...")
     finally:
         pipeline.set_state(Gst.State.NULL)
 
