@@ -38,9 +38,15 @@ connection_status = {
 
 def update_status(node, is_connected: bool):
     """Update local dictionary and emit to the Flask dashboard."""
+    global connection_status
+
+    if connection_status[node] != is_connected:
+        print(f"🔄 Updating status: {node} -> {'Connected' if is_connected else 'Disconnected'}")  # Debug Print
+
     connection_status[node] = is_connected
-    print(f"🔄 Updating status: {node} -> {'✅ Connected' if is_connected else '❌ Disconnected'}")  # Debug Print
     sio.emit("update_status", connection_status)
+    print(f"📤 Sent status update: {connection_status}")  # Debug Print
+
 
 # ----- BUILD GStreamer PIPELINE -----
 def build_pipeline(config):
@@ -102,26 +108,21 @@ def main():
     def on_message(bus, msg):
         print(f"📩 Received GStreamer Message: {msg.type}")  # Debug Print
 
-        if msg.type == Gst.MessageType.ERROR:
-            err, debug = msg.parse_error()
-            print("❌ GStreamer ERROR:", err, debug)
-        elif msg.type == Gst.MessageType.EOS:
-            print("⚠️ EOS reached. Stream ended.")
-        elif msg.type == Gst.MessageType.STATE_CHANGED:
+        if msg.type == Gst.MessageType.STATE_CHANGED:
             src = msg.src
             if not src:
                 return
+    
             name = src.get_name()
             st_old, st_new, st_pending = msg.parse_state_changed()
+    
             print(f"🔄 State changed for {name}: {st_old} -> {st_new}")  # Debug Print
-
-            # Check state of SRT sources
+    
+            # Detect source elements (srtsrc = input, srtsink = output)
             if "srtsrc" in name.lower():
                 if "7701" in name or "demuxa" in name.lower():
-                    # Node A input
                     update_status("A", st_new == Gst.State.PLAYING)
                 elif "7702" in name or "demuxc" in name.lower():
-                    # Node C input
                     update_status("C", st_new == Gst.State.PLAYING)
 
             # Check state of SRT sinks

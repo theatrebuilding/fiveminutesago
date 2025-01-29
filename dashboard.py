@@ -68,6 +68,7 @@ def handle_update_status(data):
     """
     global node_status
     node_status = data
+    print(f"📥 Received status update: {node_status}")  # Debug Print
     socketio.emit("status_update", node_status, broadcast=True)
 
 if __name__ == "__main__":
