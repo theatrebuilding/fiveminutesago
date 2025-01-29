@@ -110,6 +110,8 @@ def main():
     # We'll connect a callback to interpret messages.
     # We'll detect srtsrc or srtsink states to see if nodes are connected.
     def on_message(bus, msg):
+        print(f"Received GStreamer Message: {msg.type}")  # Debug Print
+        print(f"Received GStreamer Message: {msg}")
         if msg.type == Gst.MessageType.ERROR:
             err, debug = msg.parse_error()
             print("GStreamer ERROR:", err, debug)
