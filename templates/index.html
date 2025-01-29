@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GStreamer Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.6.0/socket.io.min.js"></script>
+    <script>
+        var socket = io();
+
+        function updateConfig() {
+            let newConfig = {
+                "encoding": {
+                    "video": {
+                        "bitrate": document.getElementById("bitrate").value,
+                        "key_int_max": document.getElementById("key_int_max").value
+                    }
+                }
+            };
+            fetch("/update_config", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(newConfig)
+            });
+        }
+
+        function restartPipeline() {
+            fetch("/restart_pipeline", { method: "POST" });
+        }
+
+        socket.on("config_updated", function (data) {
+            document.getElementById("bitrate").value = data.encoding.video.bitrate;
+            document.getElementById("key_int_max").value = data.encoding.video.key_int_max;
+        });
+    </script>
+</head>
+<body>
+    <h1>GStreamer Monitoring Dashboard</h1>
+    <label>Bitrate:</label>
+    <input type="number" id="bitrate" value="1500">
+    <br>
+    <label>Key Int Max:</label>
+    <input type="number" id="key_int_max" value="30">
+    <br>
+    <button onclick="updateConfig()">Update Config</button>
+    <button onclick="restartPipeline()">Restart Pipeline</button>
+</body>
+</html>
