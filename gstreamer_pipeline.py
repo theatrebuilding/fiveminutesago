@@ -112,12 +112,12 @@ def main():
             src = msg.src
             if not src:
                 return
-    
+
             name = src.get_name()
             st_old, st_new, st_pending = msg.parse_state_changed()
-    
+
             print(f"🔄 State changed for {name}: {st_old} -> {st_new}")  # Debug Print
-    
+
             # Detect source elements (srtsrc = input, srtsink = output)
             if "srtsrc" in name.lower():
                 if "7701" in name or "demuxa" in name.lower():
@@ -151,8 +151,14 @@ def main():
     # Start pipeline
     pipeline.set_state(Gst.State.PLAYING)
     state_return = pipeline.get_state(5 * Gst.SECOND)
+    
+    print(f"🧐 Pipeline final state: {state_return.state}")  # Debugging
+    
     if state_return.state != Gst.State.PLAYING:
         print("❌ ERROR: Pipeline failed to start!")
+    else:
+        print("✅ Pipeline started successfully!")
+
 
     # Keep the pipeline running
     loop = GLib.MainLoop()
