@@ -9,7 +9,7 @@ import psutil
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
 
-# Kill any processes using ports 7701, 7702, 8801, and 8802
+# Kill any processes using ports 7701, 7702, 8801, and 8802 before proceeding
 def kill_existing_connections():
     ports = [7701, 7702, 8801, 8802]
     for port in ports:
@@ -18,8 +18,9 @@ def kill_existing_connections():
                 pid = conn.pid
                 if pid:
                     print(f"🛑 Killing process {pid} using port {port}")
-                    psutil.Process(pid).terminate()
-                    psutil.Process(pid).wait()
+                    proc = psutil.Process(pid)
+                    proc.terminate()
+                    proc.wait()
 
 kill_existing_connections()
 
@@ -51,8 +52,6 @@ def connect_dashboard():
     except Exception as e:
         print(f"⚠️ Could not connect to dashboard: {e}")
         sys.exit(1)
-
-connect_dashboard()
 
 connection_status = {"A": False, "C": False, "B": False, "D": False}
 
@@ -113,6 +112,7 @@ def build_pipeline(config):
 
 def main():
     config = load_config()
+    connect_dashboard()
     pipeline_str = build_pipeline(config)
     print("🚀 Starting GStreamer pipeline...")
 
