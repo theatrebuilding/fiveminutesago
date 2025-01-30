@@ -65,24 +65,9 @@ def build_pipeline(config):
 
     pipeline_str = f"""
     input-selector name=video_selector_A
-      sink_0::always-ok=true
-      sink_1::always-ok=true
-      sink_1::active=true
-
     input-selector name=audio_selector_A
-      sink_0::always-ok=true
-      sink_1::always-ok=true
-      sink_1::active=true
-
     input-selector name=video_selector_C
-      sink_0::always-ok=true
-      sink_1::always-ok=true
-      sink_1::active=true
-
     input-selector name=audio_selector_C
-      sink_0::always-ok=true
-      sink_1::always-ok=true
-      sink_1::active=true
 
     srtsrc uri={node_A_in} ! tsdemux name=demuxA
       demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_A.sink_0
@@ -98,21 +83,16 @@ def build_pipeline(config):
     videotestsrc pattern={video_C_fallback} ! videoconvert ! video/x-raw,format=I420 ! video_selector_C.sink_1
     audiotestsrc wave={audio_C_fallback} ! audioconvert ! audio_selector_C.sink_1
 
-    video_selector_A. ! videoconvert !
-      x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} !
-      h264parse ! queue ! mpegtsmux name=muxerA
+    video_selector_A. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerA
     audio_selector_A. ! opusenc ! muxerA.
     muxerA. ! queue ! srtsink uri={node_B_out}
 
-    video_selector_C. ! videoconvert !
-      x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} !
-      h264parse ! queue ! mpegtsmux name=muxerC
+    video_selector_C. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerC
     audio_selector_C. ! opusenc ! muxerC.
     muxerC. ! queue ! srtsink uri={node_D_out}
     """
 
     return pipeline_str
-
 
 
 def main():
@@ -122,6 +102,25 @@ def main():
     print("🚀 Starting GStreamer pipeline with config:\n", pipeline_str)
 
     pipeline = Gst.parse_launch(pipeline_str)
+    
+    def set_selector_pad_properties(selector_name):
+        # e.g. "video_selector_A" or "audio_selector_A"
+        sel = pipeline.get_by_name(selector_name)
+    
+        # Pad for fallback (index 1)
+        fallback_pad = sel.get_static_pad("sink_1")
+        # Mark fallback pad as active
+        fallback_pad.set_property("active", True)
+    
+        # Optionally, set always_ok so that an inactive pad doesn't cause errors
+        fallback_pad.set_property("always-ok", True)
+    
+        # Also set always_ok on pad 0 if you want it never to fail
+        pad0 = sel.get_static_pad("sink_0")
+        pad0.set_property("always-ok", True)
+    
+    for sel_name in ["video_selector_A", "audio_selector_A", "video_selector_C", "audio_selector_C"]:
+        set_selector_pad_properties(sel_name)
     bus = pipeline.get_bus()
     bus.add_signal_watch()
 
