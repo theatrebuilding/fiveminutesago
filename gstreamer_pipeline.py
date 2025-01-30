@@ -8,6 +8,22 @@ import threading
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
 
+# Kill any processes using ports 7701, 7702, 8801, and 8802
+def kill_existing_connections():
+    ports = ["7701", "7702", "8801", "8802"]
+    for port in ports:
+        try:
+            result = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True)
+            for line in result.stdout.splitlines()[1:]:  # Skip the header line
+                parts = line.split()
+                pid = parts[1]
+                subprocess.run(["kill", "-9", pid])
+                print(f"🛑 Killed process {pid} using port {port}")
+        except Exception as e:
+            print(f"⚠️ Error checking/killing process on port {port}: {e}")
+
+kill_existing_connections()
+
 # Initialize GStreamer
 Gst.init(None)
 
