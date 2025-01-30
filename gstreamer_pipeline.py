@@ -55,15 +55,15 @@ def build_pipeline(config):
     node_D_out = config["srt"]["output"]["node_D"]["uri"]
 
     pipeline_str = f"""
-    srtsrc uri={node_A_in} do-timestamp=true ! tsdemux name=demuxA
-      demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerA
+    srtsrc uri={node_A_in} do-timestamp=true name=srtsrc_A ! tsdemux name=demuxA
+      demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate={config['encoding']['video']['bitrate']} key-int-max={config['encoding']['video']['key_int_max']} ! h264parse ! queue ! mpegtsmux name=muxerA
       demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerA.
-    muxerA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_B_out}
+    muxerA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_B_out} name=srtsink_B
 
-    srtsrc uri={node_C_in} do-timestamp=true ! tsdemux name=demuxC
-      demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerC
+    srtsrc uri={node_C_in} do-timestamp=true name=srtsrc_C ! tsdemux name=demuxC
+      demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate={config['encoding']['video']['bitrate']} key-int-max={config['encoding']['video']['key_int_max']} ! h264parse ! queue ! mpegtsmux name=muxerC
       demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerC.
-    muxerC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_D_out}
+    muxerC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_D_out} name=srtsink_D
     """
     return pipeline_str
 
@@ -74,14 +74,17 @@ def monitor_pipeline(pipeline):
         print(f"📡 Pipeline State: {state}")
 
         # Query elements for buffer levels
-        for node, pad_name in [("A", "demuxA"), ("C", "demuxC"), ("B", "muxerA"), ("D", "muxerC")]:
+        for node, pad_name in [("A", "muxerA"), ("C", "muxerC"), ("B", "srtsink_B"), ("D", "srtsink_D")]:
             element = pipeline.get_by_name(pad_name)
             if element:
                 query = Gst.Query.new_buffering(Gst.Format.BUFFERS)
                 if element.query(query):
-                    _, _, _, buffers = query.parse_buffering_range()
-                    print(f"🔎 Node {node}: {buffers} buffers queued")
-                    update_status(node, buffers > 0)  # Mark node as connected if buffers > 0
+                    success, format_type, start, buffers = query.parse_buffering_range()
+                    if success:
+                        print(f"🔎 Node {node}: {buffers} buffers queued")
+                        update_status(node, buffers > 0)  # Mark node as connected if buffers > 0
+                    else:
+                        update_status(node, False)  # Mark as disconnected if query fails
                 else:
                     update_status(node, False)  # Mark as disconnected if query fails
 
@@ -110,16 +113,14 @@ def main():
             st_old, st_new, st_pending = msg.parse_state_changed()
             print(f"🔄 State changed for {name}: {st_old} -> {st_new}")
 
-            if "srtsrc" in name.lower():
-                if "7701" in name or "demuxa" in name.lower():
-                    update_status("A", st_new == Gst.State.PLAYING)
-                elif "7702" in name or "demuxc" in name.lower():
-                    update_status("C", st_new == Gst.State.PLAYING)
-            elif "srtsink" in name.lower():
-                if "8801" in name:
-                    update_status("B", st_new == Gst.State.PLAYING)
-                elif "8802" in name:
-                    update_status("D", st_new == Gst.State.PLAYING)
+            if "srtsrc_a" in name.lower():
+                update_status("A", st_new == Gst.State.PLAYING)
+            elif "srtsrc_c" in name.lower():
+                update_status("C", st_new == Gst.State.PLAYING)
+            elif "srtsink_b" in name.lower():
+                update_status("B", st_new == Gst.State.PLAYING)
+            elif "srtsink_d" in name.lower():
+                update_status("D", st_new == Gst.State.PLAYING)
 
         return True
 

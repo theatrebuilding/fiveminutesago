@@ -6,9 +6,9 @@ srt:
       uri: "srt://0.0.0.0:7702?mode=listener&latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=0"
   output:
     node_B:
-      uri: "srt://0.0.0.0:8801?mode=listener&latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=0"
+      uri: "srt://REMOTE_IP:8801?mode=caller&latency=100&sndbuf=67108864&fc=102400&tsbpdDelay=0"
     node_D:
-      uri: "srt://0.0.0.0:8802?mode=listener&latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=0"
+      uri: "srt://REMOTE_IP:8802?mode=caller&latency=100&sndbuf=67108864&fc=102400&tsbpdDelay=0"
 
 fallback:
   video_A: "snow"
