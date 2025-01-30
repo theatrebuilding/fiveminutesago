@@ -9,19 +9,6 @@ import psutil
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
 
-# Kill any processes using ports 7701, 7702, 8801, and 8802 before proceeding
-def kill_existing_connections():
-    ports = [7701, 7702, 8801, 8802]
-    for port in ports:
-        for conn in psutil.net_connections(kind='inet'):
-            if conn.laddr.port == port:
-                pid = conn.pid
-                if pid:
-                    print(f"🛑 Killing process {pid} using port {port}")
-                    proc = psutil.Process(pid)
-                    proc.terminate()
-                    proc.wait()
-
 # Initialize GStreamer
 Gst.init(None)
 
@@ -109,7 +96,6 @@ def build_pipeline(config):
     """
 
 def main():
-    kill_existing_connections()
     config = load_config()
     connect_dashboard()
     pipeline_str = build_pipeline(config)
