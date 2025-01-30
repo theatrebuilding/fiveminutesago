@@ -63,14 +63,26 @@ def build_pipeline(config):
     bitrate = config["encoding"]["video"]["bitrate"]
     key_int_max = config["encoding"]["video"]["key_int_max"]
 
-    # For each input-selector, we set:
-    #   always-ok=true
-    #   start-select=1  => picks pad index=1 (fallback) at start
     pipeline_str = f"""
-    input-selector name=video_selector_A start-select=1
-    input-selector name=audio_selector_A start-select=1
-    input-selector name=video_selector_C start-select=1
-    input-selector name=audio_selector_C start-select=1
+    input-selector name=video_selector_A
+      sink_0::always-ok=true
+      sink_1::always-ok=true
+      sink_1::active=true
+
+    input-selector name=audio_selector_A
+      sink_0::always-ok=true
+      sink_1::always-ok=true
+      sink_1::active=true
+
+    input-selector name=video_selector_C
+      sink_0::always-ok=true
+      sink_1::always-ok=true
+      sink_1::active=true
+
+    input-selector name=audio_selector_C
+      sink_0::always-ok=true
+      sink_1::always-ok=true
+      sink_1::active=true
 
     srtsrc uri={node_A_in} ! tsdemux name=demuxA
       demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_A.sink_0
@@ -80,22 +92,27 @@ def build_pipeline(config):
       demuxC. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_C.sink_0
       demuxC. ! queue ! opusdec ! audioconvert ! audio_selector_C.sink_0
 
-    videotestsrc pattern={video_A_fallback} ! videoconvert ! video/x-raw, format=I420 ! video_selector_A.sink_1
+    videotestsrc pattern={video_A_fallback} ! videoconvert ! video/x-raw,format=I420 ! video_selector_A.sink_1
     audiotestsrc wave={audio_A_fallback} ! audioconvert ! audio_selector_A.sink_1
 
-    videotestsrc pattern={video_C_fallback} ! videoconvert ! video/x-raw, format=I420 ! video_selector_C.sink_1
+    videotestsrc pattern={video_C_fallback} ! videoconvert ! video/x-raw,format=I420 ! video_selector_C.sink_1
     audiotestsrc wave={audio_C_fallback} ! audioconvert ! audio_selector_C.sink_1
 
-    video_selector_A. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerA
+    video_selector_A. ! videoconvert !
+      x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} !
+      h264parse ! queue ! mpegtsmux name=muxerA
     audio_selector_A. ! opusenc ! muxerA.
     muxerA. ! queue ! srtsink uri={node_B_out}
 
-    video_selector_C. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerC
+    video_selector_C. ! videoconvert !
+      x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} !
+      h264parse ! queue ! mpegtsmux name=muxerC
     audio_selector_C. ! opusenc ! muxerC.
     muxerC. ! queue ! srtsink uri={node_D_out}
     """
 
     return pipeline_str
+
 
 
 def main():
