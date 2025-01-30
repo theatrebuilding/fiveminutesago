@@ -22,8 +22,6 @@ def kill_existing_connections():
                     proc.terminate()
                     proc.wait()
 
-kill_existing_connections()
-
 # Initialize GStreamer
 Gst.init(None)
 
@@ -111,6 +109,7 @@ def build_pipeline(config):
     """
 
 def main():
+    kill_existing_connections()
     config = load_config()
     connect_dashboard()
     pipeline_str = build_pipeline(config)
