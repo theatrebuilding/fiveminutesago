@@ -4,6 +4,7 @@ import sys
 import socketio
 import os
 import threading
+import time
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
@@ -20,7 +21,6 @@ def load_config():
 
 # ----- SOCKET.IO CLIENT FOR DASHBOARD COMMUNICATION -----
 sio = socketio.Client()
-
 DASHBOARD_URL = "http://127.0.0.1:7799"
 
 try:
@@ -41,12 +41,11 @@ def update_status(node, is_connected: bool):
     global connection_status
 
     if connection_status[node] != is_connected:
-        print(f"🔄 Updating status: {node} -> {'Connected' if is_connected else 'Disconnected'}")  # Debug Print
+        print(f"🔄 Updating status: {node} -> {'Connected' if is_connected else 'Disconnected'}")
 
     connection_status[node] = is_connected
     sio.emit("update_status", connection_status)
-    print(f"📤 Sent status update: {connection_status}")  # Debug Print
-
+    print(f"📤 Sent status update: {connection_status}")
 
 # ----- BUILD GStreamer PIPELINE -----
 def build_pipeline(config):
@@ -59,18 +58,34 @@ def build_pipeline(config):
     srtsrc uri={node_A_in} do-timestamp=true ! tsdemux name=demuxA
       demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerA
       demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerA.
-
-    muxerA. ! queue ! srtsink uri={node_B_out}
+    muxerA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_B_out}
 
     srtsrc uri={node_C_in} do-timestamp=true ! tsdemux name=demuxC
       demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerC
       demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerC.
-
     muxerC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_D_out}
     """
-
     return pipeline_str
 
+def monitor_pipeline(pipeline):
+    """Monitor pipeline state and report packet flow every 5 seconds."""
+    while True:
+        state = pipeline.get_state(1 * Gst.SECOND).state
+        print(f"📡 Pipeline State: {state}")
+
+        # Query elements for buffer levels
+        for node, pad_name in [("A", "demuxA"), ("C", "demuxC"), ("B", "muxerA"), ("D", "muxerC")]:
+            element = pipeline.get_by_name(pad_name)
+            if element:
+                query = Gst.Query.new_buffering(Gst.Format.BUFFERS)
+                if element.query(query):
+                    _, _, _, buffers = query.parse_buffering_range()
+                    print(f"🔎 Node {node}: {buffers} buffers queued")
+                    update_status(node, buffers > 0)  # Mark node as connected if buffers > 0
+                else:
+                    update_status(node, False)  # Mark as disconnected if query fails
+
+        time.sleep(5)  # Wait 5 seconds before next check
 
 def main():
     config = load_config()
@@ -84,7 +99,7 @@ def main():
 
     # ----- MESSAGE HANDLER -----
     def on_message(bus, msg):
-        print(f"📩 Received GStreamer Message: {msg.type}")  # Debug Print
+        print(f"📩 Received GStreamer Message: {msg.type}")
 
         if msg.type == Gst.MessageType.STATE_CHANGED:
             src = msg.src
@@ -93,8 +108,7 @@ def main():
 
             name = src.get_name()
             st_old, st_new, st_pending = msg.parse_state_changed()
-
-            print(f"🔄 State changed for {name}: {st_old} -> {st_new}")  # Debug Print
+            print(f"🔄 State changed for {name}: {st_old} -> {st_new}")
 
             if "srtsrc" in name.lower():
                 if "7701" in name or "demuxa" in name.lower():
@@ -112,20 +126,14 @@ def main():
     # Attach message handler
     bus.connect("message", on_message)
 
-    # 🔥 Continuous monitoring to prevent dropped messages
-    def watch_bus():
-        while True:
-            msg = bus.timed_pop_filtered(5000 * Gst.MSECOND, Gst.MessageType.ANY)
-            if msg:
-                on_message(bus, msg)
-
-    threading.Thread(target=watch_bus, daemon=True).start()
+    # 🔥 Background thread to continuously monitor the pipeline
+    threading.Thread(target=monitor_pipeline, args=(pipeline,), daemon=True).start()
 
     # Start pipeline
     pipeline.set_state(Gst.State.PLAYING)
     state_return = pipeline.get_state(5 * Gst.SECOND)
     
-    print(f"🧐 Pipeline final state: {state_return.state}")  # Debugging
+    print(f"🧐 Pipeline final state: {state_return.state}")
     
     if state_return.state != Gst.State.PLAYING:
         print("❌ ERROR: Pipeline failed to start!")
