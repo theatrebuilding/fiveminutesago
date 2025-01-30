@@ -67,10 +67,10 @@ def build_pipeline(config):
     #   always-ok=true
     #   start-select=1  => picks pad index=1 (fallback) at start
     pipeline_str = f"""
-    input-selector name=video_selector_A always-ok=true start-select=1
-    input-selector name=audio_selector_A always-ok=true start-select=1
-    input-selector name=video_selector_C always-ok=true start-select=1
-    input-selector name=audio_selector_C always-ok=true start-select=1
+    input-selector name=video_selector_A start-select=1
+    input-selector name=audio_selector_A start-select=1
+    input-selector name=video_selector_C start-select=1
+    input-selector name=audio_selector_C start-select=1
 
     srtsrc uri={node_A_in} ! tsdemux name=demuxA
       demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_A.sink_0
