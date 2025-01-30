@@ -1,14 +1,14 @@
 srt:
   input:
     node_A:
-      uri: "srt://0.0.0.0:7701?mode=listener&latency=1000&rbuf=65536&wbuf=65536&tsbpdDelay=2000"
+      uri: "srt://0.0.0.0:7701?mode=listener&latency=500&rbuf=131072&wbuf=131072&maxbw=-1&overhead=25&tsbpdDelay=250"
     node_C:
-      uri: "srt://0.0.0.0:7702?mode=listener&latency=1000&rbuf=65536&wbuf=65536&tsbpdDelay=2000"
+      uri: "srt://0.0.0.0:7702?mode=listener&latency=500&rbuf=131072&wbuf=131072&maxbw=-1&overhead=25&tsbpdDelay=250"
   output:
     node_B:
-      uri: "srt://0.0.0.0:8801?mode=listener&latency=1000&rbuf=65536&wbuf=65536&tsbpdDelay=2000"
+      uri: "srt://0.0.0.0:8801?mode=listener&latency=500&rbuf=131072&wbuf=131072&maxbw=-1&overhead=25&tsbpdDelay=250"
     node_D:
-      uri: "srt://0.0.0.0:8802?mode=listener&latency=1000&rbuf=65536&wbuf=65536&tsbpdDelay=2000"
+      uri: "srt://0.0.0.0:8802?mode=listener&latency=500&rbuf=131072&wbuf=131072&maxbw=-1&overhead=25&tsbpdDelay=250"
 
 fallback:
   video_A: "snow"
