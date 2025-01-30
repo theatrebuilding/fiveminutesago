@@ -4,24 +4,22 @@ import sys
 import socketio
 import os
 import threading
-import subprocess
+import psutil
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
 
 # Kill any processes using ports 7701, 7702, 8801, and 8802
 def kill_existing_connections():
-    ports = ["7701", "7702", "8801", "8802"]
+    ports = [7701, 7702, 8801, 8802]
     for port in ports:
-        try:
-            result = subprocess.run(["lsof", "-i", f":{port}"], capture_output=True, text=True)
-            for line in result.stdout.splitlines()[1:]:  # Skip the header line
-                parts = line.split()
-                pid = parts[1]
-                subprocess.run(["kill", "-9", pid])
-                print(f"🛑 Killed process {pid} using port {port}")
-        except Exception as e:
-            print(f"⚠️ Error checking/killing process on port {port}: {e}")
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.laddr.port == port:
+                pid = conn.pid
+                if pid:
+                    print(f"🛑 Killing process {pid} using port {port}")
+                    psutil.Process(pid).terminate()
+                    psutil.Process(pid).wait()
 
 kill_existing_connections()
 
@@ -124,46 +122,10 @@ def main():
 
     def on_message(bus, msg):
         print(f"📩 GStreamer Message: {msg.type}")
-        if msg.type == Gst.MessageType.STATE_CHANGED:
-            src = msg.src
-            if not src:
-                return
-            name = src.get_name()
-            st_old, st_new, _ = msg.parse_state_changed()
-            print(f"🔄 {name} changed state: {st_old} -> {st_new}")
-            
-            if "srtsrc" in name.lower():
-                if "7701" in name or "demuxa" in name.lower():
-                    update_status("A", st_new == Gst.State.PLAYING)
-                elif "7702" in name or "demuxc" in name.lower():
-                    update_status("C", st_new == Gst.State.PLAYING)
-            elif "srtsink" in name.lower():
-                if "8801" in name:
-                    update_status("B", st_new == Gst.State.PLAYING)
-                elif "8802" in name:
-                    update_status("D", st_new == Gst.State.PLAYING)
         return True
 
     bus.connect("message", on_message)
-
-    def watch_bus():
-        while True:
-            msg = bus.timed_pop_filtered(5000 * Gst.MSECOND, Gst.MessageType.ANY)
-            if msg:
-                on_message(bus, msg)
-
-    threading.Thread(target=watch_bus, daemon=True).start()
-
     pipeline.set_state(Gst.State.PLAYING)
-    state_return = pipeline.get_state(5 * Gst.SECOND)
-    print(f"🧐 Pipeline final state: {state_return.state}")
-
-    if state_return.state != Gst.State.PLAYING:
-        print("❌ ERROR: Pipeline failed to start!")
-        sys.exit(1)
-    else:
-        print("✅ Pipeline started successfully!")
-
     loop = GLib.MainLoop()
     try:
         loop.run()
