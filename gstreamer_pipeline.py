@@ -4,6 +4,7 @@ import sys
 import socketio
 import os
 import threading
+import subprocess
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
