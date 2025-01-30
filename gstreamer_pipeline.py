@@ -56,18 +56,21 @@ def build_pipeline(config):
     node_D_out = config["srt"]["output"]["node_D"]["uri"]
 
     pipeline_str = f"""
-    srtsrc uri={node_A_in} ! tsdemux name=demuxA
-      demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency ! h264parse ! queue ! mpegtsmux name=muxerA
+    srtsrc uri={node_A_in} do-timestamp=true ! tsdemux name=demuxA
+      demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerA
       demuxA. ! queue ! opusdec ! audioconvert ! opusenc ! muxerA.
+
     muxerA. ! queue ! srtsink uri={node_B_out}
 
-    srtsrc uri={node_C_in} ! tsdemux name=demuxC
-      demuxC. ! queue ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency ! h264parse ! queue ! mpegtsmux name=muxerC
+    srtsrc uri={node_C_in} do-timestamp=true ! tsdemux name=demuxC
+      demuxC. ! queue ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate=1500 key-int-max=30 ! h264parse ! queue ! mpegtsmux name=muxerC
       demuxC. ! queue ! opusdec ! audioconvert ! opusenc ! muxerC.
+
     muxerC. ! queue ! srtsink uri={node_D_out}
     """
 
     return pipeline_str
+
 
 def main():
     config = load_config()
