@@ -73,25 +73,25 @@ def build_pipeline(config):
     input-selector name=audio_selector_C
 
     srtsrc uri={node_A_in} ! tsdemux name=demuxA
-      demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_A.sink_0
-      demuxA. ! queue ! opusdec ! audioconvert ! audio_selector_A.sink_0
+      demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 ! video_selector_A.sink_0
+      demuxA. ! queue ! opusdec ! audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=2 ! audio_selector_A.sink_0
 
     srtsrc uri={node_C_in} ! tsdemux name=demuxC
-      demuxC. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_C.sink_0
-      demuxC. ! queue ! opusdec ! audioconvert ! audio_selector_C.sink_0
+      demuxC. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video/x-raw,format=I420 ! video_selector_C.sink_0
+      demuxC. ! queue ! opusdec ! audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=2 ! audio_selector_C.sink_0
 
-    videotestsrc pattern={video_A_fallback} ! videoconvert ! video_selector_A.sink_1
-    audiotestsrc wave={audio_A_fallback} ! audioconvert ! audio_selector_A.sink_1
+    videotestsrc pattern={video_A_fallback} ! videoconvert ! video/x-raw,format=I420 ! video_selector_A.sink_1
+    audiotestsrc wave={audio_A_fallback} ! audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=2 ! audio_selector_A.sink_1
 
-    videotestsrc pattern={video_C_fallback} ! videoconvert ! video_selector_C.sink_1
-    audiotestsrc wave={audio_C_fallback} ! audioconvert ! audio_selector_C.sink_1
+    videotestsrc pattern={video_C_fallback} ! videoconvert ! video/x-raw,format=I420 ! video_selector_C.sink_1
+    audiotestsrc wave={audio_C_fallback} ! audioconvert ! audio/x-raw,format=S16LE,rate=48000,channels=2 ! audio_selector_C.sink_1
 
     video_selector_A. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerA
-    audio_selector_A. ! opusenc ! muxerA.
+    audio_selector_A. ! opusenc ! queue ! muxerA.
     muxerA. ! queue ! srtsink uri={node_B_out}
 
     video_selector_C. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerC
-    audio_selector_C. ! opusenc ! muxerC.
+    audio_selector_C. ! opusenc ! queue ! muxerC.
     muxerC. ! queue ! srtsink uri={node_D_out}
     """
 
