@@ -32,8 +32,8 @@ except Exception as e:
 connection_status = {
     "A": False,  # Node A input
     "C": False,  # Node C input
-    "B": False,  # Node B output (Caller)
-    "D": False   # Node D output (Caller)
+    "B": False,  # Node B output (Listener)
+    "D": False   # Node D output (Listener)
 }
 
 def update_status(node, is_connected: bool):
