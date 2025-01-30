@@ -58,12 +58,12 @@ def build_pipeline(config):
     srtsrc uri={node_A_in} do-timestamp=true name=srtsrc_A ! tsdemux name=demuxA
       demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate={config['encoding']['video']['bitrate']} key-int-max={config['encoding']['video']['key_int_max']} ! h264parse ! queue ! mpegtsmux name=muxerA
       demuxA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerA.
-    muxerA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_B_out} name=srtsink_B
+    muxerA. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_B_out} name=srtsink_B wait-for-connection=false
 
     srtsrc uri={node_C_in} do-timestamp=true name=srtsrc_C ! tsdemux name=demuxC
       demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! h264parse ! avdec_h264 ! videoconvert ! x264enc tune=zerolatency bitrate={config['encoding']['video']['bitrate']} key-int-max={config['encoding']['video']['key_int_max']} ! h264parse ! queue ! mpegtsmux name=muxerC
       demuxC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! opusdec ! audioconvert ! opusenc ! muxerC.
-    muxerC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_D_out} name=srtsink_D
+    muxerC. ! queue max-size-buffers=500 max-size-time=2000000000 leaky=2 ! srtsink uri={node_D_out} name=srtsink_D wait-for-connection=false
     """
     return pipeline_str
 
