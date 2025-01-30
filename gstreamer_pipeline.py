@@ -64,14 +64,12 @@ def build_pipeline(config):
     input-selector name=video_selector_C
     input-selector name=audio_selector_C
 
-    # Test sources as primary input
     videotestsrc pattern={video_A_fallback} is-live=true ! videoconvert ! video/x-raw,format=I420 ! video_selector_A.sink_0
     audiotestsrc wave={audio_A_fallback} is-live=true ! audioconvert ! audio_selector_A.sink_0
 
     videotestsrc pattern={video_C_fallback} is-live=true ! videoconvert ! video/x-raw,format=I420 ! video_selector_C.sink_0
     audiotestsrc wave={audio_C_fallback} is-live=true ! audioconvert ! audio_selector_C.sink_0
 
-    # Encoding and SRT Output
     video_selector_A. ! videoconvert ! x264enc tune=zerolatency bitrate={bitrate} key-int-max={key_int_max} ! h264parse ! queue ! mpegtsmux name=muxerA
     audio_selector_A. ! opusenc ! muxerA.
     muxerA. ! queue ! srtsink uri={node_B_out}
