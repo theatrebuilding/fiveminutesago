@@ -1,8 +1,8 @@
 import psutil
 
-# Kill any processes using ports 7701, 7702, 8801, and 8802 before proceeding
+# Kill any processes using ports 7701, 7702, 8801, 7799 and 8802 before proceeding
 def kill_existing_connections():
-    ports = [7701, 7702, 8801, 8802]
+    ports = [7701, 7702, 8801, 8802, 7799]
     for port in ports:
         for conn in psutil.net_connections(kind='inet'):
             if conn.laddr.port == port:
