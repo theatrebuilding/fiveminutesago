@@ -63,11 +63,14 @@ def build_pipeline(config):
     bitrate = config["encoding"]["video"]["bitrate"]
     key_int_max = config["encoding"]["video"]["key_int_max"]
 
+    # For each input-selector, we set:
+    #   always-ok=true
+    #   start-select=1  => picks pad index=1 (fallback) at start
     pipeline_str = f"""
-    input-selector name=video_selector_A
-    input-selector name=audio_selector_A
-    input-selector name=video_selector_C
-    input-selector name=audio_selector_C
+    input-selector name=video_selector_A always-ok=true start-select=1
+    input-selector name=audio_selector_A always-ok=true start-select=1
+    input-selector name=video_selector_C always-ok=true start-select=1
+    input-selector name=audio_selector_C always-ok=true start-select=1
 
     srtsrc uri={node_A_in} ! tsdemux name=demuxA
       demuxA. ! queue ! h264parse ! avdec_h264 ! videoconvert ! video_selector_A.sink_0
@@ -93,6 +96,7 @@ def build_pipeline(config):
     """
 
     return pipeline_str
+
 
 def main():
     config = load_config()
