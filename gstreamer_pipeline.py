@@ -12,13 +12,6 @@ Gst.init(None)
 
 CONFIG_FILE = "config.yaml"
 
-connection_status = {
-    "receiveV1": False,
-    "receiveA1": False,
-    "sendV1": False,
-    "sendA1": False
-}
-
 def load_config():
     if not os.path.exists(CONFIG_FILE):
         print(f"ERROR: Config file '{CONFIG_FILE}' not found.")
@@ -40,30 +33,6 @@ def build_pipeline(cfg):
     """
     
     return pipeline_str
-
-def on_message(bus, msg):
-    global connection_status
-    if msg.type == Gst.MessageType.ERROR:
-        err, dbg = msg.parse_error()
-        print("GStreamer ERROR:", err, dbg)
-    elif msg.type == Gst.MessageType.EOS:
-        print("End of Stream reached.")
-    elif msg.type == Gst.MessageType.STATE_CHANGED:
-        struct = msg.get_structure()
-        if struct:
-            name = struct.get_name()
-            if "GstBaseSrc" in name:
-                if "7701" in struct.to_string():
-                    connection_status["receiveV1"] = True
-                elif "8802" in struct.to_string():
-                    connection_status["receiveA1"] = True
-            if "GstBaseSink" in name:
-                if "8801" in struct.to_string():
-                    connection_status["sendV1"] = True
-                elif "8803" in struct.to_string():
-                    connection_status["sendA1"] = True
-        print("Connection Status:", connection_status)
-    return True
 
 def signal_handler(sig, frame):
     print("Interrupt received, stopping pipeline...")
