@@ -2,6 +2,7 @@ import gi
 import yaml
 import os
 import sys
+import signal
 
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
@@ -64,7 +65,12 @@ def on_message(bus, msg):
         print("Connection Status:", connection_status)
     return True
 
+def signal_handler(sig, frame):
+    print("Interrupt received, stopping pipeline...")
+    loop.quit()
+
 def main():
+    global loop
     cfg = load_config()
     pipeline_str = build_pipeline(cfg)
     print("GStreamer pipeline:\n", pipeline_str, "\n")
@@ -75,10 +81,11 @@ def main():
     pipeline.set_state(Gst.State.PLAYING)
     loop = GLib.MainLoop()
     
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     try:
         loop.run()
-    except KeyboardInterrupt:
-        pass
     finally:
         pipeline.set_state(Gst.State.NULL)
         print("Pipeline stopped.")
