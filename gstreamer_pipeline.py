@@ -19,6 +19,14 @@ def load_config():
     with open(CONFIG_FILE, "r") as f:
         return yaml.safe_load(f)
 
+def on_message(bus, message):
+    t = message.type
+    if t == Gst.MessageType.EOS:
+        print("End of stream")
+    elif t == Gst.MessageType.ERROR:
+        err, debug = message.parse_error()
+        print(f"Error: {err}, Debug info: {debug}")
+
 def build_pipeline(cfg):
     srt_cfg = cfg["srt"]
     
