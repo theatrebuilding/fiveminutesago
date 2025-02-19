@@ -1,0 +1,25 @@
+video:
+  video_src: "v4l2src"
+  color_format: "I420"
+  tune: "zerolatency"
+  bitrate: 1000
+  key_int_max: 15
+  bframes: 0
+  aud: true
+  option_string: "repeat-headers=1"
+  byte_stream: true
+  config_interval: 1
+  alignment: 7
+
+audio:
+  src: "alsasrc"  # Change to "pulsesrc" if using PulseAudio
+  rate: 44100
+  channels: 2
+  bitrate: 512  # in kbps
+
+srt:
+  host: "178.249.52.14"
+  latency: 100
+  rbuf: 32768
+  wbuf: 32768
+  tsbpdDelay: 2000
