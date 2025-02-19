@@ -25,6 +25,7 @@ def build_audio_pipeline(cfg):
 
     # Audio parameters
     audio_src     = audio_cfg.get("src", "alsasrc")
+    audio_device  = audio_cfg.get("hardware_device", "hw:3,0")
     audio_rate    = audio_cfg.get("rate", 44100)
     audio_channels= audio_cfg.get("channels", 2)
     audio_bitrate = audio_cfg.get("bitrate", 128)
@@ -43,15 +44,14 @@ def build_audio_pipeline(cfg):
 
     pipeline_str = f"""
         {audio_src} !
+          device={audio_device} !
           audioconvert !
           audioresample !
-          audio/x-raw,rate={audio_rate},channels={audio_channels} !
-          voaacenc bitrate={audio_bitrate * 1000} !
-          aacparse !
-          queue !
-          mpegtsmux alignment=7 !
+          lamemp3enc target=1 bitrate=192 !
+          rtpmpapay ! 
           srtsink uri="{srt_audio_uri}"
     """
+
     return pipeline_str
 
 def main():

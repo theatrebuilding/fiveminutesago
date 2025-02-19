@@ -13,9 +13,10 @@ video:
 
 audio:
   src: "alsasrc"  # Change to "pulsesrc" if using PulseAudio
+  hardware_device: "hw:3,0"
   rate: 44100
   channels: 2
-  bitrate: 512  # in kbps
+  bitrate: 192  # in kbps
 
 srt:
   host: "178.249.52.14"
