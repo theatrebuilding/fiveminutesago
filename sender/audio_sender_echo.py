@@ -24,32 +24,32 @@ def build_audio_pipeline(cfg):
     srt_cfg   = cfg["srt"]
 
     # Audio parameters
-    audio_src     = audio_cfg.get("src", "alsasrc")
-    audio_device  = audio_cfg.get("hardware_device", "hw:3,0")
-    audio_rate    = audio_cfg.get("rate", 44100)
-    audio_channels= audio_cfg.get("channels", 2)
-    audio_bitrate = audio_cfg.get("bitrate", 128)
+    audio_src      = audio_cfg.get("src", "alsasrc")
+    audio_device   = audio_cfg.get("hardware_device", "hw:3,0")
+    audio_rate     = audio_cfg.get("rate", 44100)
+    audio_channels = audio_cfg.get("channels", 2)
+    audio_bitrate  = audio_cfg.get("bitrate", 128)
 
     # SRT parameters
-    latency     = srt_cfg.get("latency", 100)
-    rbuf        = srt_cfg.get("rbuf", 32768)
-    wbuf        = srt_cfg.get("wbuf", 32768)
-    tsbpd_delay = srt_cfg.get("tsbpdDelay", 2000)
-    srt_host    = srt_cfg.get("host", "178.249.52.14")
+    latency      = srt_cfg.get("latency", 100)
+    rbuf         = srt_cfg.get("rbuf", 32768)
+    wbuf         = srt_cfg.get("wbuf", 32768)
+    tsbpd_delay  = srt_cfg.get("tsbpdDelay", 2000)
+    srt_host     = srt_cfg.get("host", "178.249.52.14")
 
     srt_audio_uri = (
-        f"srt://{srt_host}:8801?mode=caller&latency={latency}&"
+        f"srt://{srt_host}:7702?mode=caller&latency={latency}&"
         f"rbuf={rbuf}&wbuf={wbuf}&tsbpdDelay={tsbpd_delay}"
     )
 
+    # 🚀 Echo Cancellation added with webrtcechoprobe
     pipeline_str = f"""
-        {audio_src}
-          device={audio_device} !
-          audioconvert !
-          audioresample !
-          lamemp3enc target=1 bitrate=192 !
-          rtpmpapay !
-          srtsink uri="{srt_audio_uri}"
+        {audio_src} device={audio_device} !
+        webrtcechoprobe !
+        audioconvert ! audioresample !
+        lamemp3enc target=1 bitrate={audio_bitrate} cbr=true !
+        rtpmpapay !
+        srtsink uri="{srt_audio_uri}"
     """
 
     return pipeline_str
@@ -59,7 +59,12 @@ def main():
     pipeline_str = build_audio_pipeline(cfg)
     print("Audio GStreamer pipeline:\n", pipeline_str)
 
-    pipeline = Gst.parse_launch(pipeline_str)
+    try:
+        pipeline = Gst.parse_launch(pipeline_str)
+    except Exception as e:
+        print(f"ERROR: Failed to create pipeline: {e}")
+        sys.exit(1)
+
     bus = pipeline.get_bus()
     bus.add_signal_watch()
 
