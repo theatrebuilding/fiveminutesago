@@ -36,7 +36,6 @@ def build_pipeline(cfg):
     srt_audio_sink = srt_cfg.get("audio_sink", "srt://:8802?mode=listener")
     
     pipeline_str = f"""
-    srtsrc uri="{srt_video_src}" ! queue ! srtsink uri="{srt_video_sink}"
     srtsrc uri="{srt_audio_src}" ! queue ! srtsink uri="{srt_audio_sink}"
     """
     
