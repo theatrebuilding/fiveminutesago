@@ -43,7 +43,7 @@ def build_audio_pipeline(cfg):
     )
 
     pipeline_str = f"""
-        {audio_src} !
+        {audio_src} 
           device={audio_device} !
           audioconvert !
           audioresample !
