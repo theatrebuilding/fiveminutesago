@@ -1,0 +1,145 @@
+Factory Details:
+  Rank                     secondary (128)
+  Long-name                RTP audio payloader
+  Klass                    Codec/Payloader/Network/RTP
+  Description              Payload-encode Raw audio into RTP packets (RFC 3551)
+  Author                   Wim Taymans <wim.taymans@gmail.com>
+  Documentation            https://gstreamer.freedesktop.org/documentation/rtp/rtpL16pay.html
+
+Plugin Details:
+  Name                     rtp
+  Description              Real-time protocol plugins
+  Filename                 /lib/aarch64-linux-gnu/gstreamer-1.0/libgstrtp.so
+  Version                  1.22.0
+  License                  LGPL
+  Source module            gst-plugins-good
+  Documentation            https://gstreamer.freedesktop.org/documentation/rtp/
+  Source release date      2023-01-23
+  Binary package           GStreamer Good Plugins (Debian)
+  Origin URL               https://tracker.debian.org/pkg/gst-plugins-good1.0
+
+GObject
+ +----GInitiallyUnowned
+       +----GstObject
+             +----GstElement
+                   +----GstRTPBasePayload
+                         +----GstRTPBaseAudioPayload
+                               +----GstRtpL16Pay
+
+Pad Templates:
+  SINK template: 'sink'
+    Availability: Always
+    Capabilities:
+      audio/x-raw
+                 format: S16BE
+                 layout: interleaved
+                   rate: [ 1, 2147483647 ]
+               channels: [ 1, 2147483647 ]
+  
+  SRC template: 'src'
+    Availability: Always
+    Capabilities:
+      application/x-rtp
+                  media: audio
+                payload: [ 96, 127 ]
+             clock-rate: [ 1, 2147483647 ]
+          encoding-name: L16
+               channels: [ 1, 2147483647 ]
+      application/x-rtp
+                  media: audio
+          encoding-name: L16
+                payload: 10
+             clock-rate: 44100
+      application/x-rtp
+                  media: audio
+          encoding-name: L16
+                payload: 11
+             clock-rate: 44100
+
+Element has no clocking capabilities.
+Element has no URI handling capabilities.
+
+Pads:
+  SRC: 'src'
+    Pad Template: 'src'
+  SINK: 'sink'
+    Pad Template: 'sink'
+
+Element Properties:
+  auto-header-extension: Whether RTP header extensions should be automatically enabled, if an implementation is available
+                        flags: readable, writable
+                        Boolean. Default: true
+  buffer-list         : Use Buffer Lists
+                        flags: readable, writable
+                        Boolean. Default: false
+  max-ptime           : Maximum duration of the packet data in ns (-1 = unlimited up to MTU)
+                        flags: readable, writable
+                        Integer64. Range: -1 - 9223372036854775807 Default: -1 
+  min-ptime           : Minimum duration of the packet data in ns (can't go above MTU)
+                        flags: readable, writable
+                        Integer64. Range: 0 - 9223372036854775807 Default: 0 
+  mtu                 : Maximum size of one packet
+                        flags: readable, writable
+                        Unsigned Integer. Range: 28 - 4294967295 Default: 1400 
+  name                : The name of the object
+                        flags: readable, writable
+                        String. Default: "rtpl16pay0"
+  onvif-no-rate-control: Enable ONVIF Rate-Control=no timestamping mode
+                        flags: readable, writable
+                        Boolean. Default: false
+  parent              : The parent of the object
+                        flags: readable, writable
+                        Object of type "GstObject"
+  perfect-rtptime     : Generate perfect RTP timestamps when possible
+                        flags: readable, writable
+                        Boolean. Default: true
+  pt                  : The payload type of the packets
+                        flags: readable, writable
+                        Unsigned Integer. Range: 0 - 127 Default: 96 
+  ptime-multiple      : Force buffers to be multiples of this duration in ns (0 disables)
+                        flags: readable, writable
+                        Integer64. Range: 0 - 9223372036854775807 Default: 0 
+  scale-rtptime       : Whether the RTP timestamp should be scaled with the rate (speed)
+                        flags: readable, writable
+                        Boolean. Default: true
+  seqnum              : The RTP sequence number of the last processed packet
+                        flags: readable
+                        Unsigned Integer. Range: 0 - 65535 Default: 0 
+  seqnum-offset       : Offset to add to all outgoing seqnum (-1 = random)
+                        flags: readable, writable
+                        Integer. Range: -1 - 65535 Default: -1 
+  source-info         : Write CSRC based on buffer meta RTP source information
+                        flags: readable, writable
+                        Boolean. Default: false
+  ssrc                : The SSRC of the packets (default == random)
+                        flags: readable, writable
+                        Unsigned Integer. Range: 0 - 4294967295 Default: 4294967295 
+  stats               : Various statistics
+                        flags: readable
+                        Boxed pointer of type "GstStructure"
+                                                          clock-rate: 0
+                                                        running-time: 18446744073709551615
+                                                              seqnum: 0
+                                                           timestamp: 0
+                                                                ssrc: 0
+                                                                  pt: 96
+                                                       seqnum-offset: 0
+                                                     timestamp-offset: 0
+
+  timestamp           : The RTP timestamp of the last processed packet
+                        flags: readable
+                        Unsigned Integer. Range: 0 - 4294967295 Default: 0 
+  timestamp-offset    : Offset to add to all outgoing timestamps (default = random)
+                        flags: readable, writable
+                        Unsigned Integer. Range: 0 - 4294967295 Default: 4294967295 
+
+Element Signals:
+  "request-extension" :  GstRTPHeaderExtension* user_function (GstElement* object,
+                                                                guint arg0,
+                                                                gchararray arg1,
+                                                                gpointer user_data);
+
+Element Actions:
+  "add-extension" :  void user_function (GstElement* object,
+                                         GstRTPHeaderExtension* arg0);
+  "clear-extensions" :  void user_function (GstElement* object);

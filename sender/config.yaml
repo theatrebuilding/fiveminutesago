@@ -19,7 +19,7 @@ audio:
   bitrate: 192  # in kbps
 
 srt:
-  host: "178.249.52.14"
+  host: "192.168.0.148"
   latency: 100
   rbuf: 32768
   wbuf: 32768
