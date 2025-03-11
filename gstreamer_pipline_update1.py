@@ -34,9 +34,13 @@ def build_pipeline(cfg):
     srt_audio_src = srt_cfg.get("audio_src", "srt://:8801?mode=listener")
     srt_audio_sink = srt_cfg.get("audio_sink", "srt://:8802?mode=listener")
 
+    # Using AAC (MPEG4-GENERIC) for the RTP caps.
+    # Note: Adjust the payload type or add a 'config' parameter if your AAC stream requires it.
+    caps = 'application/x-rtp,media=audio,clock-rate=48000,encoding-name=MPEG4-GENERIC,payload=97'
+
     pipeline_str = f"""
         srtserversrc uri="{srt_audio_src}" !
-        application/x-rtp,media=audio,clock-rate=48000,encoding-name=OPUS,payload=96 !
+        {caps} !
         queue !
         srtserversink uri="{srt_audio_sink}"
     """
