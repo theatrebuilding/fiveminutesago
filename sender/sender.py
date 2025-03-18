@@ -14,14 +14,14 @@ def stream_reader(prefix, stream):
 def main():
     # Launch video_sender.py and audio_sender.py as subprocesses with piped stdout/stderr
     video_proc = subprocess.Popen(
-        [sys.executable, "video_sender.py"],
+        [sys.executable, "video.py"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,  # ensures strings instead of bytes
         bufsize=1
     )
     audio_proc = subprocess.Popen(
-        [sys.executable, "audio_sender.py"],
+        [sys.executable, "audio.py"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
