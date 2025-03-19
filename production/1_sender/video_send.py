@@ -38,25 +38,29 @@ def main():
     # 3) Load config
     cfg = load_config()
 
-    # Example: read server IP and video send port from config
+    # General config values
     server_ip = cfg.get("server_ip")
     video_send_port = cfg.get("ports", {}).get("video_send")
+    streaming_settings = cfg.get("streaming_settings", {})
 
-    # Example: read any video-specific config
+    # Read any video-specific configs
     video_opts = cfg.get("video", {})
+    video_source = video_opts.get("source", "/dev/video0")
     bitrate = video_opts.get("bitrate", 1000)
     key_int_max = video_opts.get("key_int_max", 15)
     tune = video_opts.get("tune", "zerolatency")
-    # etc...
+    video_encoder = video_opts.get("encoder", "x264enc")
 
     # Construct the pipeline using these config values
     pipeline_str = (
-        f"v4l2src device=/dev/video0 ! videoconvert ! videorate ! "
-        f"x264enc bitrate={bitrate} tune={tune} key-int-max={key_int_max} "
+        f"{video_source} "
+        f"! videoconvert ! videorate "
+        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} "
         f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
-        f"! h264parse config-interval=1 ! queue "
+        f"! h264parse config-interval=1 "
+        f"! queue "
         f"! mpegtsmux alignment=7 "
-        f"! srtsink uri=\"srt://{server_ip}:{video_send_port}?mode=caller&latency=500&rbuf=327680\""
+        f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
     )
 
     print("Pipeline:\n", pipeline_str)

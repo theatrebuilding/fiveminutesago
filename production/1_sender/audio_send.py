@@ -14,6 +14,12 @@ if parent_dir not in sys.path:
 # 2) Now we can import load_config
 from config_loader import load_config
 
+def ask_for_device():
+    """Asks the user for the audio device to use."""
+    print("Please enter the audio device to use:")
+    print("Example: alsasrc device=hw:0")
+    return input("Device: ")
+
 def run_command(command):
     """Runs a shell command as a subprocess and returns the process."""
     return subprocess.Popen(command, shell=True, preexec_fn=os.setsid)
@@ -38,15 +44,15 @@ def main():
     server_ip = config["server_ip"]
     streaming_settings = config["streaming_settings"]
     audio_send_port = config["ports"]["audio_send"]
-    source_device = config.get("audio", {}).get("source", "autoaudiosrc")
+    source = config.get("audio", {}).get("source", "autoaudiosrc")
     audio_format = config.get("audio", {}).get("format", "S16BE")
     audio_channels = config.get("audio", {}).get("channels", 2)
     audio_rate = config.get("audio", {}).get("rate", 32000)
-    device =   #  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! remember to set this up so that it asks for the device
+    device = ask_for_device()
 
     # Build the GStreamer command for sending audio
     send_audio_cmd = (
-        f"gst-launch-1.0 -v {source_device} {device} ! "
+        f"gst-launch-1.0 -v {source} {device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels={audio_channels},rate={audio_rate} ! "
         f"rtpL16pay ! "
