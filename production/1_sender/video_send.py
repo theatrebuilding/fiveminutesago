@@ -50,13 +50,14 @@ def main():
     key_int_max = video_opts.get("key_int_max", 15)
     tune = video_opts.get("tune", "zerolatency")
     video_encoder = video_opts.get("encoder", "x264enc")
+    alignment = video_opts.get("alignment", "nal")
 
     # Construct the pipeline using these config values
     pipeline_str = (
         f"{video_source} "
         f"! videoconvert ! videorate "
         f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} "
-        f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
+        f"! video/x-h264,stream-format=byte-stream,alignment={alignment},profile=baseline "
         f"! h264parse config-interval=1 "
         f"! queue "
         f"! mpegtsmux alignment=7 "
