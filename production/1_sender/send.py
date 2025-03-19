@@ -4,7 +4,7 @@ import sys
 import signal
 import threading
 
-# Function to read and print output from subprocess streams
+# Function to read and print output from subprocess streams!
 def stream_reader(prefix, stream):
     try:
         for line in iter(stream.readline, ''):
