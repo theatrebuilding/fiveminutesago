@@ -17,7 +17,7 @@ from config_loader import load_config
 def ask_for_device():
     """Asks the user for the audio device to use."""
     print("Please enter the audio device to use:")
-    print("Example: alsasrc device=hw:0")
+    print("Example: alsasrc device=hw:0,0")
     return input("Device: ")
 
 def run_command(command):
