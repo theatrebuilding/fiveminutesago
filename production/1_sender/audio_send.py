@@ -38,14 +38,15 @@ def main():
     server_ip = config["server_ip"]
     streaming_settings = config["streaming_settings"]
     audio_send_port = config["ports"]["audio_send"]
-    source_device = config.get("audio", {}).get("source", "hw:3,0")
+    source_device = config.get("audio", {}).get("source", "autoaudiosrc")
     audio_format = config.get("audio", {}).get("format", "S16BE")
     audio_channels = config.get("audio", {}).get("channels", 2)
     audio_rate = config.get("audio", {}).get("rate", 32000)
+    device =   #  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! remember to set this up so that it asks for the device
 
     # Build the GStreamer command for sending audio
     send_audio_cmd = (
-        f"gst-launch-1.0 -v {source_device} ! "
+        f"gst-launch-1.0 -v {source_device} {device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels={audio_channels},rate={audio_rate} ! "
         f"rtpL16pay ! "
