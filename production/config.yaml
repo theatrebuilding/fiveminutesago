@@ -2,21 +2,21 @@ server_ip: 178.249.52.14
 streaming_settings: "latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=1000"
 
 ports:
-  audio_send: 8801
-  audio_receive: 8802
+  audio_send: 8805
+  audio_send2: 8806
+  audio_receive: 8807
+  audio_receive2: 8808
   video_send: 7701
-  video_receive: 7702
+  video_send2: 7702
+  video_receive: 7703
+  video_receive2: 7704
+
 
 audio:
   source: "alsasrc"
   format: "S16BE"
   rate: 32000
   channels: 2
-  aud: true
-  byte_stream: true
-  option_str: ""
-  config_interval: 1
-  alignment: 7
 
 video:
   source: "v4l2src device=/dev/video0"
