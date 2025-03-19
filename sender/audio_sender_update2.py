@@ -7,13 +7,13 @@ import time
 
 # SRT server IP and ports
 SRT_SERVER = "178.249.52.14"
-SEND_PORT = 8801
+SEND_PORT = 8803
 RECEIVE_PORT = 8802
 
 # GStreamer commands for sending and receiving audio
-SEND_AUDIO_CMD = f"gst-launch-1.0 -v alsasrc device=hw:3,0 ! audioconvert ! audioresample ! audio/x-raw,format=S16BE,channels=2,rate=32000 ! rtpL16pay ! srtsink uri=\"srt://{SRT_SERVER}:{SEND_PORT}?mode=caller\""
+SEND_AUDIO_CMD = f"gst-launch-1.0 -v alsasrc device=plughw:2,0 ! audioconvert ! audioresample ! audio/x-raw,format=S16BE,channels=2,rate=32000 ! rtpL16pay ! srtsink uri=\"srt://{SRT_SERVER}:{SEND_PORT}?mode=caller\""
 
-RECEIVE_AUDIO_CMD = f"gst-launch-1.0 -v srtsrc uri=\"srt://{SRT_SERVER}:{RECEIVE_PORT}?mode=caller&latency=1000&maxbw=0\" ! queue max-size-time=200000000 ! application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=2 ! rtpL16depay ! audioconvert ! audioresample ! alsasink device=hw:2,0"
+RECEIVE_AUDIO_CMD = f"gst-launch-1.0 -v srtsrc uri=\"srt://{SRT_SERVER}:{RECEIVE_PORT}?mode=caller&latency=1000&maxbw=0\" ! queue max-size-time=200000000 ! application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=2 ! rtpL16depay ! audioconvert ! audioresample ! alsasink device=hw:1,0"
 
 def run_command(command):
     """Runs a shell command as a subprocess and returns the process."""
