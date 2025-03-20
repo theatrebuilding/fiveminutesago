@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import os
 import sys
+import signal
+import argparse
 
 # 1) Insert parent directory into Python path, so we can import config_loader
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -8,14 +10,11 @@ parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# 2) Now we can import the loader
 from config_loader import load_config
 
 import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
-
-import signal
 
 Gst.init(None)
 loop = None
@@ -24,26 +23,45 @@ def on_message(bus, message):
     if message.type == Gst.MessageType.ERROR:
         err, dbg = message.parse_error()
         print(f"GStreamer ERROR: {err}, debug: {dbg}")
-        if loop: loop.quit()
+        if loop:
+            loop.quit()
     elif message.type == Gst.MessageType.EOS:
         print("End-of-stream reached.")
-        if loop: loop.quit()
+        if loop:
+            loop.quit()
 
 def signal_handler(sig, frame, pipeline):
     print("Stopping pipeline...")
     pipeline.set_state(Gst.State.NULL)
-    if loop: loop.quit()
+    if loop:
+        loop.quit()
 
 def main():
-    # 3) Load config
+    # Use argparse to capture device and country (even if device isn’t used for video, it is passed in for consistency)
+    parser = argparse.ArgumentParser(description="Video Send Script")
+    parser.add_argument("--device", required=True, help="Audio device to use (if applicable)")
+    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    args = parser.parse_args()
+
+    # Load config
     cfg = load_config()
+    if "server_ip" not in cfg:
+        print("ERROR: 'server_ip' key not found in config.yaml. Please define it.")
+        sys.exit(1)
+    if "ports" not in cfg:
+        print("ERROR: 'ports' section not found in config.yaml. Please define it.")
+        sys.exit(1)
 
-    # General config values
+    # Choose the video send port based on the country
+    if args.country.lower() == "tn":
+        video_send_port = cfg["ports"].get("video_send")
+    else:
+        video_send_port = cfg["ports"].get("video_send2")
+
     server_ip = cfg.get("server_ip")
-    video_send_port = cfg.get("ports", {}).get("video_send")
-    streaming_settings = cfg.get("streaming_settings", {})
+    streaming_settings = cfg.get("streaming_settings_video", "")
 
-    # Read any video-specific configs
+    # Read video-specific configs
     video_opts = cfg.get("video", {})
     video_source = video_opts.get("source", "/dev/video0")
     bitrate = video_opts.get("bitrate", 1000)

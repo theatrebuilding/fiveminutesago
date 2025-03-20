@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+# Run with:
+# python3 send.py --device hw:0,0 --country tn
+# python3 send.py --device hw:0,0 --country dk
 import subprocess
 import sys
 import signal
 import threading
+import argparse
 
 # Function to read and print output from subprocess streams!
 def stream_reader(prefix, stream):
@@ -16,18 +20,27 @@ def stream_reader(prefix, stream):
         stream.close()
 
 def main():
+    # Use argparse to get device and country from the command line.
+    parser = argparse.ArgumentParser(description="Sender Script")
+    parser.add_argument("--device", required=True, help="Audio device to use (e.g., hw:0,0)")
+    parser.add_argument("--country", required=True, help="Country code (e.g., tn for Tunisia, dk for Denmark)")
+    args = parser.parse_args()
+
+    device = args.device
+    country = args.country
+
     try:
-        # Start video subprocess in unbuffered mode
+        # Start video subprocess in unbuffered mode.
         video_proc = subprocess.Popen(
-            [sys.executable, "-u", "video_send.py"],
+            [sys.executable, "-u", "video_send.py", "--device", device, "--country", country],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1
         )
-        # Start audio subprocess in unbuffered mode
+        # Start audio subprocess in unbuffered mode.
         audio_proc = subprocess.Popen(
-            [sys.executable, "-u", "audio_send.py"],
+            [sys.executable, "-u", "audio_send.py", "--device", device, "--country", country],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -37,7 +50,7 @@ def main():
         print(f"Failed to start subprocesses: {e}")
         sys.exit(1)
 
-    # Create threads to read outputs from subprocesses
+    # Create threads to read outputs from subprocesses.
     threads = [
         threading.Thread(target=stream_reader, args=("VIDEO", video_proc.stdout)),
         threading.Thread(target=stream_reader, args=("AUDIO", audio_proc.stdout)),
@@ -45,11 +58,10 @@ def main():
         threading.Thread(target=stream_reader, args=("AUDIO ERROR", audio_proc.stderr))
     ]
 
-    # Start threads
     for t in threads:
         t.start()
 
-    # Define a signal handler for graceful termination of subprocesses
+    # Define a signal handler for graceful termination of subprocesses.
     def signal_handler(sig, frame):
         print("\nTerminating subprocesses...")
         video_proc.terminate()
@@ -64,22 +76,18 @@ def main():
             audio_proc.kill()
         sys.exit(0)
 
-    # Register signal handler for SIGINT and SIGTERM
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Wait for subprocesses to complete
+    # Wait for subprocesses to complete.
     video_return_code = video_proc.wait()
     audio_return_code = audio_proc.wait()
 
-    # Check subprocess return codes and print if abnormal termination occurs
     if video_return_code != 0:
         print(f"Video subprocess exited with code {video_return_code}")
-
     if audio_return_code != 0:
         print(f"Audio subprocess exited with code {audio_return_code}")
 
-    # Wait for all threads to finish reading subprocess outputs
     for t in threads:
         t.join()
 
