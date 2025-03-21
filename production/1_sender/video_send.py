@@ -80,6 +80,7 @@ def main():
 
     # Construct the pipeline using these config values
     pipeline_str = (
+        f"gst-launch-1.0 -v "
         f"{video_source} "
         f"! videoconvert "
         f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} "
