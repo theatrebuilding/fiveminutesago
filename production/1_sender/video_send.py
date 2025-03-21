@@ -72,9 +72,14 @@ def main():
 
     # Construct the pipeline using these config values
     pipeline_str = (
-        f"{video_source} "  # e.g., "v4l2src device=/dev/video0"
-        f"! videoconvert "
-        f"! autovideosink"
+        f"{video_source} "
+        f"! videoconvert ! videorate "
+        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} "
+        f"! video/x-h264,stream-format=byte-stream,alignment={alignment},profile=baseline "
+        f"! h264parse config-interval=1 "
+        f"! queue "
+        f"! mpegtsmux alignment=7 "
+        f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
     )
 
     print("Pipeline:\n", pipeline_str)
