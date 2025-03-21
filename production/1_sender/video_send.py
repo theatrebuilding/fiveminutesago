@@ -82,7 +82,7 @@ def main():
     pipeline_str = (
         f"{video_source} "
         f"! videoconvert "
-        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} option-string={option_str}
+        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} option-string={option_str} "
         f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
         f"! h264parse config-interval={config_interval} "
         f"! queue "
