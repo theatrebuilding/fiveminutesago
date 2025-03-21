@@ -81,7 +81,7 @@ def build_audio_pipeline():
                 mount=/stream
                 password=5e4ThU3VW
     """
-    return "gst-launch-1.0 -v" + pipeline.strip()
+    return "gst-launch-1.0 -v " + pipeline.strip()
 
 if __name__ == "__main__":
     print("Audio Pipeline:")
