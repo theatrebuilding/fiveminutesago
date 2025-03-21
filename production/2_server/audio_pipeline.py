@@ -43,15 +43,6 @@ def build_audio_pipeline():
             ! audioresample
             ! queue
             ! mixer.
-
-        
-        multifilesrc location="/mnt/usb/Haut_Recs/ordered/multifile_%04d.mp3" index=0 loop=true
-            ! decodebin
-            ! audioconvert
-            ! audioresample
-            ! volume name=multivol volume=0.0
-            ! queue
-            ! mixer.
         
         
         audiomixer name=mixer
