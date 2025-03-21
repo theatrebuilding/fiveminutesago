@@ -38,6 +38,7 @@ def main():
             text=True,
             bufsize=1
         )
+        time.sleep(10)
         # Start audio subprocess in unbuffered mode.
         audio_proc = subprocess.Popen(
             [sys.executable, "-u", "audio_send.py", "--device", device, "--country", country],
