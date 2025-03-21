@@ -3,7 +3,7 @@ import gi
 gi.require_version("Gst", "1.0")
 gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
-from modules.timed_volume import setup_dynamic_volume_control # Import the volume control timing function.
+# from modules.timed_volume import setup_dynamic_volume_control # Import the volume control timing function.
 from modules.create_symlinks import create_sequential_symlinks # Import the function to create symlinks so that gstreamer can play the audio files.
 
 import signal
@@ -51,11 +51,11 @@ def main():
     pipeline = Gst.parse_launch(pipeline_str)
 
     # Set up dynamic volume control using the gstcontroller-based mechanism.
-    volume_elem = pipeline.get_by_name("multivol")
-    if volume_elem:
-        setup_dynamic_volume_control(volume_elem)
-    else:
-        print("Volume element 'multivol' not found!")
+    # volume_elem = pipeline.get_by_name("multivol")
+    # if volume_elem:
+    #     setup_dynamic_volume_control(volume_elem)
+    # else:
+    #     print("Volume element 'multivol' not found!")
 
     # Set up bus watch.
     bus = pipeline.get_bus()
