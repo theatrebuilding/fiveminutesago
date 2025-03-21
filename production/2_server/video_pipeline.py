@@ -27,7 +27,6 @@ streaming_settings = cfg.get("streaming_settings_video", {})
 
 def build_video_pipeline():
     return f"""
-gst-launch-1.0 -v \\
     ( srtsrc uri="srt://:{video_send_port}?mode=listener" ! queue ! srtsink uri="srt://:{video_receive_port}?mode=listener" ) \\
     ( srtsrc uri="srt://:{video_send_port2}?mode=listener" ! queue ! srtsink uri="srt://:{video_receive_port2}?mode=listener" )
 """
