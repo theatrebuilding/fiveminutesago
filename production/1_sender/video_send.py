@@ -87,7 +87,7 @@ def main():
         f"! h264parse config-interval={config_interval} "
         f"! queue "
         f"! mpegtsmux alignment={alignment} "
-        f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller'"
+        f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
     )
 
     print("Pipeline:\n", pipeline_str)
