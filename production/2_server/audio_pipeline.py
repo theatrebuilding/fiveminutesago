@@ -24,7 +24,7 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
     pipeline = f"""
-    gst-launch-1.0 -v \\
+    
         srtsrc uri=srt://:{audio_send_port}?mode=listener&{streaming_settings}
             ! queue
             ! application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels}
