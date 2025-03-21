@@ -69,16 +69,24 @@ def main():
     tune = video_opts.get("tune", "zerolatency")
     video_encoder = video_opts.get("encoder", "x264enc")
     alignment = video_opts.get("alignment", "nal")
+    bframes = video_opts.get("bframes", 0)
+    aud_bool = video_opts.get("aud", True)
+    byte_stream = video_opts.get("byte_stream", True)
+    option_str = video_opts.get("option_str", "")
+    config_interval = video_opts.get("config_interval", 1)
+
+    aud_str = "true" if aud_bool else "false"
+    byte_stream_str = "true" if byte_stream else "false"
 
     # Construct the pipeline using these config values
     pipeline_str = (
         f"{video_source} "
-        f"! videoconvert ! videorate "
-        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} "
-        f"! video/x-h264,stream-format=byte-stream,alignment={alignment},profile=baseline "
-        f"! h264parse config-interval=1 "
+        f"! videoconvert "
+        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} option-string={option_str}
+        f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
+        f"! h264parse config-interval={config_interval} "
         f"! queue "
-        f"! mpegtsmux alignment=7 "
+        f"! mpegtsmux alignment={alignment} "
         f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
     )
 
