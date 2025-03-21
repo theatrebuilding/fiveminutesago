@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
+"""
+Video Send Script (using gst-launch-1.0 directly, without Gst.parse_launch)
+Run with:
+  python3 video_send.py --device hw:0,0 --country tn
+  python3 video_send.py --device hw:0,0 --country dk
+"""
+
 import os
 import sys
 import signal
 import argparse
+import subprocess
 
 # 1) Insert parent directory into Python path, so we can import config_loader
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -12,33 +20,10 @@ if parent_dir not in sys.path:
 
 from config_loader import load_config
 
-import gi
-gi.require_version("Gst", "1.0")
-from gi.repository import Gst, GLib
-
-Gst.init(None)
-loop = None
-
-def on_message(bus, message):
-    if message.type == Gst.MessageType.ERROR:
-        err, dbg = message.parse_error()
-        print(f"GStreamer ERROR: {err}, debug: {dbg}")
-        if loop:
-            loop.quit()
-    elif message.type == Gst.MessageType.EOS:
-        print("End-of-stream reached.")
-        if loop:
-            loop.quit()
-
-def signal_handler(sig, frame, pipeline):
-    print("Stopping pipeline...")
-    pipeline.set_state(Gst.State.NULL)
-    if loop:
-        loop.quit()
-
 def main():
-    # Use argparse to capture device and country (even if device isn’t used for video, it is passed in for consistency)
-    parser = argparse.ArgumentParser(description="Video Send Script")
+    # Use argparse to capture device and country (even if device isn’t used for video,
+    # it is passed in for consistency)
+    parser = argparse.ArgumentParser(description="Video Send Script (shell-based)")
     parser.add_argument("--device", required=True, help="Audio device to use (if applicable)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
@@ -72,9 +57,9 @@ def main():
     bframes = video_opts.get("bframes", 0)
     aud_bool = video_opts.get("aud", True)
     byte_stream = video_opts.get("byte_stream", True)
-    option_str = video_opts.get("option_str", "")
     config_interval = video_opts.get("config_interval", 1)
 
+    # Convert Python bools to GStreamer string booleans
     aud_str = "true" if aud_bool else "false"
     byte_stream_str = "true" if byte_stream else "false"
 
@@ -91,26 +76,28 @@ def main():
         f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
     )
 
-    print("Pipeline:\n", pipeline_str)
+    print("Pipeline command:\n", pipeline_str)
 
-    pipeline = Gst.parse_launch(pipeline_str)
-    bus = pipeline.get_bus()
-    bus.add_signal_watch()
-    bus.connect("message", on_message)
+    # Launch gst-launch as a subprocess
+    process = subprocess.Popen(pipeline_str, shell=True)
 
-    pipeline.set_state(Gst.State.PLAYING)
+    # Define signal handler to gracefully stop gst-launch
+    def signal_handler(sig, frame):
+        print("Stopping pipeline...")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        sys.exit(0)
 
-    global loop
-    loop = GLib.MainLoop()
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
 
-    signal.signal(signal.SIGINT, lambda s, f: signal_handler(s, f, pipeline))
-    signal.signal(signal.SIGTERM, lambda s, f: signal_handler(s, f, pipeline))
-
-    try:
-        loop.run()
-    finally:
-        pipeline.set_state(Gst.State.NULL)
-        print("Pipeline stopped.")
+    # Wait for gst-launch to finish
+    return_code = process.wait()
+    if return_code != 0:
+        print(f"gst-launch-1.0 exited with code {return_code}")
 
 if __name__ == "__main__":
     main()
