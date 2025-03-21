@@ -23,8 +23,8 @@ def stream_reader(prefix, stream):
         stream.close()
 
 def main():
-    parser = argparse.ArgumentParser(description="Sender Script (Video Only)")
-    parser.add_argument("--device", required=True, help="Audio device to use (not used here, but retained for consistency)")
+    parser = argparse.ArgumentParser(description="Sender Script (Video + Audio)")
+    parser.add_argument("--device", required=True, help="Audio device to use (e.g., hw:0,0)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
@@ -35,7 +35,7 @@ def main():
     env = os.environ.copy()
 
     try:
-        # Start ONLY the video subprocess
+        # Start the video subprocess
         video_proc = subprocess.Popen(
             [sys.executable, "-u", "video_send.py", "--device", device, "--country", country],
             stdout=subprocess.PIPE,
@@ -44,35 +44,61 @@ def main():
             bufsize=1,
             env=env
         )
+
+        # (Optional) Add a small delay to let video init before starting audio
+        # time.sleep(1)
+
+        # Start the audio subprocess
+        audio_proc = subprocess.Popen(
+            [sys.executable, "-u", "audio_send.py", "--device", device, "--country", country],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env
+        )
+
     except Exception as e:
-        print(f"Failed to start video subprocess: {e}")
+        print(f"Failed to start subprocesses: {e}")
         sys.exit(1)
 
-    # Create threads to read output from the subprocess
+    # Create threads to read output from video and audio subprocesses
     threads = [
         threading.Thread(target=stream_reader, args=("VIDEO", video_proc.stdout)),
-        threading.Thread(target=stream_reader, args=("VIDEO ERROR", video_proc.stderr))
+        threading.Thread(target=stream_reader, args=("VIDEO ERROR", video_proc.stderr)),
+        threading.Thread(target=stream_reader, args=("AUDIO", audio_proc.stdout)),
+        threading.Thread(target=stream_reader, args=("AUDIO ERROR", audio_proc.stderr))
     ]
+
     for t in threads:
         t.start()
 
     def signal_handler(sig, frame):
-        print("\nTerminating video subprocess...")
+        print("\nTerminating subprocesses...")
         video_proc.terminate()
+        audio_proc.terminate()
         try:
             video_proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             video_proc.kill()
+        try:
+            audio_proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            audio_proc.kill()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
-    # Wait for the video subprocess to complete
+    # Wait for both subprocesses to complete
     video_return_code = video_proc.wait()
+    audio_return_code = audio_proc.wait()
 
+    # If needed, print the exit codes
     if video_return_code != 0:
         print(f"Video subprocess exited with code {video_return_code}")
+    if audio_return_code != 0:
+        print(f"Audio subprocess exited with code {audio_return_code}")
 
     # Join the reader threads
     for t in threads:
