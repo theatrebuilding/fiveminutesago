@@ -68,6 +68,8 @@ def main():
         f"gst-launch-1.0 -v "
         f"{video_source} "
         f"! videoconvert "
+        f"! videoscale "
+        f"! video/x-raw,width=1920,height=1080 "  # Set the desired dimensions here
         f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} "
         f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
         f"! h264parse config-interval={config_interval} "

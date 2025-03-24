@@ -24,7 +24,7 @@ video:
   source: "v4l2src device=/dev/video0"
   encoder: "x264enc"
   tune: "zerolatency"
-  bitrate: 1000
+  bitrate: 3000
   key_int_max: 15
   bframes: 0
   aud: true

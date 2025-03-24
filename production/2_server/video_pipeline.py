@@ -22,10 +22,19 @@ video_receive_port2 = cfg.get("ports", {}).get("video_receive2")
 streaming_settings = cfg.get("streaming_settings_video", {})
 
 def build_video_pipeline():
-    # Create two separate valid pipeline strings.
-    pipeline1 = f'srtsrc uri="srt://:{video_send_port}?mode=listener" ! queue ! srtsink uri="srt://:{video_receive_port}?mode=listener"'
-    pipeline2 = f'srtsrc uri="srt://:{video_send_port2}?mode=listener" ! queue ! srtsink uri="srt://:{video_receive_port2}?mode=listener"'
+    # These pipelines relay the stream between ports with low latency and bounded buffering.
+    pipeline1 = (
+        f'srtsrc uri="srt://:{video_send_port}?mode=listener&latency=100" '
+        f'! queue max-size-time=2000000000 max-size-buffers=200 '
+        f'! srtsink uri="srt://:{video_receive_port}?mode=listener&latency=100"'
+    )
+    pipeline2 = (
+        f'srtsrc uri="srt://:{video_send_port2}?mode=listener&latency=100" '
+        f'! queue max-size-time=2000000000 max-size-buffers=200 '
+        f'! srtsink uri="srt://:{video_receive_port2}?mode=listener&latency=100"'
+    )
     return pipeline1, pipeline2
+
 
 if __name__ == "__main__":
     pipelines = build_video_pipeline()
