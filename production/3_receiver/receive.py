@@ -48,11 +48,14 @@ def main():
     # to decide which port (e.g., 'audio_receive' vs 'audio_receive2') to use and which device.
     audio_part = build_audio_pipeline(args.country, args.device)
     video_part = build_video_pipeline(args.country, args.device)
+
+    print("Audio part:", audio_part)
+    print("Video part:", video_part)
     
     # Combine them into one pipeline string.
     pipeline_str = f"""
-{audio_part}
-{video_part}
+        {audio_part}
+        {video_part}
     """.strip()
     
     print("Receiver: Final pipeline:\n", pipeline_str, "\n")
