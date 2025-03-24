@@ -34,7 +34,7 @@ def build_audio_pipeline(country, device):
             ! rtpL16depay
             ! audioconvert
             ! audioresample
-            ! speex-aec
+            ! webrtcechoprobe
             ! alsasink device="{device}"
     """
     return pipeline.strip()
