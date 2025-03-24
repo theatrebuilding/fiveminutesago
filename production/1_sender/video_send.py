@@ -39,9 +39,9 @@ def main():
 
     # Choose the video send port based on the country
     if args.country.lower() == "tn":
-        video_send_port = cfg["ports"].get("video_send")
+        video_send_port = cfg["ports"].get("video_send_tn")
     else:
-        video_send_port = cfg["ports"].get("video_send2")
+        video_send_port = cfg["ports"].get("video_send_dk")
 
     server_ip = cfg.get("server_ip")
     streaming_settings = cfg.get("streaming_settings_video", "")

@@ -23,9 +23,9 @@ def build_audio_pipeline(country, device):
     
     # Choose the audio receive port based on the country.
     if country.lower() == "tn":
-        receive_port = config.get("ports", {}).get("audio_receive")
+        receive_port = config.get("ports", {}).get("audio_receive_dk")
     else:
-        receive_port = config.get("ports", {}).get("audio_receive2")
+        receive_port = config.get("ports", {}).get("audio_receive_tn")
     
     pipeline = f"""
         srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=1000&maxbw=0"

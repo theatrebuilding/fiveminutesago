@@ -23,9 +23,9 @@ def build_video_pipeline(country, device):
     
     # Choose the video receive port based on the country.
     if country.lower() == "tn":
-        receive_port = config.get("ports", {}).get("video_receive")
+        receive_port = config.get("ports", {}).get("video_receive_tn")
     else:
-        receive_port = config.get("ports", {}).get("video_receive2")
+        receive_port = config.get("ports", {}).get("video_receive_dk")
     
     pipeline = (
         f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100" '

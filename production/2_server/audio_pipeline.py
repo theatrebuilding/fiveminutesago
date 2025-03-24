@@ -13,10 +13,10 @@ from config_loader import load_config
 cfg = load_config()
 
 # 3) Fetch port values and streaming settings from the config.
-audio_send_port     = cfg.get("ports", {}).get("audio_send")
-audio_send_port2    = cfg.get("ports", {}).get("audio_send2")
-audio_receive_port  = cfg.get("ports", {}).get("audio_receive")
-audio_receive_port2 = cfg.get("ports", {}).get("audio_receive2")
+audio_send_tn     = cfg.get("ports", {}).get("audio_send_tn")
+audio_send_dk    = cfg.get("ports", {}).get("audio_send_dk")
+audio_receive_dk  = cfg.get("ports", {}).get("audio_receive_dk")
+audio_receive_tn = cfg.get("ports", {}).get("audio_receive_tn")
 streaming_settings  = cfg.get("streaming_settings_audio", "")
 clock_rate          = cfg.get("audio", {}).get("rate", 32000)
 channels            = cfg.get("audio", {}).get("channels", 2)
@@ -25,7 +25,7 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 def build_audio_pipeline():
     pipeline = f"""
 
-        srtsrc uri=srt://:{audio_send_port}?mode=listener&{streaming_settings}
+        srtsrc uri=srt://:{audio_send_tn}?mode=listener&{streaming_settings}
             ! queue
             ! application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels}
             ! rtpL16depay
@@ -35,7 +35,7 @@ def build_audio_pipeline():
             ! mixer.
 
         
-        srtsrc uri=srt://:{audio_send_port2}?mode=listener&{streaming_settings}
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener&{streaming_settings}
             ! queue
             ! application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels}
             ! rtpL16depay
@@ -54,12 +54,12 @@ def build_audio_pipeline():
         
         t. ! queue
             ! rtpL16pay
-            ! srtsink uri=srt://:{audio_receive_port}?mode=listener wait-for-connection=false
+            ! srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         
         t. ! queue
             ! rtpL16pay
-            ! srtsink uri=srt://:{audio_receive_port2}?mode=listener wait-for-connection=false
+            ! srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
         
         t. ! queue

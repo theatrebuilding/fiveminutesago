@@ -15,23 +15,23 @@ from config_loader import load_config
 cfg = load_config()
 
 # General config values.
-video_send_port = cfg.get("ports", {}).get("video_send")
-video_send_port2 = cfg.get("ports", {}).get("video_send2")
-video_receive_port = cfg.get("ports", {}).get("video_receive")
-video_receive_port2 = cfg.get("ports", {}).get("video_receive2")
+video_send_tn = cfg.get("ports", {}).get("video_send_tn")
+video_send_dk = cfg.get("ports", {}).get("video_send_dk")
+video_receive_dk = cfg.get("ports", {}).get("video_receive_dk")
+video_receive_tn = cfg.get("ports", {}).get("video_receive_tn")
 streaming_settings = cfg.get("streaming_settings_video", {})
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
     pipeline1 = (
-        f'srtsrc uri="srt://:{video_send_port}?mode=listener&latency=100" '
+        f'srtsrc uri="srt://:{video_send_tn}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_port}?mode=listener&latency=100"'
+        f'! srtsink uri="srt://:{video_receive_dk}?mode=listener&latency=100"'
     )
     pipeline2 = (
-        f'srtsrc uri="srt://:{video_send_port2}?mode=listener&latency=100" '
+        f'srtsrc uri="srt://:{video_send_dk}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_port2}?mode=listener&latency=100"'
+        f'! srtsink uri="srt://:{video_receive_tn}?mode=listener&latency=100"'
     )
     return pipeline1, pipeline2
 

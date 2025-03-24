@@ -43,9 +43,9 @@ def main():
 
     # Choose the audio send port based on the country
     if args.country.lower() == "tn":
-        audio_send_port = config["ports"].get("audio_send")
+        audio_send_tn = config["ports"].get("audio_send_tn")
     else:
-        audio_send_port = config["ports"].get("audio_send2")
+        audio_send_port = config["ports"].get("audio_send_dk")
 
     server_ip = config["server_ip"]
     streaming_settings = config.get("streaming_settings_audio", "")
@@ -63,11 +63,11 @@ def main():
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
-        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
+        f"srtsink uri='srt://{server_ip}:{audio_send_tn}?mode=caller&{streaming_settings}'"
     )
 
     print("Starting audio sending pipeline...")
-    print(f"Host: {server_ip}, Port: {audio_send_port}")
+    print(f"Host: {server_ip}, Port: {audio_send_tn}")
 
     send_process = None
 

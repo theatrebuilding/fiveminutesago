@@ -45,7 +45,7 @@ def main():
 
     # Build each part of the pipeline (audio + video) using the provided parameters.
     # The build_audio_pipeline and build_video_pipeline functions should use these values
-    # to decide which port (e.g., 'audio_receive' vs 'audio_receive2') to use and which device.
+    # to decide which port (e.g., 'audio_receive_dk' vs 'audio_receive_tn') to use and which device.
     audio_part = build_audio_pipeline(args.country, args.device)
     video_part = build_video_pipeline(args.country, args.device)
 

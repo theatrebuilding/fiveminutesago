@@ -3,14 +3,14 @@ streaming_settings_audio: "latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=1000
 streaming_settings_video: "latency=500&rbuf=327680&wbuf=327680&tsbpdDelay=2000"
 
 ports:
-  audio_send: 8805
-  audio_send2: 8806
-  audio_receive: 8807
-  audio_receive2: 8808
-  video_send: 7701
-  video_send2: 7702
-  video_receive: 7703
-  video_receive2: 7704
+  audio_send_tn: 8805
+  audio_send_dk: 8806
+  audio_receive_dk: 8807
+  audio_receive_tn: 8808
+  video_send_tn: 7701
+  video_send_dk: 7702
+  video_receive_dk: 7703
+  video_receive_tn: 7704
 
 
 audio:
