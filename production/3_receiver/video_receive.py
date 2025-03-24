@@ -27,25 +27,19 @@ def build_video_pipeline(country, device):
     else:
         receive_port = config.get("ports", {}).get("video_receive2")
     
-    def build_receiver_pipeline():
-        pipeline = (
-            f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100" '
-            f'! queue max-size-time=2000000000 max-size-buffers=500 '
-            f'! tsdemux name=demux '
-            f'demux. ! queue '
-            f'! h264parse config-interval=1 '
-            f'! avdec_h264 '
-            f'! videoconvert '
-            f'! videoscale '
-            f'! video/x-raw,width=1920,height=1080 '  # Enforce a specific output resolution
-            f'! kmssink device=/dev/dri/card0 sync=false'  # Direct output to a specific DRM device
-        )
-        return pipeline.strip()
-    
-    # Call and return the nested function's result.
-    return build_receiver_pipeline()
-
-
+    pipeline = (
+        f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100" '
+        f'! queue max-size-time=2000000000 max-size-buffers=500 '
+        f'! tsdemux name=demux '
+        f'demux. ! queue '
+        f'! h264parse config-interval=1 '
+        f'! avdec_h264 '
+        f'! videoconvert '
+        f'! videoscale '
+        f'! video/x-raw,width=1920,height=1080 '  # Enforce a specific output resolution
+        f'! kmssink sync=false'  # Direct output to a specific DRM device
+    )
+    return pipeline.strip()
 
 if __name__ == "__main__":
     # For testing purposes:
