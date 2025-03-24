@@ -41,6 +41,9 @@ def build_video_pipeline(country, device):
             f'! kmssink device=/dev/dri/card0 sync=false'  # Direct output to a specific DRM device
         )
         return pipeline.strip()
+    
+    # Call and return the nested function's result.
+    return build_receiver_pipeline()
 
 
 
