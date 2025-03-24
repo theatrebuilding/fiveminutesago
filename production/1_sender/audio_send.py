@@ -61,7 +61,7 @@ def main():
     send_audio_cmd = (
         f"gst-launch-1.0 -v {source} device={device} ! "
         f"audioconvert ! audioresample ! "
-        f"audio/x-raw,format={audio_format},channels={audio_channels},rate={audio_rate} ! "
+        f"audio/x-raw,channels=1,rate=32000 ! audioconvert ! audio/x-raw,channels=2,rate=32000 ! "
         f"rtpL16pay ! "
         f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
     )
