@@ -33,7 +33,7 @@ def build_audio_pipeline():
             ! audioresample
             ! queue
             ! mixer.
-            ! dksend.
+            ! tn.
 
         
         srtsrc uri=srt://:{audio_send_dk}?mode=listener&{streaming_settings}
@@ -44,27 +44,39 @@ def build_audio_pipeline():
             ! audioresample
             ! queue
             ! mixer.
-            ! tnsend.
+            ! dk.
         
         
         audiomixer name=mixer
             ! audioconvert
             ! audioresample
             ! audio/x-raw,format=S16BE,channels=2,rate=32000
-            ! tee name=t
+            ! tee name=mix
+        
+        audiomixer name=tn
+            ! audioconvert
+            ! audioresample
+            ! audio/x-raw,format=S16BE,channels=2,rate=32000
+            ! tee name=tn
+
+        audiomixer name=dk
+            ! audioconvert
+            ! audioresample
+            ! audio/x-raw,format=S16BE,channels=2,rate=32000
+            ! tee name=dk
 
         
-        tnsend. ! queue
+        tn. ! queue
             ! rtpL16pay
             ! srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         
-        dksend. ! queue
+        dk. ! queue
             ! rtpL16pay
             ! srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
         
-        t. ! queue
+        mix. ! queue
             ! audioconvert
             ! audioresample
             ! lamemp3enc bitrate=128
