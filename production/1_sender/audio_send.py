@@ -44,8 +44,10 @@ def main():
     # Choose the audio send port based on the country
     if args.country.lower() == "tn":
         audio_send_port = config["ports"].get("audio_send_tn")
+        audio_loopback_port = config["ports"].get("audio_receive_dk")
     else:
         audio_send_port = config["ports"].get("audio_send_dk")
+        audio_loopback_port = config["ports"].get("audio_receive_tn")
 
     server_ip = config["server_ip"]
     streaming_settings = config.get("streaming_settings_audio", "")
@@ -58,13 +60,27 @@ def main():
     device = args.device
 
     # Build the GStreamer command for sending audio
+    # send_audio_cmd = (
+    #     f"gst-launch-1.0 -v {source} device={device} ! "
+    #     f"audioconvert ! audioresample ! "
+    #     f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
+    #     f"rtpL16pay ! "
+    #     f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
+    # )
+
     send_audio_cmd = (
-        f"gst-launch-1.0 -v {source} device={device} ! "
+        f"gst-launch-1.0 -v "
+        f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
-        f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
+        f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
+        f"webrtcdsp name=aec aec=1 agc=1 noise-suppression=1 ! "
+        f"audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
-        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
-    )
+        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
+        f"srtsink uri='srt://{server_ip}:{audio_loopback_port}?mode=caller ! "
+        f"audioconvert ! audioresample ! "
+        f"aec.ref."
+)
 
     print("Starting audio sending pipeline...")
     print(f"Host: {server_ip}, Port: {audio_send_port}")
