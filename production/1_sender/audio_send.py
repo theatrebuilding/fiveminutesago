@@ -60,25 +60,13 @@ def main():
     device = args.device
 
     # Build the GStreamer command for sending audio
-    # send_audio_cmd = (
-    #     f"gst-launch-1.0 -v {source} device={device} ! "
-    #     f"audioconvert ! audioresample ! "
-    #     f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
-    #     f"rtpL16pay ! "
-    #     f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
-    # )
-
-
-    send_audio_cmd = (
-       f"gst-launch-1.0 -v "
-       f"{source} device={device} ! "
-       f"audioconvert ! audioresample ! "
-       f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
-       f"webrtcdsp probe=webrtcechoprobe0 ! "
-       f"audioconvert ! audio/x-raw,channels=2 ! "
-       f"rtpL16pay ! "
-       f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
-    )
+     send_audio_cmd = (
+         f"gst-launch-1.0 -v {source} device={device} ! "
+         f"audioconvert ! audioresample ! "
+         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
+         f"rtpL16pay ! "
+         f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
+     )
 
 
     print("Starting audio sending pipeline...")
