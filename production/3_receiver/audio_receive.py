@@ -28,12 +28,14 @@ def build_audio_pipeline(country, device):
         receive_port = config.get("ports", {}).get("audio_receive_dk")
     
     pipeline = f"""
-        srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=1000&maxbw=0"
+        gst-launch-1.0 -v srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=1000&maxbw=0"
             ! queue max-size-time=200000000
             ! application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=2
             ! rtpL16depay
             ! audioconvert
             ! audioresample
+            ! webrtcechoprobe name=webrtcechoprobe0
+            ! audioconvert
             ! alsasink device="{device}"
     """
     return pipeline.strip()
