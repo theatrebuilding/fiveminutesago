@@ -34,7 +34,6 @@ def build_audio_pipeline(country, device):
             ! rtpL16depay
             ! audioconvert
             ! audioresample
-            ! webrtcdsp
             ! alsasink device="{device}"
     """
     return pipeline.strip()

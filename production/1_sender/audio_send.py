@@ -74,28 +74,17 @@ def main():
         f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
+        f"webrtcdsp ! "
+        f"tee name=t ! "
+        f"queue ! "
         f"audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
-        f"webrtcechoprobe ! "
-        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' ! "
-)
-
-send_audio_cmd = (
-    f"gst-launch-1.0 -v "
-    f"{source} device={device} ! "
-    f"audioconvert ! audioresample ! "
-    f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
-    f"webrtcdsp ! "
-    f"tee name=t ! "
-    f"queue ! "
-    f"audioconvert ! audio/x-raw,channels=2 ! "
-    f"rtpL16pay ! "
-    f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
-    f"t. ! "
-    f"queue ! "
-    f"webrtcechoprobe probe=webrtcechoprobe0 ! "
-    f"fakesink"
-)
+        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
+        f"t. ! "
+        f"queue ! "
+        f"webrtcechoprobe probe=webrtcechoprobe0 ! "
+        f"fakesink"
+    )
 
 
     print("Starting audio sending pipeline...")
