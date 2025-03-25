@@ -1,6 +1,6 @@
 server_ip: 178.249.52.14
 streaming_settings_audio: "latency=100&rcvbuf=67108864&fc=102400&tsbpdDelay=1000"
-streaming_settings_video: "latency=500&rbuf=327680&wbuf=327680&tsbpdDelay=2000"
+streaming_settings_video: "latency=100&rbuf=327680&wbuf=327680&tsbpdDelay=2000"
 
 ports:
   audio_send_tn: 8805
@@ -11,6 +11,8 @@ ports:
   video_send_dk: 7702
   video_receive_dk: 7703
   video_receive_tn: 7704
+  audio_loopback_tn: 8810 
+  audio_loopback_dk: 8811
 
 
 audio:

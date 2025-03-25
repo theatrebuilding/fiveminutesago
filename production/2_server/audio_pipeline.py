@@ -61,6 +61,17 @@ def build_audio_pipeline():
           audioresample !
           lamemp3enc bitrate=128 !
           shout2send ip=s40.myradiostream.com port=23058 mount=/stream password=5e4ThU3VW
+
+        tee_dk. ! queue !
+          audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
+          rtpL16pay !
+          srtsink uri=srt://:8810?mode=caller&latency=1000 wait-for-connection=false
+
+        tee_tn. ! queue !
+          audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
+          rtpL16pay !
+          srtsink uri=srt://:8811?mode=caller&latency=1000 wait-for-connection=false
+   
     """
     return pipeline.strip()
 
