@@ -77,7 +77,7 @@ def main():
         f"audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
         f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
-        f"srtsink uri='srt://{server_ip}:{audio_loopback_port}?mode=caller ! "
+        f"srtsink uri='srt://{server_ip}:{audio_loopback_port}?mode=caller' ! "
         f"audioconvert ! audioresample ! "
         f"aec.ref."
 )
