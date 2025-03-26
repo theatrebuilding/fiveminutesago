@@ -20,6 +20,9 @@ def build_video_pipeline(country, device):
     """
     config = load_config()
     server_address = config.get("server_ip")
+    streaming_settings = config.get("streaming_settings_video", "")
+    image_height = config.get("video", {}).get("height", 1080)
+    image_width = config.get("video", {}).get("width", 1920)
     
     # Choose the video receive port based on the country.
     if country.lower() == "tn":
@@ -28,7 +31,7 @@ def build_video_pipeline(country, device):
         receive_port = config.get("ports", {}).get("video_receive_dk")
     
     pipeline = (
-        f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100" '
+        f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&{streaming_settings}" '
         f'! queue max-size-time=2000000000 max-size-buffers=500 '
         f'! tsdemux name=demux '
         f'demux. ! queue '
@@ -36,8 +39,8 @@ def build_video_pipeline(country, device):
         f'! avdec_h264 '
         f'! videoconvert '
         f'! videoscale '
-        f'! video/x-raw,width=1920,height=1080 '  # Enforce a specific output resolution
-        f'! kmssink sync=false'  # Direct output to a specific DRM device
+        f'! video/x-raw,width={image_width},height={image_height} '
+        f'! kmssink sync=false'
     )
     return pipeline.strip()
 

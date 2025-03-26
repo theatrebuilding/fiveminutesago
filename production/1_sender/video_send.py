@@ -58,6 +58,9 @@ def main():
     aud_bool = video_opts.get("aud", True)
     byte_stream = video_opts.get("byte_stream", True)
     config_interval = video_opts.get("config_interval", 1)
+    image_width = video_opts.get("width", 1920)
+    image_height = video_opts.get("height", 1080)
+    framerate = video_opts.get("framerate", 25)
 
     # Convert Python bools to GStreamer string booleans
     aud_str = "true" if aud_bool else "false"
@@ -69,7 +72,7 @@ def main():
         f"{video_source} "
         f"! videoconvert "
         f"! videoscale "
-        f"! video/x-raw,width=1920,height=1080 "  # Set the desired dimensions here
+        f"! video/x-raw,width={image_width},height={image_height} "
         f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} "
         f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
         f"! h264parse config-interval={config_interval} "
