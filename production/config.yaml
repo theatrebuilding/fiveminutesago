@@ -1,6 +1,6 @@
 server_ip: 178.249.52.14
-streaming_settings_audio: "latency=500&rcvbuf=67108864&fc=102400&tsbpdDelay=1000"
-streaming_settings_video: "latency=500&rbuf=327680&wbuf=327680&tsbpdDelay=2000"
+streaming_settings_audio: "latency=5000&rcvbuf=67108864&fc=102400&tsbpdDelay=1000"
+streaming_settings_video: "latency=5000&rbuf=327680&wbuf=327680&tsbpdDelay=2000"
 
 ports:
   audio_send_tn: 8805
@@ -17,7 +17,7 @@ ports:
 
 audio:
   source: "alsasrc"
-  format: "S16LE"
+  format: "S16BE"
   rate: 32000
   channels: 2
   encoding_name: "L16"
