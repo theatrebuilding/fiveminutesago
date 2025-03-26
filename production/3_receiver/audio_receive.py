@@ -36,7 +36,7 @@ def build_audio_pipeline(country, device):
             ! audioresample 
             ! audio/x-raw,channels=1,rate=32000 
             ! rtpL16pay 
-            ! srtsink uri="srt://:8819?mode=listener&latency=10" wait-for-connection=false keep-listening=true
+            ! srtsink uri="srt://:8819?mode=listener&latency=10" wait-for-connection=false 
     """
     return pipeline.strip()
 

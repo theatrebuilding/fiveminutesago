@@ -23,15 +23,16 @@ streaming_settings = cfg.get("streaming_settings_video", {})
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
+    # Rembember to add keep-listening=true to the srtsink elements to prevent the pipeline from stopping. It needs to be added to the uri settings.
     pipeline1 = (
-        f'srtsrc uri="srt://:{video_send_tn}?mode=listener&latency=100" wait-for-connection=false keep-listening=true '
+        f'srtsrc uri="srt://:{video_send_tn}?mode=listener&latency=100" wait-for-connection=false  '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_dk}?mode=listener&latency=100" wait-for-connection=false keep-listening=true'
+        f'! srtsink uri="srt://:{video_receive_dk}?mode=listener&latency=100" wait-for-connection=false '
     )
     pipeline2 = (
-        f'srtsrc uri="srt://:{video_send_dk}?mode=listener&latency=100" wait-for-connection=false keep-listening=true '
+        f'srtsrc uri="srt://:{video_send_dk}?mode=listener&latency=100" wait-for-connection=false  '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_tn}?mode=listener&latency=100" wait-for-connection=false keep-listening=true'
+        f'! srtsink uri="srt://:{video_receive_tn}?mode=listener&latency=100" wait-for-connection=false '
     )
     return pipeline1, pipeline2
 
