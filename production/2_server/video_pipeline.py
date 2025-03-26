@@ -2,16 +2,16 @@
 import os
 import sys
 
-# 1 Insert parent directory into Python path so we can import config_loader.
+# 1) Insert parent directory into Python path so we can import config_loader.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# 2 Now we can import the loader.
+# 2) Now we can import the loader.
 from config_loader import load_config
 
-# 3 Load config.
+# 3) Load config.
 cfg = load_config()
 
 # General config values.
@@ -23,16 +23,15 @@ streaming_settings = cfg.get("streaming_settings_video", {})
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
-    # Rembember to add keep-listening=true to the srtsink elements to prevent the pipeline from stopping. It needs to be added to the uri settings.
     pipeline1 = (
         f'srtsrc uri="srt://:{video_send_tn}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_dk}?mode=listener&latency=100" '
+        f'! srtsink uri="srt://:{video_receive_dk}?mode=listener&latency=100"'
     )
     pipeline2 = (
         f'srtsrc uri="srt://:{video_send_dk}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink uri="srt://:{video_receive_tn}?mode=listener&latency=100" '
+        f'! srtsink uri="srt://:{video_receive_tn}?mode=listener&latency=100"'
     )
     return pipeline1, pipeline2
 
