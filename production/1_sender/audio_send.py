@@ -69,6 +69,10 @@ def main():
     # )
     send_audio_cmd = (
         f"gst-launch-1.0 -v "
+        f"srtsrc uri='srt://:8819?mode=caller' ! "
+        f"application/x-raw,media=audio,clock-rate=32000,encoding-name=L16,channels=1 ! "
+        f"audioconvert ! audioresample ! "
+        f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink"
         f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate=32000 ! "
@@ -76,11 +80,6 @@ def main():
         f"audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
         f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
-        f"srtsrc uri='srt://:{server_ip}:{audio_loopback_port}?mode=caller&latency=1000' ! "
-        f"application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=1 ! "
-        f"rtpL16depay ! "
-        f"audioconvert ! audioresample ! "
-        f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink"
     )
 
 

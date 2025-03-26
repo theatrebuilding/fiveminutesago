@@ -24,7 +24,7 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
     pipeline = f"""
-        srtsrc uri=srt://:{audio_send_tn}?mode=listener&{streaming_settings} !
+        srtsrc uri="srt://:{audio_send_tn}?mode=listener&{streaming_settings}" wait-for-connection=false keep-listening=true !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -34,9 +34,9 @@ def build_audio_pipeline():
 
         tee_tn. ! queue !
           rtpL16pay !
-          srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
+          srtsink uri="srt://:{audio_receive_dk}?mode=listener" wait-for-connection=false keep-listening=true
 
-        srtsrc uri=srt://:{audio_send_dk}?mode=listener&{streaming_settings} !
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener&{streaming_settings} wait-for-connection=false keep-listening=true !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -46,7 +46,7 @@ def build_audio_pipeline():
 
         tee_dk. ! queue !
           rtpL16pay !
-          srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
+          srtsink uri="srt://:{audio_receive_tn}?mode=listener" wait-for-connection=false keep-listening=true
 
         tee_tn. ! queue ! mix.sink_0
         tee_dk. ! queue ! mix.sink_1
@@ -61,16 +61,6 @@ def build_audio_pipeline():
           audioresample !
           lamemp3enc bitrate=128 !
           shout2send ip=s40.myradiostream.com port=23058 mount=/stream password=5e4ThU3VW
-
-        tee_dk. ! queue !
-          audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
-          rtpL16pay !
-          srtsink uri=srt://:8810?mode=caller&latency=1000 wait-for-connection=false
-
-        tee_tn. ! queue !
-          audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
-          rtpL16pay !
-          srtsink uri=srt://:8811?mode=caller&latency=1000 wait-for-connection=false
    
     """
     return pipeline.strip()
