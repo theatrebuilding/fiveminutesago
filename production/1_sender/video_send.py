@@ -72,7 +72,7 @@ def main():
         f"{video_source} "
         f"! videoconvert "
         f"! videoscale "
-        f"! video/x-raw,width={image_width},height={image_height} "
+        f"! video/x-raw,width={image_width},height={image_height},framerate={framerate}/1 "
         f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} "
         f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
         f"! h264parse config-interval={config_interval} "

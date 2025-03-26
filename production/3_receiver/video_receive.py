@@ -11,18 +11,13 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 def build_video_pipeline(country, device):
-    """
-    Build the GStreamer pipeline string for receiving video.
-    
-    Parameters:
-      country (str): Used to choose the correct receive port.
-      device (str): Not used in video pipeline; included for consistency.
-    """
+
     config = load_config()
     server_address = config.get("server_ip")
     streaming_settings = config.get("streaming_settings_video", "")
     image_height = config.get("video", {}).get("height", 1080)
     image_width = config.get("video", {}).get("width", 1920)
+    framerate = config.get("video", {}).get("framerate", 25)
     
     # Choose the video receive port based on the country.
     if country.lower() == "tn":
@@ -39,7 +34,7 @@ def build_video_pipeline(country, device):
         f'! avdec_h264 '
         f'! videoconvert '
         f'! videoscale '
-        f'! video/x-raw,width={image_width},height={image_height} '
+        f'! video/x-raw,width={image_width},height={image_height},framerate={framerate}/1 '
         f'! kmssink sync=false'
     )
     return pipeline.strip()
