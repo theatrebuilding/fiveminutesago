@@ -6,7 +6,7 @@ import signal
 import subprocess
 import argparse
 
-# 1) Insert the parent folder into sys.path so we can import config_loader
+# 1 Insert the parent folder into sys.path so we can import config_loader
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
@@ -62,11 +62,11 @@ def main():
     # Build the audio sending pipeline
     send_audio_cmd = (
         f"gst-launch-1.0 -v "
-        f"srtsrc uri='srt://{server_ip}:{audio_loopback_port}?mode=caller{streaming_settings}' ! "
-        f"application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=1 ! "
-        f"rtpL16depay ! audioconvert ! audioresample ! "
-        f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink "
-        f"; "
+    #    f"srtsrc uri='srt://{server_ip}:{audio_loopback_port}?mode=caller{streaming_settings}' ! "
+    #    f"application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=1 ! "
+    #    f"rtpL16depay ! audioconvert ! audioresample ! "
+    #    f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink "
+    #    f"; "
         f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
