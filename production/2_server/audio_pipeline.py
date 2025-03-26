@@ -27,7 +27,7 @@ audio_loopback_dk = cfg.get("ports", {}).get("audio_loopback_dk")
 def build_audio_pipeline():
     pipeline = f"""
 
-        srtsrc uri="srt://:{audio_send_tn}?mode=listener&{streaming_settings}" wait-for-connection=false  !
+        srtsrc uri="srt://:{audio_send_tn}?mode=listener&{streaming_settings}" wait-for-connection=false !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -37,12 +37,12 @@ def build_audio_pipeline():
 
         tee_tn. ! queue !
           rtpL16pay !
-          srtsink uri="srt://:{audio_receive_dk}?mode=listener" wait-for-connection=false 
+          srtsink uri="srt://:{audio_receive_dk}?mode=listener&{streaming_settings}" wait-for-connection=false 
 
         tee_tn. ! queue !
           audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
           rtpL16pay !
-          srtsink uri="srt://:{audio_loopback_dk}?mode=listener" wait-for-connection=false 
+          srtsink uri="srt://:{audio_loopback_tn}?mode=listener&{streaming_settings}" wait-for-connection=false 
 
         srtsrc uri="srt://:{audio_send_dk}?mode=listener&{streaming_settings}" wait-for-connection=false  !
           queue !
@@ -54,12 +54,12 @@ def build_audio_pipeline():
 
         tee_dk. ! queue !
           rtpL16pay !
-          srtsink uri="srt://:{audio_receive_tn}?mode=listener" wait-for-connection=false 
+          srtsink uri="srt://:{audio_receive_tn}?mode=listener&{streaming_settings}" wait-for-connection=false 
 
         tee_dk. ! queue !
           audioconvert ! audioresample ! audio/x-raw,channels=1,rate=32000 !
           rtpL16pay !
-          srtsink uri="srt://:{audio_loopback_tn}?mode=listener" wait-for-connection=false 
+          srtsink uri="srt://:{audio_loopback_dk}?mode=listener&{streaming_settings}" wait-for-connection=false 
 
         tee_tn. ! queue ! mix.sink_0
         tee_dk. ! queue ! mix.sink_1
