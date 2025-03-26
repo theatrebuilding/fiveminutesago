@@ -45,9 +45,6 @@ def main():
             env=env
         )
 
-        # (Optional) Add a small delay to let video init before starting audio
-        # time.sleep(1)
-
         # Start the audio subprocess
         audio_proc = subprocess.Popen(
             [sys.executable, "-u", "audio_send.py", "--device", device, "--country", country],

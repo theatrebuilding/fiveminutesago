@@ -44,10 +44,8 @@ def main():
     # Choose the audio send port based on the country
     if args.country.lower() == "tn":
         audio_send_port = config["ports"].get("audio_send_tn")
-        audio_loopback_port = config["ports"].get("audio_loopback_tn")
     else:
         audio_send_port = config["ports"].get("audio_send_dk")
-        audio_loopback_port = config["ports"].get("audio_loopback_dk")
 
     server_ip = config["server_ip"]
     streaming_settings = config.get("streaming_settings_audio", "")
@@ -61,6 +59,7 @@ def main():
 
     # Build the audio sending pipeline
     send_audio_cmd = (
+        f"gst-launch-1.0 -v "
         f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
