@@ -6,7 +6,7 @@ import signal
 import subprocess
 import argparse
 
-# 1) Insert the parent folder into sys.path so we can import config_loader
+# 1 Insert the parent folder into sys.path so we can import config_loader
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
@@ -44,8 +44,10 @@ def main():
     # Choose the audio send port based on the country
     if args.country.lower() == "tn":
         audio_send_port = config["ports"].get("audio_send_tn")
+        audio_loopback_port = config["ports"].get("audio_loopback_tn")
     else:
         audio_send_port = config["ports"].get("audio_send_dk")
+        audio_loopback_port = config["ports"].get("audio_loopback_dk")
 
     server_ip = config["server_ip"]
     streaming_settings = config.get("streaming_settings_audio", "")
@@ -57,14 +59,16 @@ def main():
     # Use the device value provided by the main script
     device = args.device
 
-    # Build the GStreamer command for sending audio
+    # Build the audio sending pipeline
     send_audio_cmd = (
-        f"gst-launch-1.0 -v {source} device={device} ! "
+        f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
-        f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! audioconvert ! audio/x-raw,channels=2 ! "
+        f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
+        f"audioconvert ! audio/x-raw,channels=2 ! "
         f"rtpL16pay ! "
-        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}'"
+        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
     )
+
 
     print("Starting audio sending pipeline...")
     print(f"Host: {server_ip}, Port: {audio_send_port}")
