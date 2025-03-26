@@ -25,7 +25,7 @@ def build_audio_pipeline(country, device):
         receive_port = config.get("ports", {}).get("audio_receive_dk")
     
     pipeline = f"""
-        srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&{streaming_settings}" !
+        srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&{streaming_settings}"
             ! queue max-size-time=200000000
             ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels=2
             ! rtpL16depay
