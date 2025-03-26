@@ -23,16 +23,47 @@ channels            = cfg.get("audio", {}).get("channels", 2)
 encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
-    pipeline = f"""srtsrc uri="srt://:{audio_send_tn}?mode=listener&{streaming_settings}" ! queue ! application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} ! rtpL16depay ! audioconvert ! audioresample ! tee name=tntee ;
-        tntee. ! queue ! rtpL16pay ! srtsink uri="srt://:{audio_receive_dk}?mode=listener" wait-for-connection=false ;
-        tntee. ! queue ! mixer. ;
-        srtsrc uri="srt://:{audio_send_dk}?mode=listener&{streaming_settings}" ! queue ! application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} ! rtpL16depay ! audioconvert ! audioresample ! tee name=dktee ;
-        dktee. ! queue ! rtpL16pay ! srtsink uri="srt://:{audio_receive_tn}?mode=listener" wait-for-connection=false ;
-        dktee. ! queue ! mixer. ;
-        audiomixer name=mixer ! audioconvert ! audioresample ! audio/x-raw,format=S16BE,channels=2,rate=32000 ! tee name=mixtee ;
-        mixtee. ! queue ! lamemp3enc bitrate=128 ! shout2send ip=s40.myradiostream.com port=23058 mount=/stream password=5e4ThU3VW"""
-    return pipeline.strip()
+    pipeline = f"""
 
+        srtsrc uri="srt://:{audio_send_tn}?mode=listener&{streaming_settings}" !
+            queue !
+            application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+            rtpL16depay !
+            audioconvert !
+            audioresample !
+            tee name=tntee 
+
+        tntee. ! queue !
+            rtpL16pay !
+            srtsink uri="srt://:{audio_receive_dk}?mode=listener" wait-for-connection=false ;
+
+        tntee. ! queue ! mixer. 
+
+        srtsrc uri="srt://:{audio_send_dk}?mode=listener&{streaming_settings}" !
+            queue !
+            application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+            rtpL16depay !
+            audioconvert !
+            audioresample !
+            tee name=dktee ;
+
+        dktee. ! queue !
+            rtpL16pay !
+            srtsink uri="srt://:{audio_receive_tn}?mode=listener" wait-for-connection=false ;
+
+        dktee. ! queue ! mixer. 
+
+        audiomixer name=mixer !
+            audioconvert !
+            audioresample !
+            audio/x-raw,format=S16BE,channels=2,rate=32000 !
+            tee name=mixtee 
+
+        mixtee. ! queue !
+            lamemp3enc bitrate=128 !
+            shout2send ip=s40.myradiostream.com port=23058 mount=/stream password=5e4ThU3VW
+    """
+    return pipeline.strip()
 
 
 if __name__ == "__main__":
