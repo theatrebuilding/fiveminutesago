@@ -65,8 +65,8 @@ def main():
         f"srtsrc uri='srt://{server_ip}:{audio_loopback_port}?mode=caller{streaming_settings}' ! "
         f"application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=1 ! "
         f"rtpL16depay ! audioconvert ! audioresample ! "
-        f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink ! "
-
+        f"webrtcechoprobe name=webrtcechoprobe0 ! fakesink "
+        f"; "
         f"{source} device={device} ! "
         f"audioconvert ! audioresample ! "
         f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
