@@ -17,6 +17,7 @@ def build_audio_pipeline(country, device):
     streaming_settings = config.get("streaming_settings_audio", "")
     audio_rate = config.get("audio", {}).get("rate", 32000)
     encoding_name = config.get("audio", {}).get("encoding_name", "L16")
+    audio_format = config.get("audio", {}).get("format", "S16BE")
     
     # Choose the audio receive port based on the country.
     if country.lower() == "tn":
@@ -25,9 +26,9 @@ def build_audio_pipeline(country, device):
         receive_port = config.get("ports", {}).get("audio_receive_dk")
     
     pipeline = f"""
-        srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&{streaming_settings}" !
+        srtsrc uri="srt://{server_address}:{receive_port}?mode=caller" !
             queue max-size-time=200000000 !
-            application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels=2 !
+            application/x-rtp,format={audio_format},media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels=2 !
             rtpL16depay !
             audioconvert !
             audioresample !

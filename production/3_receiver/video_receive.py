@@ -26,7 +26,7 @@ def build_video_pipeline(country, device):
         receive_port = config.get("ports", {}).get("video_receive_dk")
     
     pipeline = (
-        f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&{streaming_settings}" '
+        f'srtsrc uri="srt://{server_address}:{receive_port}?mode=caller" '
         f'! queue max-size-time=2000000000 max-size-buffers=500 '
         f'! tsdemux name=demux '
         f'demux. ! queue '
