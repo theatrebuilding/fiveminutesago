@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-# Run with:
-# python3 receive.py --device hw:0,0 --country tn
-# python3 receive.py --device hw:0,0 --country dk
 import gi
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst, GLib
@@ -9,80 +6,61 @@ from gi.repository import Gst, GLib
 import signal
 import sys
 import argparse
+import threading
 
 # Import the pipeline builders
-from audio_receive import build_audio_pipeline
-from video_receive import build_video_pipeline
+from audio_receive import AudioReceiver
+from video_receive import VideoReceiver
 
 Gst.init(None)
-loop = None
 
-def on_message(bus, message):
-    t = message.type
-    if t == Gst.MessageType.EOS:
-        print("Receiver: End of Stream")
-        loop.quit()
-    elif t == Gst.MessageType.ERROR:
-        err, debug = message.parse_error()
-        print(f"Receiver: ERROR -> {err}")
-        if debug:
-            print(f"Debug info: {debug}")
-        loop.quit()
+class Receiver:
+    def __init__(self, country, audio_device):
+        self.country = country
+        self.audio_device = audio_device
+        self.audio_receiver = None
+        self.video_receiver = None
 
-def signal_handler(sig, frame):
-    print("Receiver: Interrupt received, stopping pipeline...")
-    if loop is not None:
-        loop.quit()
+    def start(self):
+        # Start audio receiver in a separate thread
+        self.audio_receiver = AudioReceiver(self.country, self.audio_device)
+        audio_thread = threading.Thread(target=self.audio_receiver.run)
+        audio_thread.start()
+
+        # Start video receiver in a separate thread
+        self.video_receiver = VideoReceiver(self.country)
+        video_thread = threading.Thread(target=self.video_receiver.run)
+        video_thread.start()
+
+        # Wait for both threads to finish
+        audio_thread.join()
+        video_thread.join()
+
+    def stop(self):
+        if self.audio_receiver:
+            self.audio_receiver.stop()
+        if self.video_receiver:
+            self.video_receiver.stop()
+
+def signal_handler(sig, frame, receiver):
+    print("Receiver: Interrupt received, stopping pipelines...")
+    receiver.stop()
+    sys.exit(0)
 
 def main():
-    global loop
-
-    # Parse command-line arguments to get the country code and device
+    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Receiver Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
-    parser.add_argument("--device", required=True, help="Device to use")
+    parser.add_argument("--device", required=True, help="Audio output device (e.g., hw:0,0)")
     args = parser.parse_args()
 
-    # Build each part of the pipeline (audio + video) using the provided parameters.
-    # The build_audio_pipeline and build_video_pipeline functions should use these values
-    # to decide which port (e.g., 'audio_receive_dk' vs 'audio_receive_tn') to use and which device.
-    audio_part = build_audio_pipeline(args.country, args.device)
-    video_part = build_video_pipeline(args.country, args.device)
+    receiver = Receiver(args.country, args.device)
 
-    print("Audio part:", audio_part)
-    print("Video part:", video_part)
-    
-    # Combine them into one pipeline string.
-    pipeline_str = f"""
-        {audio_part}
-        {video_part}
-    """.strip()
-    
-    print("Receiver: Final pipeline:\n", pipeline_str, "\n")
-    
-    # Parse and launch the pipeline
-    pipeline = Gst.parse_launch(pipeline_str)
-    
-    # Set up bus to monitor for messages
-    bus = pipeline.get_bus()
-    bus.add_signal_watch()
-    bus.connect("message", on_message)
-    
-    # Start playing
-    pipeline.set_state(Gst.State.PLAYING)
-    
-    # Main loop
-    loop = GLib.MainLoop()
-    
-    # Handle Ctrl+C / kill signals
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
-    try:
-        loop.run()
-    finally:
-        pipeline.set_state(Gst.State.NULL)
-        print("Receiver: Pipeline stopped.")
+    # Handle termination signals
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, receiver))
+    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, receiver))
+
+    receiver.start()
 
 if __name__ == "__main__":
     main()
