@@ -3,8 +3,6 @@ import gi
 gi.require_version("Gst", "1.0")
 gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
-# from modules.timed_volume import setup_dynamic_volume_control
-from modules.create_symlinks import create_sequential_symlinks
 
 import signal
 import sys
