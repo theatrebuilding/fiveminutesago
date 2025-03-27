@@ -2,6 +2,7 @@ import subprocess
 import time
 import os
 from datetime import datetime
+from threading import Thread
 
 # Set the recording directory
 recording_dir = "/mnt/usb/Haut_Recs/"
@@ -32,23 +33,22 @@ def start_gstreamer():
     return subprocess.Popen(gst_command)
 
 def record_chunk():
-    """Continuously records 1-minute audio chunks from port 8802."""
+    """Continuously records 1-minute audio chunks directly from GStreamer."""
     while True:
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         output_file = f"{recording_dir}audio_chunk_{timestamp}.mp3"
-        
-        # FFmpeg command to capture raw PCM audio from SRT and encode it as MP3
-        ffmpeg_command = [
-            "ffmpeg", "-y", 
-            "-f", "s16be", "-ar", "32000", "-ac", "2",  # Define raw PCM format
-            "-i", "srt://127.0.0.1:8802",  # Capture the mixed stream
-            "-c:a", "libmp3lame", "-b:a", "192k",  # Encode as MP3
-            "-t", "60",  # Record for 60 seconds
-            output_file
+
+        # GStreamer command to record audio directly into MP3
+        record_command = [
+            "gst-launch-1.0", "-e",
+            "srtsrc", "uri=srt://127.0.0.1:8802", "!", "queue",
+            "!", "application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=2",
+            "!", "rtpL16depay", "!", "audioconvert", "!", "audioresample",
+            "!", "lamemp3enc", "bitrate=192", "!", "filesink", f"location={output_file}"
         ]
 
         print(f"Recording: {output_file}")
-        subprocess.run(ffmpeg_command)
+        subprocess.run(record_command)  # Run the GStreamer recording process
         time.sleep(1)  # Small delay before next recording
 
 def get_sorted_audio_files():
@@ -75,7 +75,7 @@ def playback_loop():
                 "!", "audio/x-raw,format=S16BE,channels=2,rate=32000",
                 "!", "rtpL16pay", "!", "srtsink", "uri=srt://127.0.0.1:8802"
             ]
-            
+
             subprocess.run(play_command)
             time.sleep(1)  # Small delay before playing next file
 
@@ -84,7 +84,6 @@ if __name__ == "__main__":
         gst_process = start_gstreamer()  # Start GStreamer in the background
 
         # Run recording and playback in parallel
-        from threading import Thread
         record_thread = Thread(target=record_chunk, daemon=True)
         playback_thread = Thread(target=playback_loop, daemon=True)
 
