@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib
+
 import os
 import sys
-import time
 import signal
-import subprocess
-import argparse
 
-# 1 Insert the parent folder into sys.path so we can import config_loader
+# Insert parent directory to access config_loader.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
@@ -14,80 +15,84 @@ if parent_dir not in sys.path:
 
 from config_loader import load_config
 
-def run_command(command):
-    """Runs a shell command as a subprocess and returns the process."""
-    return subprocess.Popen(command, shell=True, preexec_fn=os.setsid)
+class AudioSender:
+    def __init__(self, device, country):
+        self.device = device
+        self.country = country
+        self.pipeline = None
+        self.loop = None
+        self.server_ip = None
+        self.audio_send_port = None
 
-def stop_process(process):
-    """Stops the subprocess gracefully."""
-    if process:
-        os.killpg(os.getpgid(process.pid), signal.SIGTERM)
+    def build_pipeline(self):
+        config = load_config()
+        self.server_ip = config.get("server_ip")
+        if not self.server_ip:
+            print("ERROR: 'server_ip' not defined in config.")
+            sys.exit(1)
+        
+        # Choose the audio send port based on the country.
+        if self.country.lower() == "tn":
+            self.audio_send_port = config.get("ports", {}).get("audio_send_tn")
+        else:
+            self.audio_send_port = config.get("ports", {}).get("audio_send_dk")
+        
+        streaming_settings = config.get("streaming_settings_audio", "")
+        source = config.get("audio", {}).get("source", "autoaudiosrc")
+        audio_format = config.get("audio", {}).get("format", "S16BE")
+        audio_rate = config.get("audio", {}).get("rate", 32000)
+        
+        # Build the pipeline string.
+        pipeline_str = f"""
+            {source} device={self.device} ! 
+            audioconvert ! audioresample !
+            audio/x-raw,format={audio_format},channels=1,rate={audio_rate} !
+            audioconvert ! audio/x-raw,channels=2 !
+            rtpL16pay !
+            srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
+        """
+        return pipeline_str.strip()
 
-def main():
-    # Use argparse to get the device and country from the main script
-    parser = argparse.ArgumentParser(description="Audio Send Script")
-    parser.add_argument("--device", required=True, help="Audio device to use (e.g., hw:0,0)")
-    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
-    args = parser.parse_args()
+    def on_message(self, bus, message):
+        msg_type = message.type
+        if msg_type == Gst.MessageType.EOS:
+            print("AudioSender: End of Stream")
+            self.stop()
+        elif msg_type == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            print(f"AudioSender: ERROR -> {err}")
+            if debug:
+                print(f"Debug info: {debug}")
+            self.stop()
 
-    config = load_config()
+    def run(self):
+        pipeline_str = self.build_pipeline()
+        print("AudioSender: Pipeline:\n", pipeline_str, "\n")
+        self.pipeline = Gst.parse_launch(pipeline_str)
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", self.on_message)
 
-    # Validate required keys in config
-    if "server_ip" not in config:
-        print("ERROR: 'server_ip' key not found in config.yaml. Please define it.")
-        sys.exit(1)
+        self.pipeline.set_state(Gst.State.PLAYING)
+        self.loop = GLib.MainLoop()
+        try:
+            self.loop.run()
+        except Exception as e:
+            print(f"AudioSender: Exception -> {e}")
+        finally:
+            self.pipeline.set_state(Gst.State.NULL)
+            print("AudioSender: Pipeline stopped.")
 
-    if "ports" not in config:
-        print("ERROR: 'ports' section not found in config.yaml. Please define it.")
-        sys.exit(1)
-
-    # Choose the audio send port based on the country
-    if args.country.lower() == "tn":
-        audio_send_port = config["ports"].get("audio_send_tn")
-    else:
-        audio_send_port = config["ports"].get("audio_send_dk")
-
-    server_ip = config["server_ip"]
-    streaming_settings = config.get("streaming_settings_audio", "")
-    source = config.get("audio", {}).get("source", "autoaudiosrc")
-    audio_format = config.get("audio", {}).get("format", "S16BE")
-    audio_channels = config.get("audio", {}).get("channels", 2)
-    audio_rate = config.get("audio", {}).get("rate", 32000)
-    
-    # Use the device value provided by the main script
-    device = args.device
-
-    # Build the audio sending pipeline
-    send_audio_cmd = (
-        f"gst-launch-1.0 -v "
-        f"{source} device={device} ! "
-        f"audioconvert ! audioresample ! "
-        f"audio/x-raw,format={audio_format},channels=1,rate={audio_rate} ! "
-        f"audioconvert ! audio/x-raw,channels=2 ! "
-        f"rtpL16pay ! "
-        f"srtsink uri='srt://{server_ip}:{audio_send_port}?mode=caller&{streaming_settings}' "
-    )
-
-
-    print("Starting audio sending pipeline...")
-    print(f"Host: {server_ip}, Port: {audio_send_port}")
-
-    send_process = None
-
-    def signal_handler(sig, frame):
-        print("\nStopping audio sending pipeline...")
-        stop_process(send_process)
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    try:
-        send_process = run_command(send_audio_cmd)
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        signal_handler(None, None)
+    def stop(self):
+        if self.loop:
+            self.loop.quit()
 
 if __name__ == "__main__":
-    main()
+    # For standalone testing.
+    import argparse
+    parser = argparse.ArgumentParser(description="Audio Sender Script")
+    parser.add_argument("--device", required=True, help="Audio device (e.g., hw:0,0)")
+    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    args = parser.parse_args()
+    sender = AudioSender(args.device, args.country)
+    sender.run()

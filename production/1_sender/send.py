@@ -1,26 +1,50 @@
 #!/usr/bin/env python3
-# Run with:
-#   python3 send.py --device hw:0,0 --country tn
-#   python3 send.py --device hw:0,0 --country dk
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib
 
-import os
-import subprocess
-import sys
-import signal
-import threading
 import argparse
-import time
+import threading
+import signal
+import sys
 
-def stream_reader(prefix, stream):
-    """Reads lines from a stream and prints them with a prefix."""
-    try:
-        for line in iter(stream.readline, ''):
-            if line:
-                print(f"{prefix}: {line}", end='')
-    except Exception as e:
-        print(f"{prefix} reader error: {e}")
-    finally:
-        stream.close()
+from audio_send import AudioSender
+from video_send import VideoSender
+
+Gst.init(None)
+
+class Sender:
+    def __init__(self, device, country):
+        self.device = device
+        self.country = country
+        self.audio_sender = None
+        self.video_sender = None
+
+    def start(self):
+        # Start audio sender in a separate thread.
+        self.audio_sender = AudioSender(self.device, self.country)
+        audio_thread = threading.Thread(target=self.audio_sender.run)
+        audio_thread.start()
+
+        # Start video sender in a separate thread.
+        self.video_sender = VideoSender(self.device, self.country)
+        video_thread = threading.Thread(target=self.video_sender.run)
+        video_thread.start()
+
+        # Wait for both threads to complete.
+        audio_thread.join()
+        video_thread.join()
+
+    def stop(self):
+        if self.audio_sender:
+            self.audio_sender.stop()
+        if self.video_sender:
+            self.video_sender.stop()
+
+def signal_handler(sig, frame, sender):
+    print("\nTerminating sender pipelines...")
+    sender.stop()
+    sys.exit(0)
 
 def main():
     parser = argparse.ArgumentParser(description="Sender Script (Video + Audio)")
@@ -28,78 +52,12 @@ def main():
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
-    device = args.device
-    country = args.country
+    sender = Sender(args.device, args.country)
 
-    # Copy the current environment so child processes inherit it
-    env = os.environ.copy()
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, sender))
+    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, sender))
 
-    try:
-        # Start the video subprocess
-        video_proc = subprocess.Popen(
-            [sys.executable, "-u", "video_send.py", "--device", device, "--country", country],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=env
-        )
-
-        # Start the audio subprocess
-        audio_proc = subprocess.Popen(
-            [sys.executable, "-u", "audio_send.py", "--device", device, "--country", country],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            bufsize=1,
-            env=env
-        )
-
-    except Exception as e:
-        print(f"Failed to start subprocesses: {e}")
-        sys.exit(1)
-
-    # Create threads to read output from video and audio subprocesses
-    threads = [
-        threading.Thread(target=stream_reader, args=("VIDEO", video_proc.stdout)),
-        threading.Thread(target=stream_reader, args=("VIDEO ERROR", video_proc.stderr)),
-        threading.Thread(target=stream_reader, args=("AUDIO", audio_proc.stdout)),
-        threading.Thread(target=stream_reader, args=("AUDIO ERROR", audio_proc.stderr))
-    ]
-
-    for t in threads:
-        t.start()
-
-    def signal_handler(sig, frame):
-        print("\nTerminating subprocesses...")
-        video_proc.terminate()
-        audio_proc.terminate()
-        try:
-            video_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            video_proc.kill()
-        try:
-            audio_proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            audio_proc.kill()
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    # Wait for both subprocesses to complete
-    video_return_code = video_proc.wait()
-    audio_return_code = audio_proc.wait()
-
-    # If needed, print the exit codes
-    if video_return_code != 0:
-        print(f"Video subprocess exited with code {video_return_code}")
-    if audio_return_code != 0:
-        print(f"Audio subprocess exited with code {audio_return_code}")
-
-    # Join the reader threads
-    for t in threads:
-        t.join()
+    sender.start()
 
 if __name__ == "__main__":
     main()

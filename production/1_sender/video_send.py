@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
-"""
-Video Send Script (using gst-launch-1.0 directly, without Gst.parse_launch)
-Run with:
-  python3 video_send.py --device hw:0,0 --country tn
-  python3 video_send.py --device hw:0,0 --country dk
-"""
+
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib
 
 import os
 import sys
 import signal
-import argparse
-import subprocess
 
-# 1) Insert parent directory into Python path, so we can import config_loader
+# Insert parent directory to access config_loader.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
@@ -20,86 +16,97 @@ if parent_dir not in sys.path:
 
 from config_loader import load_config
 
-def main():
-    # Use argparse to capture device and country (even if device isn’t used for video,
-    # it is passed in for consistency)
-    parser = argparse.ArgumentParser(description="Video Send Script (shell-based)")
-    parser.add_argument("--device", required=True, help="Audio device to use (if applicable)")
-    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
-    args = parser.parse_args()
+class VideoSender:
+    def __init__(self, device, country):
+        self.device = device  # Not used for video, but included for consistency.
+        self.country = country
+        self.pipeline = None
+        self.loop = None
+        self.server_ip = None
+        self.video_send_port = None
 
-    # Load config
-    cfg = load_config()
-    if "server_ip" not in cfg:
-        print("ERROR: 'server_ip' key not found in config.yaml. Please define it.")
-        sys.exit(1)
-    if "ports" not in cfg:
-        print("ERROR: 'ports' section not found in config.yaml. Please define it.")
-        sys.exit(1)
+    def build_pipeline(self):
+        cfg = load_config()
+        self.server_ip = cfg.get("server_ip")
+        if not self.server_ip:
+            print("ERROR: 'server_ip' not defined in config.")
+            sys.exit(1)
 
-    # Choose the video send port based on the country
-    if args.country.lower() == "tn":
-        video_send_port = cfg["ports"].get("video_send_tn")
-    else:
-        video_send_port = cfg["ports"].get("video_send_dk")
+        # Choose the video send port based on the country.
+        if self.country.lower() == "tn":
+            self.video_send_port = cfg.get("ports", {}).get("video_send_tn")
+        else:
+            self.video_send_port = cfg.get("ports", {}).get("video_send_dk")
 
-    server_ip = cfg.get("server_ip")
-    streaming_settings = cfg.get("streaming_settings_video", "")
+        streaming_settings = cfg.get("streaming_settings_video", "")
+        video_opts = cfg.get("video", {})
+        video_source = video_opts.get("source", "/dev/video0")
+        bitrate = video_opts.get("bitrate", 1000)
+        key_int_max = video_opts.get("key_int_max", 15)
+        tune = video_opts.get("tune", "zerolatency")
+        video_encoder = video_opts.get("encoder", "x264enc")
+        alignment = video_opts.get("alignment", "nal")
+        bframes = video_opts.get("bframes", 0)
+        aud_bool = video_opts.get("aud", True)
+        byte_stream = video_opts.get("byte_stream", True)
+        config_interval = video_opts.get("config_interval", 1)
+        video_width = video_opts.get("width", 1920)
+        video_height = video_opts.get("height", 1080)
+        
+        aud_str = "true" if aud_bool else "false"
+        byte_stream_str = "true" if byte_stream else "false"
+        
+        pipeline_str = f"""
+            {video_source} !
+            videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
+            {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} !
+            video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline !
+            h264parse config-interval={config_interval} !
+            queue !
+            mpegtsmux alignment={alignment} !
+            srtsink uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings}"
+        """
+        return pipeline_str.strip()
 
-    # Read video-specific configs
-    video_opts = cfg.get("video", {})
-    video_source = video_opts.get("source", "/dev/video0")
-    bitrate = video_opts.get("bitrate", 1000)
-    key_int_max = video_opts.get("key_int_max", 15)
-    tune = video_opts.get("tune", "zerolatency")
-    video_encoder = video_opts.get("encoder", "x264enc")
-    alignment = video_opts.get("alignment", "nal")
-    bframes = video_opts.get("bframes", 0)
-    aud_bool = video_opts.get("aud", True)
-    byte_stream = video_opts.get("byte_stream", True)
-    config_interval = video_opts.get("config_interval", 1)
+    def on_message(self, bus, message):
+        msg_type = message.type
+        if msg_type == Gst.MessageType.EOS:
+            print("VideoSender: End of Stream")
+            self.stop()
+        elif msg_type == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            print(f"VideoSender: ERROR -> {err}")
+            if debug:
+                print(f"Debug info: {debug}")
+            self.stop()
 
-    # Convert Python bools to GStreamer string booleans
-    aud_str = "true" if aud_bool else "false"
-    byte_stream_str = "true" if byte_stream else "false"
+    def run(self):
+        pipeline_str = self.build_pipeline()
+        print("VideoSender: Pipeline:\n", pipeline_str, "\n")
+        self.pipeline = Gst.parse_launch(pipeline_str)
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", self.on_message)
 
-    # Construct the pipeline using these config values
-    pipeline_str = (
-        f"gst-launch-1.0 -v "
-        f"{video_source} "
-        f"! videoconvert "
-        f"! videoscale "
-        f"! video/x-raw,width=1920,height=1080 "  # Set the desired dimensions here
-        f"! {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} "
-        f"! video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline "
-        f"! h264parse config-interval={config_interval} "
-        f"! queue "
-        f"! mpegtsmux alignment={alignment} "
-        f"! srtsink uri='srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}'"
-    )
-
-    print("Pipeline command:\n", pipeline_str)
-
-    # Launch gst-launch as a subprocess
-    process = subprocess.Popen(pipeline_str, shell=True)
-
-    # Define signal handler to gracefully stop gst-launch
-    def signal_handler(sig, frame):
-        print("Stopping pipeline...")
-        process.terminate()
+        self.pipeline.set_state(Gst.State.PLAYING)
+        self.loop = GLib.MainLoop()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-        sys.exit(0)
+            self.loop.run()
+        except Exception as e:
+            print(f"VideoSender: Exception -> {e}")
+        finally:
+            self.pipeline.set_state(Gst.State.NULL)
+            print("VideoSender: Pipeline stopped.")
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-
-    # Wait for gst-launch to finish
-    return_code = process.wait()
-    if return_code != 0:
-        print(f"gst-launch-1.0 exited with code {return_code}")
+    def stop(self):
+        if self.loop:
+            self.loop.quit()
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description="Video Sender Script")
+    parser.add_argument("--device", required=True, help="Device parameter (for consistency)")
+    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    args = parser.parse_args()
+    sender = VideoSender(args.device, args.country)
+    sender.run()
