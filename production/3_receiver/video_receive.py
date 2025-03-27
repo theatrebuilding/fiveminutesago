@@ -44,7 +44,7 @@ class VideoReceiver:
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" 
                 ! queue max-size-time=2000000000 max-size-buffers=500 ! tsdemux name=demux 
                 demux. ! queue ! h264parse config-interval=1 ! avdec_h264 ! selector. 
-            videotestsrc pattern=colorbars ! video/x-raw,format=I420,width=1920,height=1080 ! selector.
+            videotestsrc pattern=snow ! video/x-raw,format=I420,width=1920,height=1080 ! selector.
         """
         return pipeline_str.strip()
 
