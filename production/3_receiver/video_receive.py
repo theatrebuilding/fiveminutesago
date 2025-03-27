@@ -8,12 +8,6 @@ import signal
 import argparse
 
 # Import the configuration loader
-# Insert parent directory for config_loader
-script_dir = os.path.dirname(os.path.realpath(__file__))
-parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
 from config_loader import load_config
 
 class VideoReceiver:
@@ -27,8 +21,7 @@ class VideoReceiver:
     def build_pipeline(self):
         """
         Build the GStreamer pipeline string for receiving video.
-        The pipeline uses an input-selector that takes the live stream from the SRT source
-        and a fallback branch that uses videotestsrc (colorbars).
+        This pipeline uses the live SRT stream, demuxes it, decodes it, and displays it.
         """
         config = load_config()
         self.server_address = config.get("server_ip", "127.0.0.1")
@@ -37,14 +30,17 @@ class VideoReceiver:
             self.receive_port = config.get("ports", {}).get("video_receive_tn")
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
-
-        # Build the pipeline string:
+        
         pipeline_str = f"""
-            input-selector name=selector ! queue ! videoconvert ! videoscale ! video/x-raw,width=1920,height=1080 ! kmssink sync=false 
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" 
-                ! queue max-size-time=2000000000 max-size-buffers=500 ! tsdemux name=demux 
-                demux. ! queue ! h264parse config-interval=1 ! avdec_h264 ! selector. 
-            videotestsrc pattern=snow ! video/x-raw,format=I420,width=1920,height=1080 ! selector.
+                ! queue max-size-time=2000000000 max-size-buffers=500 
+                ! tsdemux name=demux 
+                demux. ! queue ! h264parse config-interval=1 
+                ! avdec_h264 
+                ! videoconvert 
+                ! videoscale 
+                ! video/x-raw,width=1920,height=1080 
+                ! kmssink sync=false
         """
         return pipeline_str.strip()
 
@@ -99,7 +95,7 @@ def signal_handler(sig, frame, receiver):
 
 def main():
     # Parse command-line arguments
-    parser = argparse.ArgumentParser(description="Video Receiver Script with Fallback (Colorbars)")
+    parser = argparse.ArgumentParser(description="Video Receiver Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
