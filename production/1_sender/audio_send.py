@@ -45,7 +45,6 @@ class AudioSender:
         # Build the pipeline string.
         pipeline_str = f"""
             {source} device={self.device} ! 
-            webrtcdsp echo-cancel=false !
             audioconvert ! audioresample !
             audio/x-raw,format={audio_format},channels=1,rate={audio_rate} !
             audioconvert ! audio/x-raw,channels=2 !
