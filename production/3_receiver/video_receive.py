@@ -6,6 +6,8 @@ import os
 import sys
 import signal
 import argparse
+import math  # For math.pi
+import cairo  # Provides the Cairo graphics context
 
 # Import the configuration loader
 from config_loader import load_config
@@ -21,7 +23,7 @@ class VideoReceiver:
     def build_pipeline(self):
         """
         Build the GStreamer pipeline string for receiving video.
-        This pipeline uses the live SRT stream, demuxes it, decodes it, and displays it.
+        This pipeline uses the live SRT stream, demuxes it, decodes it, overlays a circle, and displays it.
         """
         config = load_config()
         self.server_address = config.get("server_ip", "127.0.0.1")
@@ -40,9 +42,26 @@ class VideoReceiver:
                 ! videoconvert 
                 ! videoscale 
                 ! video/x-raw,width=1920,height=1080 
+                ! cairooverlay name=overlay 
                 ! kmssink sync=false
         """
         return pipeline_str.strip()
+
+    @staticmethod
+    def draw_callback(overlay, cr, timestamp, duration, user_data):
+        """
+        Callback function for cairooverlay's draw signal.
+        Draws a black circle with specified position and radius.
+        """
+        # Define the circle parameters
+        x, y = 150, 100  # Center coordinates in pixels (adjust as needed)
+        radius = 30      # Radius in pixels (adjust as needed)
+        
+        # Set the drawing color to black (RGBA)
+        cr.set_source_rgba(0, 0, 0, 1)
+        # Draw the circle
+        cr.arc(x, y, radius, 0, 2 * math.pi)
+        cr.fill()
 
     def on_message(self, bus, message):
         """
@@ -61,12 +80,21 @@ class VideoReceiver:
 
     def run(self):
         """
-        Parse the pipeline string, set up the bus watch, and run the main loop.
+        Parse the pipeline string, set up the bus watch, connect the overlay draw callback,
+        and run the main loop.
         """
         pipeline_str = self.build_pipeline()
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
+        
+        # Retrieve the cairooverlay element and connect the draw callback
+        overlay = self.pipeline.get_by_name("overlay")
+        if overlay:
+            overlay.connect("draw", self.draw_callback)
+        else:
+            print("VideoReceiver: cairooverlay element not found in the pipeline.")
+
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
