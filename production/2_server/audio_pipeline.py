@@ -47,20 +47,6 @@ def build_audio_pipeline():
         tee_dk. ! queue !
           rtpL16pay !
           srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
-
-        tee_tn. ! queue ! mix.sink_0
-        tee_dk. ! queue ! mix.sink_1
-        audiomixer name=mix !
-          audioconvert !
-          audioresample !
-          audio/x-raw,format=S16BE,channels=2,rate=32000 !
-          tee name=mix_tee
-
-        mix_tee. ! queue !
-          audioconvert !
-          audioresample !
-          lamemp3enc bitrate=128 !
-          shout2send ip=s40.myradiostream.com port=23058 mount=/stream password=5e4ThU3VW
    
     """
     return pipeline.strip()
