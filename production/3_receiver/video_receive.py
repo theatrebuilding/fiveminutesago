@@ -19,6 +19,8 @@ class VideoReceiver:
         self.loop = None
         self.server_address = None
         self.receive_port = None
+        # Overlay state for storing video dimensions and validity.
+        self.overlay_state = {"valid": False, "width": 0, "height": 0}
 
     def build_pipeline(self):
         """
@@ -50,18 +52,35 @@ class VideoReceiver:
         return pipeline_str.strip()
 
     @staticmethod
+    def caps_changed_callback(overlay, caps, user_data):
+        """
+        Callback for the 'caps-changed' signal.
+        Parses the Gst.Caps to update the overlay state with video dimensions.
+        """
+        structure = caps.get_structure(0)
+        success_width, width = structure.get_int("width")
+        success_height, height = structure.get_int("height")
+        if success_width and success_height:
+            user_data["width"] = width
+            user_data["height"] = height
+            user_data["valid"] = True
+            print(f"Overlay caps changed: width={width}, height={height}")
+
+    @staticmethod
     def draw_callback(overlay, cr, timestamp, duration, user_data):
         """
-        Callback function for cairooverlay's draw signal.
-        Draws a black circle with a transparent background.
+        Callback for the 'draw' signal.
+        Draws a black circle on a transparent surface.
         """
-        # Define the circle parameters: adjust these values as needed.
+        if not user_data.get("valid", False):
+            return
+
+        # For demonstration, we use fixed coordinates.
+        # You may update these to be dynamic based on user input or video dimensions.
         x, y = 150, 100  # Center coordinates in pixels
         radius = 30      # Radius in pixels
-        
-        # Set the drawing color to black (RGBA)
-        cr.set_source_rgba(0, 0, 0, 1)
-        # Draw the circle on the transparent surface
+
+        cr.set_source_rgba(0, 0, 0, 1)  # Black, fully opaque
         cr.arc(x, y, radius, 0, 2 * math.pi)
         cr.fill()
 
@@ -82,7 +101,7 @@ class VideoReceiver:
 
     def run(self):
         """
-        Parse the pipeline string, set up the bus watch, connect the overlay draw callback,
+        Parse the pipeline string, set up the bus watch, connect the overlay callbacks,
         and run the main loop.
         """
         pipeline_str = self.build_pipeline()
@@ -90,10 +109,11 @@ class VideoReceiver:
 
         self.pipeline = Gst.parse_launch(pipeline_str)
         
-        # Retrieve the cairooverlay element and connect the draw callback.
+        # Retrieve the cairooverlay element and connect both callbacks.
         overlay = self.pipeline.get_by_name("overlay")
         if overlay:
-            overlay.connect("draw", self.draw_callback)
+            overlay.connect("draw", self.draw_callback, self.overlay_state)
+            overlay.connect("caps-changed", self.caps_changed_callback, self.overlay_state)
         else:
             print("VideoReceiver: cairooverlay element not found in the pipeline.")
 
