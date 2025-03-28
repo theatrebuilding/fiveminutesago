@@ -24,53 +24,60 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
     pipeline = f"""
-
+        # TN microphone branch: TN's mic processed with echo cancellation.
         srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},
-            encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
           webrtcdsp probe=probe_tn !
           tee name=tn_mic
-        tn_mic. ! queue ! rtpL16pay !
+        tn_mic. ! queue ! audioconvert ! audioresample !
+          capsfilter caps="audio/x-raw,format=S16LE,rate={clock_rate},channels={channels}" !
+          rtpL16pay !
           srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
+        # TN playback branch: far‑end reference for TN.
         srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},
-            encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
           webrtcechoprobe name=probe_tn !
           tee name=tn_play
-        tn_play. ! queue ! rtpL16pay !
+        tn_play. ! queue ! audioconvert ! audioresample !
+          capsfilter caps="audio/x-raw,format=S16LE,rate={clock_rate},channels={channels}" !
+          rtpL16pay !
           srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
+        # DK microphone branch: DK's mic processed with echo cancellation.
         srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},
-            encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
           webrtcdsp probe=probe_dk !
           tee name=dk_mic
-        dk_mic. ! queue ! rtpL16pay !
+        dk_mic. ! queue ! audioconvert ! audioresample !
+          capsfilter caps="audio/x-raw,format=S16LE,rate={clock_rate},channels={channels}" !
+          rtpL16pay !
           srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
+        # DK playback branch: far‑end reference for DK.
         srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},
-            encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
           webrtcechoprobe name=probe_dk !
           tee name=dk_play
-        dk_play. ! queue ! rtpL16pay !
+        dk_play. ! queue ! audioconvert ! audioresample !
+          capsfilter caps="audio/x-raw,format=S16LE,rate={clock_rate},channels={channels}" !
+          rtpL16pay !
           srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
     """
     return pipeline.strip()
