@@ -34,7 +34,7 @@ class VideoReceiver:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
         pipeline_str = f"""
-            videotestsrc pattern=ball 
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" 
                 ! queue max-size-time=2000000000 max-size-buffers=500 
                 ! tsdemux name=demux 
                 demux. ! queue ! h264parse config-interval=1 
