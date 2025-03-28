@@ -24,32 +24,57 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
     pipeline = f"""
+
         srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},
+            encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
-          tee name=tee_tn
-
-        tee_tn. ! queue !
-          rtpL16pay !
+          webrtcdsp probe=probe_tn !
+          tee name=tn_mic
+        tn_mic. ! queue ! rtpL16pay !
           srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
           queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+          application/x-rtp,media=audio,clock-rate={clock_rate},
+            encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           audioconvert !
           audioresample !
-          tee name=tee_dk
-
-        tee_dk. ! queue !
-          rtpL16pay !
+          webrtcechoprobe name=probe_tn !
+          tee name=tn_play
+        tn_play. ! queue ! rtpL16pay !
           srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
-   
+
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
+          queue !
+          application/x-rtp,media=audio,clock-rate={clock_rate},
+            encoding-name={encoding_name},channels={channels} !
+          rtpL16depay !
+          audioconvert !
+          audioresample !
+          webrtcdsp probe=probe_dk !
+          tee name=dk_mic
+        dk_mic. ! queue ! rtpL16pay !
+          srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
+
+        srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
+          queue !
+          application/x-rtp,media=audio,clock-rate={clock_rate},
+            encoding-name={encoding_name},channels={channels} !
+          rtpL16depay !
+          audioconvert !
+          audioresample !
+          webrtcechoprobe name=probe_dk !
+          tee name=dk_play
+        dk_play. ! queue ! rtpL16pay !
+          srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
     """
     return pipeline.strip()
+
 
 
 if __name__ == "__main__":
