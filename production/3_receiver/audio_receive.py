@@ -22,6 +22,10 @@ class AudioReceiver:
     def build_pipeline(self):
         config = load_config()
         server_address = config.get("server_ip", "127.0.0.1")
+        audio_rate = config.get("audio", {}).get("rate", 32000)
+        audio_format = config.get("audio", {}).get("format", "S16LE")
+        channels = config.get("audio", {}).get("channels", 2)
+        encoding_name = config.get("audio", {}).get("encoding_name", "L16")
 
         # Choose the audio receive port based on the country
         if self.country.lower() == "tn":
@@ -32,7 +36,7 @@ class AudioReceiver:
         pipeline_str = f"""
             srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100"
                 ! queue max-size-time=200000000
-                ! application/x-rtp,media=audio,clock-rate=32000,encoding-name=L16,channels=2
+                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
                 ! audioconvert
                 ! audioresample

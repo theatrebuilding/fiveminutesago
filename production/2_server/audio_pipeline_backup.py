@@ -21,7 +21,6 @@ streaming_settings  = cfg.get("streaming_settings_audio", "")
 clock_rate          = cfg.get("audio", {}).get("rate", 32000)
 channels            = cfg.get("audio", {}).get("channels", 2)
 encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
-audio_format        = cfg.get("audio", {}).get("format", "S16BE") 
 
 def build_audio_pipeline():
     pipeline = f"""
@@ -31,8 +30,11 @@ def build_audio_pipeline():
           rtpL16depay !
           audioconvert !
           audioresample !
-          audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_tn
+
+        tee_tn. ! queue !
+          rtpL16pay !
+          srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
           queue !
@@ -40,29 +42,13 @@ def build_audio_pipeline():
           rtpL16depay !
           audioconvert !
           audioresample !
-          audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_dk
 
-        tee_tn. ! queue !
-          webrtcechoprobe name=probe_dk
-
         tee_dk. ! queue !
-          webrtcechoprobe name=probe_tn
-
-        tee_tn. ! queue !
-          webrtcdsp probe=probe_tn !
-          audioconvert ! audioresample !
-          audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
-          rtpL16pay !
-          srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
-
-        tee_dk. ! queue !
-          webrtcdsp probe=probe_dk  !
-          audioconvert ! audioresample !
-          audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
           srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
+   
     """
     return pipeline.strip()
 
