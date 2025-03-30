@@ -23,6 +23,7 @@ class AudioSender:
         self.loop = None
         self.server_ip = None
         self.audio_send_port = None
+        self.clock = None
 
     def build_pipeline(self):
         config = load_config()
@@ -69,6 +70,14 @@ class AudioSender:
         pipeline_str = self.build_pipeline()
         print("AudioSender: Pipeline:\n", pipeline_str, "\n")
         self.pipeline = Gst.parse_launch(pipeline_str)
+
+        # Use the shared clock if provided.
+        if self.clock:
+            self.pipeline.use_clock(self.clock)
+        else:
+            system_clock = Gst.SystemClock.obtain()
+            self.pipeline.use_clock(system_clock)
+
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)

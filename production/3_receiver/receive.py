@@ -22,13 +22,18 @@ class Receiver:
         self.video_receiver = None
 
     def start(self):
+        # Create a shared system clock
+        shared_clock = Gst.SystemClock.obtain()
+        
         # Start audio receiver in a separate thread
         self.audio_receiver = AudioReceiver(self.country, self.audio_device)
+        self.audio_receiver.set_clock(shared_clock)
         audio_thread = threading.Thread(target=self.audio_receiver.run)
         audio_thread.start()
 
         # Start video receiver in a separate thread
         self.video_receiver = VideoReceiver(self.country)
+        self.video_receiver.set_clock(shared_clock)
         video_thread = threading.Thread(target=self.video_receiver.run)
         video_thread.start()
 

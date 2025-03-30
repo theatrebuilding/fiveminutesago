@@ -17,12 +17,10 @@ class VideoReceiver:
         self.loop = None
         self.server_address = None
         self.receive_port = None
+        self.clock = None
 
     def build_pipeline(self):
-        """
-        Build the GStreamer pipeline string for receiving video.
-        This pipeline uses the live SRT stream, demuxes it, decodes it, and displays it.
-        """
+
         config = load_config()
         self.server_address = config.get("server_ip", "127.0.0.1")
         # Choose the video receive port based on the country.
@@ -67,6 +65,13 @@ class VideoReceiver:
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
+        # Use the shared clock if available; otherwise fall back to the default.
+        if self.clock:
+            self.pipeline.use_clock(self.clock)
+        else:
+            system_clock = Gst.SystemClock.obtain()
+            self.pipeline.use_clock(system_clock)
+            
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)

@@ -18,6 +18,7 @@ class AudioReceiver:
         self.device = device
         self.pipeline = None
         self.loop = None
+        self.clock = None
 
     def build_pipeline(self):
         config = load_config()
@@ -61,6 +62,13 @@ class AudioReceiver:
         print("AudioReceiver: Pipeline:", pipeline_str)
 
         self.pipeline = Gst.parse_launch(pipeline_str)
+        # Use the shared clock if available; otherwise fall back to the default.
+        if self.clock:
+            self.pipeline.use_clock(self.clock)
+        else:
+            system_clock = Gst.SystemClock.obtain()
+            self.pipeline.use_clock(system_clock)
+            
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
