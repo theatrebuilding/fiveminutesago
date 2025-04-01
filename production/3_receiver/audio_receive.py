@@ -20,6 +20,9 @@ class AudioReceiver:
         self.loop = None
         self.clock = None
 
+    def set_clock(self, clock):
+        self.clock = clock
+
     def build_pipeline(self):
         config = load_config()
         server_address = config.get("server_ip", "127.0.0.1")
