@@ -44,7 +44,7 @@ voice_detection_likelihood = cfg.get("webrtcdsp_settings", {}).get("voice-detect
 
 def build_audio_pipeline():
     pipeline = f"""
-        srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
+        srtsrc uri=srt://:{audio_send_tn}?mode=listener !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -53,7 +53,7 @@ def build_audio_pipeline():
           audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_tn
 
-        srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !

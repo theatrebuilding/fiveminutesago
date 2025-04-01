@@ -24,7 +24,7 @@ encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 
 def build_audio_pipeline():
     pipeline = f"""
-        srtsrc uri=srt://:{audio_send_tn}?mode=listener !
+        srtsrc uri=srt://:{audio_send_tn}?mode=listener&latency=100 !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -36,7 +36,7 @@ def build_audio_pipeline():
           rtpL16pay !
           srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
-        srtsrc uri=srt://:{audio_send_dk}?mode=listener !
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener&latency=100 !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
