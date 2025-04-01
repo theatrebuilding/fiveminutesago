@@ -38,7 +38,7 @@ class AudioReceiver:
             receive_port = config.get("ports", {}).get("audio_receive_dk")
 
         pipeline_str = f"""
-            srtsrc uri="srt://{server_address}:{receive_port}?mode=caller&latency=100"
+            srtsrc uri="srt://{server_address}:{receive_port}?mode=caller"
                 ! queue max-size-time=200000000
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
