@@ -52,7 +52,7 @@ webrtcdsp_settings:
   startup-min-volume: 12                # At startup, the experimental AGC will boost the microphone volume up to this level if too low.
   target-level-dbfs: 3                  # Sets the target peak |level| (or envelope) of the gain control in dBFS (decibels from digital full-scale).
   voice-detection: false                # Enable or disable the voice activity detector.
-  voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
+  voice-detection-frame-size-ms: 1      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
 
 
