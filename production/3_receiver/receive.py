@@ -22,18 +22,22 @@ class ReceiverManager:
         # Create a shared system clock
         self.shared_clock = Gst.SystemClock.obtain()
         self.shutdown_event = threading.Event()
+        # Hold references to active receiver instances.
+        self.audio_receiver = None
+        self.video_receiver = None
 
     def run_audio_worker(self):
         while not self.shutdown_event.is_set():
             print("ReceiverManager: Starting audio receiver...")
-            # Create a new instance each time so that any crashed instance is discarded
             audio_receiver = AudioReceiver(self.country, self.audio_device)
+            self.audio_receiver = audio_receiver  # Store reference.
             audio_receiver.set_clock(self.shared_clock)
             try:
                 # This call blocks until the pipeline stops (EOS or error)
                 audio_receiver.run()
             except Exception as e:
                 print(f"ReceiverManager: Audio receiver encountered an exception: {e}")
+            self.audio_receiver = None
             if self.shutdown_event.is_set():
                 break
             print("ReceiverManager: Audio receiver stopped unexpectedly. Restarting in 5 seconds...")
@@ -43,11 +47,13 @@ class ReceiverManager:
         while not self.shutdown_event.is_set():
             print("ReceiverManager: Starting video receiver...")
             video_receiver = VideoReceiver(self.country)
+            self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
             try:
                 video_receiver.run()
             except Exception as e:
                 print(f"ReceiverManager: Video receiver encountered an exception: {e}")
+            self.video_receiver = None
             if self.shutdown_event.is_set():
                 break
             print("ReceiverManager: Video receiver stopped unexpectedly. Restarting in 5 seconds...")
@@ -62,7 +68,11 @@ class ReceiverManager:
     def stop(self):
         print("ReceiverManager: Stopping receiver manager...")
         self.shutdown_event.set()
-        # You might want to signal the pipelines to stop immediately, if possible
+        # If an audio or video receiver is active, signal it to quit its main loop.
+        if self.audio_receiver is not None:
+            self.audio_receiver.stop()
+        if self.video_receiver is not None:
+            self.video_receiver.stop()
         self.audio_thread.join()
         self.video_thread.join()
         print("ReceiverManager: All receiver workers stopped.")
