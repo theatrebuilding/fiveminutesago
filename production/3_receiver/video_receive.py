@@ -7,7 +7,6 @@ import sys
 import signal
 import argparse
 
-# Import the configuration loader
 from config_loader import load_config
 
 class VideoReceiver:
@@ -23,7 +22,6 @@ class VideoReceiver:
         self.clock = clock
 
     def build_pipeline(self):
-
         config = load_config()
         self.server_address = config.get("server_ip", "127.0.0.1")
         # Choose the video receive port based on the country.
@@ -46,9 +44,6 @@ class VideoReceiver:
         return pipeline_str.strip()
 
     def on_message(self, bus, message):
-        """
-        Handle messages from the GStreamer bus.
-        """
         msg_type = message.type
         if msg_type == Gst.MessageType.EOS:
             print("VideoReceiver: End of Stream")
@@ -61,14 +56,11 @@ class VideoReceiver:
             self.stop()
 
     def run(self):
-        """
-        Parse the pipeline string, set up the bus watch, and run the main loop.
-        """
         pipeline_str = self.build_pipeline()
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
 
         self.pipeline = Gst.parse_launch(pipeline_str)
-        # Use the shared clock if available; otherwise fall back to the default.
+        # Use the shared clock if available; otherwise, obtain the system clock.
         if self.clock:
             self.pipeline.use_clock(self.clock)
         else:
@@ -90,10 +82,8 @@ class VideoReceiver:
             print("VideoReceiver: Pipeline stopped.")
 
     def stop(self):
-        """
-        Stop the GStreamer pipeline and exit the main loop.
-        """
-        if self.loop:
+        if self.loop and self.loop.is_running():
+            print("VideoReceiver: Quitting main loop...")
             self.loop.quit()
 
 def signal_handler(sig, frame, receiver):
@@ -102,14 +92,13 @@ def signal_handler(sig, frame, receiver):
     sys.exit(0)
 
 def main():
-    # Parse command-line arguments
     parser = argparse.ArgumentParser(description="Video Receiver Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
     receiver = VideoReceiver(args.country)
 
-    # Handle termination signals
+    # Setup signal handling to allow graceful shutdown.
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, receiver))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, receiver))
 
