@@ -37,21 +37,21 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
-  compression-gain-db: 0                # Sets the maximum gain the digital compression stage may apply, in dB.
+  compression-gain-db: 12                # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
   echo-cancel: true                     # Enable or disable the echo cancellation algorithm. 
   echo-suppression-level: high      # Options: low, moderate, high. (Controls the aggressiveness of echo suppression)
   extended-filter: true                 # This is an additional filtering stage built into the echo cancellation algorithm. When enabled, it applies extra processing on top of the standard echo cancellation to further reduce residual echo—especially in acoustically challenging or reverberant environments.
-  experimental-agc: false               # Enable or disable experimental automatic gain control.
-  gain-control: false                   # Enable or disable automatic digital gain control.
+  experimental-agc: true               # Enable or disable experimental automatic gain control.
+  gain-control: true                   # Enable or disable automatic digital gain control.
   gain-control-mode: adaptive-digital   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
-  high-pass-filter: false               # Enable or disable high pass filtering.
-  limiter: false                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
-  noise-suppression: false              # Enable or disable noise suppression.  
-  noise-suppression-level: moderate     # Options: low, moderate, high. (Controls the aggressiveness of noise suppression.)
+  high-pass-filter: true               # Enable or disable high pass filtering.
+  limiter: true                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
+  noise-suppression: true              # Enable or disable noise suppression.  
+  noise-suppression-level: high     # Options: low, moderate, high. (Controls the aggressiveness of noise suppression.)
   startup-min-volume: 12                # At startup, the experimental AGC will boost the microphone volume up to this level if too low.
   target-level-dbfs: 3                  # Sets the target peak |level| (or envelope) of the gain control in dBFS (decibels from digital full-scale).
-  voice-detection: false                # Enable or disable the voice activity detector.
+  voice-detection: true                # Enable or disable the voice activity detector.
   voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
 
