@@ -16,7 +16,7 @@ ports:
 audio:
   source: "alsasrc"
   format: "S16BE"
-  rate: 48000
+  rate: 32000
   channels: 2
   encoding_name: "L16"
 
