@@ -86,20 +86,20 @@ class VideoSender:
 
     def run(self):
         pipeline_str = self.build_pipeline()
-        print("VideoSender: Pipeline:\n", pipeline_str, "\n", flush=True)
+        print("VideoSender: Pipeline:\n" + pipeline_str + "\n", flush=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
-    
+
         # Use the shared clock if provided.
         if self.clock:
             self.pipeline.use_clock(self.clock)
         else:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
-    
+
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
-    
+
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
         try:
