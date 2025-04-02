@@ -1,80 +1,67 @@
 #!/usr/bin/env python3
 import gi
 gi.require_version("Gst", "1.0")
+gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
 import signal
 import sys
 import logging
-import subprocess
-import concurrent.futures
-import os
+import threading
 
-# Insert parent directory to access config_loader.
-script_dir = os.path.dirname(os.path.realpath(__file__))
-parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
+# Import the health monitor module.
+# It should have a callable main() function that runs the tcpdump health check.
+from health_monitor import main as health_monitor_main
 
-from config_loader import load_config
-
-# Set up logging.
+# Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
-# Load configuration.
-from config_loader import load_config
-cfg = load_config()
-
-# Import your pipeline build functions.
+# Import the pipeline builders.
 from audio_pipeline import build_audio_pipeline
 from video_pipeline import build_video_pipeline
 
-# Initialize GStreamer and the GLib main loop.
 Gst.init(None)
 main_loop = GLib.MainLoop()
 
-# Dictionary to hold our pipelines.
-# Keys: "audio", "video1", "video2"
+# A dictionary to hold our pipelines along with their pipeline string.
+# Keys are pipeline names.
 pipelines = {}
-
-# Build a mapping of endpoint names to their port numbers.
-# (Adjust these keys/names as needed for your environment.)
-endpoints = {
-    "a_send_tn": cfg.get("ports", {}).get("audio_send_tn"),
-    "a_send_dk": cfg.get("ports", {}).get("audio_send_dk"),
-    "a_recv_tn": cfg.get("ports", {}).get("audio_receive_tn"),
-    "a_recv_dk": cfg.get("ports", {}).get("audio_receive_dk"),
-    "v_send_tn": cfg.get("ports", {}).get("video_send_tn"),
-    "v_send_dk": cfg.get("ports", {}).get("video_send_dk"),
-    "v_recv_tn": cfg.get("ports", {}).get("video_receive_tn"),
-    "v_recv_dk": cfg.get("ports", {}).get("video_receive_dk"),
-}
 
 def restart_pipeline(pipeline_name):
     """
-    Restart the given pipeline by setting it to NULL and re-launching it after a delay.
+    Restart the pipeline for a given key.
+    This function sets the failing pipeline to NULL, and after a delay, recreates it.
     """
     pipeline, pipeline_str = pipelines[pipeline_name]
     logging.info(f"[{pipeline_name}] Restarting pipeline...")
-    pipeline.set_state(Gst.State.NULL)
+    result = pipeline.set_state(Gst.State.NULL)  # Stop the current pipeline.
+    if result == Gst.StateChangeReturn.FAILURE:
+        logging.error(f"[{pipeline_name}] Failed to set pipeline to NULL.")
+    # Restart after a delay (e.g., 3 seconds).
     GLib.timeout_add_seconds(3, _do_restart, pipeline_name, pipeline_str)
+    # Return False so the timeout callback is only run once.
     return False
 
 def _do_restart(pipeline_name, pipeline_str):
+    """
+    Helper function called by the timeout callback to create and start a new pipeline.
+    """
     new_pipeline = Gst.parse_launch(pipeline_str)
+    # Add bus watch for the new pipeline.
     bus = new_pipeline.get_bus()
     bus.add_signal_watch()
-    # Pass the pipeline name to on_message via a lambda.
+    # Use a lambda to pass the pipeline name into on_message.
     bus.connect("message", lambda bus, message, name=pipeline_name: on_message(bus, message, name))
     result = new_pipeline.set_state(Gst.State.PLAYING)
     if result == Gst.StateChangeReturn.FAILURE:
         logging.error(f"[{pipeline_name}] Failed to set pipeline to PLAYING.")
     pipelines[pipeline_name] = (new_pipeline, pipeline_str)
     logging.info(f"[{pipeline_name}] Pipeline restarted.")
-    return False
+    return False  # Stop the timeout callback.
 
 def on_message(bus, message, pipeline_name):
     """
-    Restart a pipeline if EOS or ERROR is encountered.
+    Handle messages for each pipeline.
+    Instead of quitting the main loop on EOS or ERROR, we restart the failing pipeline.
     """
     msg_type = message.type
     if msg_type == Gst.MessageType.EOS:
@@ -82,64 +69,9 @@ def on_message(bus, message, pipeline_name):
         restart_pipeline(pipeline_name)
     elif msg_type == Gst.MessageType.ERROR:
         err, debug = message.parse_error()
-        logging.error(f"[{pipeline_name}] ERROR: {err}, Debug: {debug}")
+        logging.error(f"[{pipeline_name}] ERROR: {err}, Debug info: {debug}")
         restart_pipeline(pipeline_name)
-    return True
-
-def check_port(endpoint, port):
-    """
-    Run tcpdump to check for activity on the specified port.
-    Returns True if a packet is captured, False otherwise.
-    """
-    try:
-        result = subprocess.run(
-            ["tcpdump", "-c", "1", "-i", "any", "port", str(port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=1
-        )
-        return (result.returncode == 0)
-    except subprocess.TimeoutExpired:
-        return False
-    except Exception as e:
-        logging.error(f"Error checking port {port} for endpoint {endpoint}: {e}")
-        return False
-
-def health_check():
-    """
-    Check each endpoint concurrently using tcpdump and then update the console output.
-    """
-    statuses = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=len(endpoints)) as executor:
-        future_to_ep = {executor.submit(check_port, ep, port): ep 
-                        for ep, port in endpoints.items() if port}
-        for future in concurrent.futures.as_completed(future_to_ep):
-            ep = future_to_ep[future]
-            try:
-                statuses[ep] = future.result()
-            except Exception:
-                statuses[ep] = False
-
-    # Build the status strings.
-    audio_status = (
-        "Audio:\n"
-        f"Sending from Tunisia: {'Yes!' if statuses.get('a_send_tn', False) else 'No!'}\n"
-        f"Sending from Denmark: {'Yes!' if statuses.get('a_send_dk', False) else 'No!'}\n"
-        f"Receiving in Tunisia: {'Yes!' if statuses.get('a_recv_tn', False) else 'No!'}\n"
-        f"Receiving in Denmark: {'Yes!' if statuses.get('a_recv_dk', False) else 'No!'}\n"
-    )
-    video_status = (
-        "Video:\n"
-        f"Sending from Tunisia: {'Yes!' if statuses.get('v_send_tn', False) else 'No!'}\n"
-        f"Sending from Denmark: {'Yes!' if statuses.get('v_send_dk', False) else 'No!'}\n"
-        f"Receiving in Tunisia: {'Yes!' if statuses.get('v_recv_tn', False) else 'No!'}\n"
-        f"Receiving in Denmark: {'Yes!' if statuses.get('v_recv_dk', False) else 'No!'}\n"
-    )
-    output = audio_status + "\n" + video_status
-
-    # Clear the screen and print the new status block.
-    print("\033[H\033[J" + output, end='', flush=True)
-    return True
+    return True  # Continue receiving messages.
 
 def signal_handler(sig, frame):
     logging.info("Interrupt received, stopping pipelines...")
@@ -147,15 +79,15 @@ def signal_handler(sig, frame):
 
 def main():
     global pipelines
-    # Build pipeline strings.
+    # Build the pipeline strings.
     audio_pipeline_str = build_audio_pipeline()
-    video_pipeline_strs = build_video_pipeline()  # Should return a tuple: (video_pipeline1, video_pipeline2)
+    video_pipeline_strs = build_video_pipeline()  # Returns a tuple (video_pipeline1, video_pipeline2)
 
     logging.info("Audio Pipeline:\n%s", audio_pipeline_str)
     logging.info("Video Pipeline 1:\n%s", video_pipeline_strs[0])
     logging.info("Video Pipeline 2:\n%s", video_pipeline_strs[1])
 
-    # Create and store pipelines.
+    # Create pipelines and store them in our dictionary.
     audio_pipeline = Gst.parse_launch(audio_pipeline_str)
     video_pipeline1 = Gst.parse_launch(video_pipeline_strs[0])
     video_pipeline2 = Gst.parse_launch(video_pipeline_strs[1])
@@ -163,17 +95,19 @@ def main():
     pipelines["video1"] = (video_pipeline1, video_pipeline_strs[0])
     pipelines["video2"] = (video_pipeline2, video_pipeline_strs[1])
 
-    # Set up bus watches for pipeline restart on EOS or ERROR.
+    # Set up bus watch for each pipeline.
     for name, (pipeline, _) in pipelines.items():
         bus = pipeline.get_bus()
         bus.add_signal_watch()
+        # Use lambda to pass the pipeline name into the callback.
         bus.connect("message", lambda bus, message, name=name: on_message(bus, message, name))
         result = pipeline.set_state(Gst.State.PLAYING)
         if result == Gst.StateChangeReturn.FAILURE:
             logging.error(f"[{name}] Failed to set pipeline to PLAYING.")
 
-    # Schedule the periodic health check (every second).
-    GLib.timeout_add_seconds(1, health_check)
+    # Start the health monitor in a separate daemon thread.
+    health_thread = threading.Thread(target=health_monitor_main, daemon=True)
+    health_thread.start()
 
     # Set up signal handlers.
     signal.signal(signal.SIGINT, signal_handler)
@@ -184,6 +118,7 @@ def main():
     except Exception as e:
         logging.error("Main loop error: %s", e)
     finally:
+        # Clean up all pipelines.
         for pipeline, _ in pipelines.values():
             pipeline.set_state(Gst.State.NULL)
         logging.info("Pipelines stopped.")
