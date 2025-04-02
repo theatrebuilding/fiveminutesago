@@ -9,6 +9,14 @@ import subprocess
 import concurrent.futures
 import os
 
+# Insert parent directory to access config_loader.
+script_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
+from config_loader import load_config
+
 # Set up logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
 
