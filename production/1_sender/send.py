@@ -21,16 +21,21 @@ class SenderManager:
         self.shutdown_event = threading.Event()
         # Create a shared clock for both sender pipelines.
         self.shared_clock = Gst.SystemClock.obtain()
+        # Hold references to active sender instances.
+        self.audio_sender = None
+        self.video_sender = None
 
     def run_audio_worker(self):
         while not self.shutdown_event.is_set():
             print("SenderManager: Starting audio sender...")
             audio_sender = AudioSender(self.device, self.country)
+            self.audio_sender = audio_sender  # Store reference.
             audio_sender.set_clock(self.shared_clock)
             try:
                 audio_sender.run()
             except Exception as e:
                 print(f"SenderManager: Audio sender encountered an exception: {e}")
+            self.audio_sender = None
             if self.shutdown_event.is_set():
                 break
             print("SenderManager: Audio sender stopped unexpectedly. Restarting in 5 seconds...")
@@ -40,11 +45,13 @@ class SenderManager:
         while not self.shutdown_event.is_set():
             print("SenderManager: Starting video sender...")
             video_sender = VideoSender(self.device, self.country)
+            self.video_sender = video_sender  # Store reference.
             video_sender.set_clock(self.shared_clock)
             try:
                 video_sender.run()
             except Exception as e:
                 print(f"SenderManager: Video sender encountered an exception: {e}")
+            self.video_sender = None
             if self.shutdown_event.is_set():
                 break
             print("SenderManager: Video sender stopped unexpectedly. Restarting in 5 seconds...")
@@ -59,6 +66,11 @@ class SenderManager:
     def stop(self):
         print("SenderManager: Stopping sender manager...")
         self.shutdown_event.set()
+        # Signal the active sender instances to stop their main loops.
+        if self.audio_sender is not None:
+            self.audio_sender.stop()
+        if self.video_sender is not None:
+            self.video_sender.stop()
         self.audio_thread.join()
         self.video_thread.join()
         print("SenderManager: All sender workers stopped.")
