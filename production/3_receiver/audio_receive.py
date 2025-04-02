@@ -65,13 +65,13 @@ class AudioReceiver:
         print("AudioReceiver: Pipeline:", pipeline_str)
 
         self.pipeline = Gst.parse_launch(pipeline_str)
-        # Use the shared clock if available; otherwise, obtain the system clock.
+        # Use the shared clock if available; otherwise fall back to the default.
         if self.clock:
             self.pipeline.use_clock(self.clock)
         else:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
-
+            
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
@@ -79,7 +79,7 @@ class AudioReceiver:
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
         try:
-            self.loop.run()  # This blocks until self.loop.quit() is called.
+            self.loop.run()
         except Exception as e:
             print(f"AudioReceiver: Exception -> {e}")
         finally:
@@ -87,6 +87,5 @@ class AudioReceiver:
             print("AudioReceiver: Pipeline stopped.")
 
     def stop(self):
-        if self.loop and self.loop.is_running():
-            print("AudioReceiver: Quitting main loop...")
+        if self.loop:
             self.loop.quit()
