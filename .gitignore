@@ -1,7 +1,0 @@
-env.json
-.aider*
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
