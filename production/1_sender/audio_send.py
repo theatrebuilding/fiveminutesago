@@ -25,6 +25,9 @@ class AudioSender:
         self.audio_send_port = None
         self.clock = None
 
+    def set_clock(self, clock):
+        self.clock = clock
+
     def build_pipeline(self):
         config = load_config()
         self.server_ip = config.get("server_ip")

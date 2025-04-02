@@ -26,6 +26,9 @@ class VideoSender:
         self.video_send_port = None
         self.clock = None
 
+    def set_clock(self, clock):
+        self.clock = clock
+
     def build_pipeline(self):
         cfg = load_config()
         self.server_ip = cfg.get("server_ip")
