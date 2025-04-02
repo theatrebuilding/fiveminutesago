@@ -5,12 +5,16 @@ gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
 import signal
 import sys
+import os
 import logging
 import threading
 
 # Import the health monitor module.
 # It should have a callable main() function that runs the tcpdump health check.
-from health_monitor import main as health_monitor_main
+modules_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "modules")
+if modules_dir not in sys.path:
+    sys.path.insert(0, modules_dir)
+from check_streams import main as health_monitor_main
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
