@@ -5,22 +5,7 @@ gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
 import signal
 import sys
-import os
-import logging
-import threading
-
-# Insert parent directory to access config_loader.
-script_dir = os.path.dirname(os.path.realpath(__file__))
-parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
-if parent_dir not in sys.path:
-    sys.path.insert(0, parent_dir)
-
-# Import the health monitor module.
-# It should have a callable main() function that runs the tcpdump health check.
-modules_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), "modules")
-if modules_dir not in sys.path:
-    sys.path.insert(0, modules_dir)
-from check_streams import main as health_monitor_main
+import logging  # new import
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -114,10 +99,6 @@ def main():
         result = pipeline.set_state(Gst.State.PLAYING)
         if result == Gst.StateChangeReturn.FAILURE:
             logging.error(f"[{name}] Failed to set pipeline to PLAYING.")
-
-    # Start the health monitor in a separate daemon thread.
-    health_thread = threading.Thread(target=health_monitor_main, daemon=True)
-    health_thread.start()
 
     # Set up signal handlers.
     signal.signal(signal.SIGINT, signal_handler)
