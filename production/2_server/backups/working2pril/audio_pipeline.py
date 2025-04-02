@@ -44,7 +44,7 @@ voice_detection_likelihood = cfg.get("webrtcdsp_settings", {}).get("voice-detect
 
 def build_audio_pipeline():
     pipeline = f"""
-        srtsrc name=a_send_tn uri=srt://:{audio_send_tn}?mode=listener !
+        srtsrc uri=srt://:{audio_send_tn}?mode=listener !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -53,7 +53,7 @@ def build_audio_pipeline():
           audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_tn
 
-        srtsrc name=a_send_dk uri=srt://:{audio_send_dk}?mode=listener !
+        srtsrc uri=srt://:{audio_send_dk}?mode=listener !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
@@ -73,14 +73,14 @@ def build_audio_pipeline():
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
+          srtsink uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         tee_dk. ! queue !
           webrtcdsp probe=probe_dk  !
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
+          srtsink uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
 
     """
     return pipeline.strip()
