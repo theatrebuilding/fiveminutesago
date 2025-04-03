@@ -45,8 +45,8 @@ webrtcdsp_settings:
   experimental-agc: true               # Enable or disable experimental automatic gain control.
   gain-control: true                   # Enable or disable automatic digital gain control.
   gain-control-mode: adaptive-digital   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
-  high-pass-filter: false               # Enable or disable high pass filtering.
-  limiter: false                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
+  high-pass-filter: true               # Enable or disable high pass filtering.
+  limiter: true                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
   noise-suppression: true              # Enable or disable noise suppression.  
   noise-suppression-level: high     # Options: low, moderate, high. (Controls the aggressiveness of noise suppression.)
   startup-min-volume: 12                # At startup, the experimental AGC will boost the microphone volume up to this level if too low.
