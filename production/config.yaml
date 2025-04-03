@@ -44,7 +44,7 @@ webrtcdsp_settings:
   extended-filter: true                 # This is an additional filtering stage built into the echo cancellation algorithm. When enabled, it applies extra processing on top of the standard echo cancellation to further reduce residual echo—especially in acoustically challenging or reverberant environments.
   experimental-agc: true               # Enable or disable experimental automatic gain control.
   gain-control: true                   # Enable or disable automatic digital gain control.
-  gain-control-mode: adaptive-analog   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
+  gain-control-mode: adaptive-analogue   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
   high-pass-filter: false               # Enable or disable high pass filtering.
   limiter: false                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
   noise-suppression: true              # Enable or disable noise suppression.  
