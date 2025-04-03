@@ -37,7 +37,7 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
-  compression-gain-db: 1                # Sets the maximum gain the digital compression stage may apply, in dB.
+  compression-gain-db: 9                # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
   echo-cancel: true                     # Enable or disable the echo cancellation algorithm. 
   echo-suppression-level: high      # Options: low, moderate, high. (Controls the aggressiveness of echo suppression)
