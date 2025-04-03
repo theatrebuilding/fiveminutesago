@@ -63,10 +63,10 @@ def build_audio_pipeline():
           tee name=tee_dk
 
         tee_tn. ! queue !
-          webrtcechoprobe name=probe_dk
+          webrtcechoprobe name=probe_dk ! fakesink async=false
 
         tee_dk. ! queue !
-          webrtcechoprobe name=probe_tn
+          webrtcechoprobe name=probe_tn ! fakesink async=false
 
         tee_tn. ! queue ! 
           webrtcdsp probe=probe_dk compression-gain-db={compression_level} delay-agnostic={delay_agnostic} echo-cancel={echo_cancel} echo-suppression-level={echo_suppression} experimental-agc={experimental_agc} extended-filter={extended_filter} gain-control={gain_control} gain-control-mode={gain_control_mode} high-pass-filter={high_pass_filter} limiter={limiter} noise-suppression={noise_suppression} noise-suppression-level={noise_suppression_level} startup-min-volume={startup_min_volume} target-level-dbfs={target_level_dbfs} !
