@@ -54,7 +54,7 @@ class VideoReceiver:
                 ! avdec_h264
                 ! videoconvert
                 ! videoscale
-                ! video/x-raw,width=3840,height=2160
+                ! video/x-raw,width=1920,height=1080
                 ! queue name=primary_in
                 ! tee name=primary_tee
                 primary_tee. ! queue name=primary_selector ! selector.
@@ -62,7 +62,7 @@ class VideoReceiver:
             videotestsrc pattern=ball
                 ! videoconvert
                 ! videoscale
-                ! video/x-raw,width=3840,height=2160
+                ! video/x-raw,width=1920,height=1080
                 ! queue ! selector.
         """
         return pipeline_str.strip()
