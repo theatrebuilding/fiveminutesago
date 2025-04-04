@@ -22,7 +22,7 @@ class VideoReceiver:
         self.clock = clock
 
     def build_pipeline(self):
-        # Load configuration and choose the proper receive port.
+        # Load configuration and select port.
         config = load_config()
         self.server_address = config.get("server_ip", "127.0.0.1")
         if self.country.lower() == "tn":
@@ -30,20 +30,12 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
-        # This pipeline uses fallbackswitch to automatically select between
-        # the primary SRT stream and the fallback videotestsrc.
-        #
-        # The fallbackswitch element (from gst-plugin-fallbackswitch) has request
-        # sink pads. Here we connect the primary branch to sink_0 (assumed higher
-        # priority) and the fallback branch to sink_1.
-        #
-        # The "timeout" property is in nanoseconds (here: 5e9 = 5 seconds).
-        # With auto-switch enabled (default true), fallbackswitch monitors both
-        # inputs and switches if the primary is not healthy.
-        #
-        # Finally, the output of fallbackswitch goes to kmssink.
+        # This pipeline uses fallbackswitch (from gst-plugin-fallbackswitch)
+        # to automatically select between the primary SRT stream and a fallback videotestsrc.
+        # We connect the primary branch to sink_0 and the fallback branch to sink_1.
+        # The "timeout" property is in nanoseconds (5e9 = 5 seconds).
         pipeline_str = f"""
-            fallbackswitch name=fswitch timeout=10000000000 auto-switch=true
+            fallbackswitch name=fswitch timeout=5000000000 auto-switch=true
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false
                 ! queue max-size-time=2000000000 max-size-buffers=500
                 ! tsdemux name=demux
@@ -76,12 +68,40 @@ class VideoReceiver:
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
         self.pipeline = Gst.parse_launch(pipeline_str)
         
+        # Set clock if provided.
         if self.clock:
             self.pipeline.use_clock(self.clock)
         else:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
         
+        # Retrieve fallbackswitch element and set sink pad priorities.
+        fswitch = self.pipeline.get_by_name("fswitch")
+        if fswitch:
+            # Get the sink pads. These are request pads; since we already used them in the pipeline,
+            # we can retrieve them using get_pad().
+            pad_primary = fswitch.get_pad("sink_0")
+            pad_fallback = fswitch.get_pad("sink_1")
+            if pad_primary:
+                try:
+                    # Lower priority value means higher preference.
+                    pad_primary.set_property("priority", -1)
+                    print("Set primary sink priority to -1")
+                except Exception as e:
+                    print("Error setting primary sink priority:", e)
+            else:
+                print("Primary sink pad (sink_0) not found.")
+            if pad_fallback:
+                try:
+                    pad_fallback.set_property("priority", 0)
+                    print("Set fallback sink priority to 0")
+                except Exception as e:
+                    print("Error setting fallback sink priority:", e)
+            else:
+                print("Fallback sink pad (sink_1) not found.")
+        else:
+            print("Fallbackswitch element (fswitch) not found.")
+
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
