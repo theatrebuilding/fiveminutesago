@@ -5,7 +5,12 @@ gi.require_version("GstController", "1.0")
 from gi.repository import Gst, GLib
 import signal
 import sys
-import logging  # new import
+import logging
+
+# Uncomment to enable recording of the pipeline output.
+# import subprocess
+# subprocess.Popen(["python3", "modules/record.py"])
+
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
