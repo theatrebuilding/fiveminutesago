@@ -57,23 +57,26 @@ def _do_restart(pipeline_name, pipeline_str):
     return False  # Stop the timeout callback.
 
 def on_message(bus, message, pipeline_name):
-    """
-    Handle messages for each pipeline.
-    Instead of quitting the main loop on EOS or ERROR, we restart the failing pipeline.
-    """
     msg_type = message.type
     if msg_type == Gst.MessageType.EOS:
         logging.info(f"[{pipeline_name}] End of stream detected.")
-        restart_pipeline(pipeline_name)
+        # Only restart pipelines if EOS wasn't intentionally sent for shutdown
+        if main_loop.is_running():
+            restart_pipeline(pipeline_name)
     elif msg_type == Gst.MessageType.ERROR:
         err, debug = message.parse_error()
         logging.error(f"[{pipeline_name}] ERROR: {err}, Debug info: {debug}")
         restart_pipeline(pipeline_name)
-    return True  # Continue receiving messages.
+    return True
+
 
 def signal_handler(sig, frame):
-    logging.info("Interrupt received, stopping pipelines...")
-    main_loop.quit()
+    logging.info("Interrupt received, sending EOS to pipelines...")
+    for name, (pipeline, _) in pipelines.items():
+        pipeline.send_event(Gst.Event.new_eos())
+    # Schedule a delayed stop of the main loop to allow EOS handling
+    GLib.timeout_add_seconds(2, main_loop.quit)
+
 
 def main():
     global pipelines
