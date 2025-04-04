@@ -37,7 +37,7 @@ class VideoReceiver:
         # Fallback branch: videotestsrc.
         # We name the last queue in the primary branch "primary_queue" so we can attach a pad probe.
         pipeline_str = f"""
-            input-selector name=selector ! kmssink sync=false
+            input-selector name=selector ! kmssink plane=primary render-rectangle="0,0,1920,1080" sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100"
                 ! queue max-size-time=2000000000 max-size-buffers=500 
                 ! tsdemux name=demux 
