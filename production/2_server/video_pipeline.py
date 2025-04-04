@@ -21,7 +21,8 @@ video_receive_dk = cfg.get("ports", {}).get("video_receive_dk")
 video_receive_tn = cfg.get("ports", {}).get("video_receive_tn")
 streaming_settings = cfg.get("streaming_settings_video", {})
 
-recorded_file_tn = "/mnt/tbdrive/video/test_video.ts"
+recorded_file_tn = "/mnt/tbdrive/video/video_tn.ts"
+recorded_file_dk = "/mnt/tbdrive/video/video_dk.ts"
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
@@ -35,7 +36,9 @@ def build_video_pipeline():
     pipeline2 = (
         f'srtsrc name=v_send_dk uri="srt://:{video_send_dk}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
-        f'! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener&latency=100"'
+        f'! tee name=tee_dk '
+        f' tee_tn. ! queue ! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener&latency=100"'
+        f' tee_tn. ! queue ! filesink location="{recorded_file_dk}" '
     )
     return pipeline1, pipeline2
 
