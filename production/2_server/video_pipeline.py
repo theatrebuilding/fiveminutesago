@@ -28,9 +28,10 @@ def build_video_pipeline():
     pipeline1 = (
         f'srtsrc name=v_send_tn uri="srt://:{video_send_tn}?mode=listener&latency=100" '
         f'! queue max-size-time=2000000000 max-size-buffers=200 '
+        
         f'! tee name=tee_tn '
         f' tee_tn. ! queue ! srtsink name=v_recv_dk uri="srt://:{video_receive_dk}?mode=listener&latency=100" '
-        f' tee_tn. ! queue ! h264parse ! mp4mux ! filesink location="{recorded_file_tn}" '
+        f' tee_tn. ! tsdemux ! queue ! h264parse config-interval=-1 ! queue ! mp4mux ! filesink location="{recorded_file_tn}" '
     )
     pipeline2 = (
         f'srtsrc name=v_send_dk uri="srt://:{video_send_dk}?mode=listener&latency=100" '
