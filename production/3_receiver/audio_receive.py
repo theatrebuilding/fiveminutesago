@@ -31,20 +31,16 @@ class AudioReceiver:
         channels = config.get("audio", {}).get("channels", 2)
         encoding_name = config.get("audio", {}).get("encoding_name", "L16")
 
-        # Choose the audio receive port based on the country
+        # Choose the audio receive port based on the country for playing back some other audio like humming or something else.
         if self.country.lower() == "tn":
             receive_port = config.get("ports", {}).get("audio_receive_tn")
         else:
             receive_port = config.get("ports", {}).get("audio_receive_dk")
 
+        # This will be updated to play the audio that should arrive from the server which is the humming sounds that we can process invarious ways.
         pipeline_str = f"""
-            srtsrc uri="srt://{server_address}:{receive_port}?mode=caller"
-                ! queue max-size-time=200000000
-                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
-                ! rtpL16depay
-                ! audioconvert
-                ! audioresample
-                ! alsasink device="{self.device}"
+            alsasrc device={self.device} !
+            fakesink sync=false async=false
         """
         return pipeline_str.strip()
 

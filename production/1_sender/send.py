@@ -32,7 +32,7 @@ class SenderManager:
             self.audio_sender = audio_sender  # Store reference.
             audio_sender.set_clock(self.shared_clock)
             try:
-                audio_sender.run()
+                audio_sender.run()  # Blocks until pipeline stops
             except Exception as e:
                 print(f"SenderManager: Audio sender encountered an exception: {e}")
             self.audio_sender = None

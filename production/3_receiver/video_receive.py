@@ -35,16 +35,6 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
-        # Pipeline structure:
-        #   [srtsrc] -> [queue] -> [tsdemux] -> [queue] -> [h264parse] -> [avdec_h264] ->
-        #   [videoconvert] -> [videoscale] -> [video/x-raw,width=1920,height=1080] -> [queue name=primary_in]
-        #   -> [tee name=primary_tee]
-        #      primary_tee. ! [queue name=primary_selector] ! input-selector (primary branch)
-        #      primary_tee. ! [queue name=primary_monitor] ! fakesink (for monitoring)
-        #
-        #   Meanwhile, videotestsrc (fallback) is processed similarly and goes to input-selector.
-        #
-        # Finally, input-selector output goes to kmssink.
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false

@@ -16,45 +16,94 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 class AudioSender:
+
     def __init__(self, device, country):
         self.device = device
         self.country = country
         self.pipeline = None
         self.loop = None
+        self.clock = None
+
+        # Will fill these from config:
         self.server_ip = None
         self.audio_send_port = None
-        self.clock = None
+        self.audio_recv_port = None
 
     def set_clock(self, clock):
         self.clock = clock
 
     def build_pipeline(self):
         config = load_config()
-        self.server_ip = config.get("server_ip")
+
+        # Server or remote IP for SRT:
+        self.server_ip = config.get("server_ip", "127.0.0.1")
         if not self.server_ip:
             print("ERROR: 'server_ip' not defined in config.")
             sys.exit(1)
-        
-        # Choose the audio send port based on the country.
+
+        # Decide which send/receive ports to use based on country
         if self.country.lower() == "tn":
             self.audio_send_port = config.get("ports", {}).get("audio_send_tn")
+            self.audio_recv_port = config.get("ports", {}).get("audio_receive_tn")
         else:
             self.audio_send_port = config.get("ports", {}).get("audio_send_dk")
-        
-        streaming_settings = config.get("streaming_settings_audio", "")
-        source = config.get("audio", {}).get("source", "autoaudiosrc")
-        audio_format = config.get("audio", {}).get("format", "S16BE")
-        audio_rate = config.get("audio", {}).get("rate", 32000)
+            self.audio_recv_port = config.get("ports", {}).get("audio_receive_dk")
+
+        if not self.audio_send_port or not self.audio_recv_port:
+            print("ERROR: Missing audio ports in config (send/receive).")
+            sys.exit(1)
+
+        # Basic audio parameters
+        audio_format = config.get("audio", {}).get("format", "S16LE")  # Must be L16 or S16LE for webrtcdsp
+        audio_rate = config.get("audio", {}).get("rate", 48000)
         channels = config.get("audio", {}).get("channels", 2)
-        
-        # Do mono then stereo with this:   audioconvert ! audio/x-raw,channels=2 !
-        # Build the pipeline string.
+        encoding_name = config.get("audio", {}).get("encoding_name", "L16")
+
+        # SRT streaming settings (for sending)
+        streaming_settings = config.get("streaming_settings_audio", "")
+
+        # webrtcdsp settings
+        dsp_cfg = config.get("webrtcdsp_settings", {})
+        echo_cancel = dsp_cfg.get("echo-cancel", True)
+        noise_suppression = dsp_cfg.get("noise-suppression", True)
+        extended_filter = dsp_cfg.get("extended-filter", True)
+        compression_gain = dsp_cfg.get("compression-gain-db", 0)
+        echo_supp_level = dsp_cfg.get("echo-suppression-level", "moderate")
+        gain_control = dsp_cfg.get("gain-control", False)
+        high_pass = dsp_cfg.get("high-pass-filter", False)
+        limiter = dsp_cfg.get("limiter", True)
+
         pipeline_str = f"""
-            {source} device={self.device} ! 
-            audioconvert ! audioresample !
-            audio/x-raw,format={audio_format},channels={channels},rate={audio_rate},channel-mask=(bitmask)0x3 !
-            rtpL16pay !
-            srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
+            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller"
+                ! queue
+                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                ! rtpL16depay
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                ! webrtcechoprobe
+                ! queue
+                ! alsasink device={self.device}
+
+            alsasrc device={self.device}
+                ! queue
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                ! webrtcdsp
+                    echo-cancel={str(echo_cancel).lower()}
+                    noise-suppression={str(noise_suppression).lower()}
+                    extended-filter={str(extended_filter).lower()}
+                    compression-gain-db={compression_gain}
+                    echo-suppression-level={echo_supp_level}
+                    gain-control={str(gain_control).lower()}
+                    high-pass-filter={str(high_pass).lower()}
+                    limiter={str(limiter).lower()}
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
+                ! rtpL16pay
+                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
         """
         return pipeline_str.strip()
 
@@ -72,7 +121,8 @@ class AudioSender:
 
     def run(self):
         pipeline_str = self.build_pipeline()
-        print("AudioSender: Pipeline:\n" + pipeline_str + "\n", flush=True)
+        print("AudioSender (Send+Receive) Pipeline:\n" + pipeline_str + "\n", flush=True)
+
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         # Use the shared clock if provided.
@@ -96,7 +146,6 @@ class AudioSender:
             self.pipeline.set_state(Gst.State.NULL)
             print("AudioSender: Pipeline stopped.")
 
-
     def stop(self):
         if self.loop:
             self.loop.quit()
@@ -104,8 +153,8 @@ class AudioSender:
 if __name__ == "__main__":
     # For standalone testing.
     import argparse
-    parser = argparse.ArgumentParser(description="Audio Sender Script")
-    parser.add_argument("--device", required=True, help="Audio device (e.g., hw:0,0)")
+    parser = argparse.ArgumentParser(description="Audio Sender/Receiver with Echo Cancellation")
+    parser.add_argument("--device", required=True, help="ALSA device (e.g., hw:0,0)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
     sender = AudioSender(args.device, args.country)
