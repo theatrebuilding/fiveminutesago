@@ -22,6 +22,10 @@ class VideoReceiver:
         self.last_primary_buffer_time = None
         # Timeout threshold (seconds) after which primary is considered down.
         self.primary_timeout_threshold = 5
+        self.clock = None
+
+    def set_clock(self, clock):
+        self.clock = clock
 
     def build_pipeline(self):
         config = load_config()
