@@ -18,6 +18,7 @@ class VideoReceiver:
         self.receive_port = None
         self.clock = None
         self.fallback_active = False
+        self.primary_data_received = False
 
     def set_clock(self, clock):
         self.clock = clock
@@ -31,11 +32,10 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
-        # Adjust this path to point to your local fallback video file.
-        fallback_file = "/path/to/fallback_video.mp4"
-
-        # The pipeline has two branches feeding into an input-selector.
-        # The first branch is the primary SRT stream and the second branch is the fallback.
+        # Build the pipeline with two branches feeding into an input-selector:
+        # Primary branch: SRT stream.
+        # Fallback branch: videotestsrc.
+        # We name the last queue in the primary branch "primary_queue" so we can attach a pad probe.
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false
@@ -46,7 +46,7 @@ class VideoReceiver:
                 ! videoconvert 
                 ! videoscale 
                 ! video/x-raw,width=1920,height=1080 
-                ! queue ! selector.
+                ! queue name=primary_queue ! selector.
             videotestsrc pattern=ball 
                 ! videoconvert 
                 ! videoscale 
@@ -54,6 +54,22 @@ class VideoReceiver:
                 ! queue ! selector.
         """
         return pipeline_str.strip()
+
+    def primary_buffer_probe(self, pad, info):
+        # This callback is called whenever a buffer passes through the primary branch.
+        if info.type == Gst.PadProbeType.BUFFER:
+            if not self.primary_data_received:
+                print("VideoReceiver: Primary branch is receiving data.")
+            self.primary_data_received = True
+        return Gst.PadProbeReturn.OK
+
+    def check_primary_data(self):
+        # Called after a timeout to verify if the primary branch is active.
+        if not self.primary_data_received and not self.fallback_active:
+            print("VideoReceiver: No data from primary source detected, switching to fallback.")
+            self.switch_to_fallback()
+        # Return False to remove the timeout callback.
+        return False
 
     def switch_to_fallback(self):
         if self.fallback_active:
@@ -80,14 +96,13 @@ class VideoReceiver:
         msg_type = message.type
         if msg_type == Gst.MessageType.EOS:
             print("VideoReceiver: End of Stream")
-            # Optionally, you could switch to the fallback here if the primary stream ends.
+            # Optionally, switch to fallback when EOS is detected.
             self.switch_to_fallback()
         elif msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             print(f"VideoReceiver: ERROR -> {err}")
             if debug:
                 print(f"Debug info: {debug}")
-            # Assuming error on the primary source triggers fallback.
             self.switch_to_fallback()
 
     def run(self):
@@ -107,14 +122,23 @@ class VideoReceiver:
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
 
-        # Optionally, force the primary branch to be active at startup.
+        # Set the active pad of the input-selector to the primary branch.
         selector = self.pipeline.get_by_name("selector")
         if selector:
             sink_pads = selector.sinkpads
             if sink_pads:
-                # Set the active pad to the first branch (primary SRT stream).
                 selector.set_property("active-pad", sink_pads[0])
                 print("VideoReceiver: Primary video source active.")
+
+        # Attach a pad probe to the primary branch to detect data flow.
+        primary_queue = self.pipeline.get_by_name("primary_queue")
+        if primary_queue:
+            pad = primary_queue.get_static_pad("src")
+            if pad:
+                pad.add_probe(Gst.PadProbeType.BUFFER, self.primary_buffer_probe)
+        
+        # Schedule a timeout to check for data from the primary source after 5 seconds.
+        GLib.timeout_add_seconds(5, self.check_primary_data)
 
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
@@ -143,7 +167,7 @@ def main():
 
     receiver = VideoReceiver(args.country)
 
-    # Setup signal handling to allow graceful shutdown.
+    # Setup signal handling for graceful shutdown.
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, receiver))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, receiver))
 
