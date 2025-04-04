@@ -45,13 +45,14 @@ class AudioSender:
         source = config.get("audio", {}).get("source", "autoaudiosrc")
         audio_format = config.get("audio", {}).get("format", "S16BE")
         audio_rate = config.get("audio", {}).get("rate", 32000)
+        channels = config.get("audio", {}).get("channels", 2)
         
+        # Do mono then stereo with this:   audioconvert ! audio/x-raw,channels=2 !
         # Build the pipeline string.
         pipeline_str = f"""
             {source} device={self.device} ! 
+            audio/x-raw,format={audio_format},channels={channels},rate={audio_rate},channel-mask=(bitmask)0x3 !
             audioconvert ! audioresample !
-            audio/x-raw,format={audio_format},channels=1,rate={audio_rate} !
-            audioconvert ! audio/x-raw,channels=2 !
             rtpL16pay !
             srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
         """
