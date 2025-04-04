@@ -38,7 +38,7 @@ class VideoReceiver:
         # We name the last queue in the primary branch "primary_queue" so we can attach a pad probe.
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
-            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100"
                 ! queue max-size-time=2000000000 max-size-buffers=500 
                 ! tsdemux name=demux 
                 demux. ! queue ! h264parse config-interval=1 
