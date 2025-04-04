@@ -38,7 +38,7 @@ class VideoReceiver:
         # The first branch is the primary SRT stream and the second branch is the fallback.
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
-            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" 
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false
                 ! queue max-size-time=2000000000 max-size-buffers=500 
                 ! tsdemux name=demux 
                 demux. ! queue ! h264parse config-interval=1 
