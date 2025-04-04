@@ -47,7 +47,7 @@ class VideoReceiver:
                 ! videoscale 
                 ! video/x-raw,width=1920,height=1080 
                 ! queue name=primary_queue ! selector.
-            videotestsrc pattern=snow 
+            videotestsrc pattern=ball 
                 ! videoconvert 
                 ! videoscale 
                 ! video/x-raw,width=1920,height=1080 
