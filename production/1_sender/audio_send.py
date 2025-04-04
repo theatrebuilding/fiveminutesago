@@ -51,8 +51,8 @@ class AudioSender:
         # Build the pipeline string.
         pipeline_str = f"""
             {source} device={self.device} ! 
-            audio/x-raw,format={audio_format},channels={channels},rate={audio_rate},channel-mask=(bitmask)0x3 !
             audioconvert ! audioresample !
+            audio/x-raw,format={audio_format},channels={channels},rate={audio_rate},channel-mask=(bitmask)0x3 !
             rtpL16pay !
             srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
         """

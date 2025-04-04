@@ -17,7 +17,6 @@ class VideoReceiver:
         self.server_address = None
         self.receive_port = None
         self.clock = None
-        self.fallback_active = False
 
     def set_clock(self, clock):
         self.clock = clock
@@ -31,13 +30,7 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
-        # Adjust this path to point to your local fallback video file.
-        fallback_file = "/path/to/fallback_video.mp4"
-
-        # The pipeline has two branches feeding into an input-selector.
-        # The first branch is the primary SRT stream and the second branch is the fallback.
         pipeline_str = f"""
-            input-selector name=selector ! kmssink sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" 
                 ! queue max-size-time=2000000000 max-size-buffers=500 
                 ! tsdemux name=demux 
@@ -46,50 +39,21 @@ class VideoReceiver:
                 ! videoconvert 
                 ! videoscale 
                 ! video/x-raw,width=1920,height=1080 
-                ! queue ! selector.
-            filesrc location="{fallback_file}" 
-                ! decodebin 
-                ! videoconvert 
-                ! videoscale 
-                ! video/x-raw,width=1920,height=1080 
-                ! queue ! selector.
+                ! kmssink sync=false
         """
         return pipeline_str.strip()
-
-    def switch_to_fallback(self):
-        if self.fallback_active:
-            # Already switched.
-            return
-        selector = self.pipeline.get_by_name("selector")
-        if not selector:
-            print("VideoReceiver: Input-selector not found!")
-            return
-
-        # List all sink pads on the selector.
-        sink_pads = selector.sinkpads
-        if len(sink_pads) < 2:
-            print("VideoReceiver: Not enough sink pads on input-selector to switch!")
-            return
-
-        # By construction, the second sink pad (index 1) comes from the fallback branch.
-        fallback_pad = sink_pads[1]
-        selector.set_property("active-pad", fallback_pad)
-        self.fallback_active = True
-        print("VideoReceiver: Switched to fallback video source.")
 
     def on_message(self, bus, message):
         msg_type = message.type
         if msg_type == Gst.MessageType.EOS:
             print("VideoReceiver: End of Stream")
-            # Optionally, you could switch to the fallback here if the primary stream ends.
-            self.switch_to_fallback()
+            self.stop()
         elif msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             print(f"VideoReceiver: ERROR -> {err}")
             if debug:
                 print(f"Debug info: {debug}")
-            # Assuming error on the primary source triggers fallback.
-            self.switch_to_fallback()
+            self.stop()
 
     def run(self):
         pipeline_str = self.build_pipeline()
@@ -103,19 +67,9 @@ class VideoReceiver:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
             
-        # Set up bus message monitoring.
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
-
-        # Optionally, force the primary branch to be active at startup.
-        selector = self.pipeline.get_by_name("selector")
-        if selector:
-            sink_pads = selector.sinkpads
-            if sink_pads:
-                # Set the active pad to the first branch (primary SRT stream).
-                selector.set_property("active-pad", sink_pads[0])
-                print("VideoReceiver: Primary video source active.")
 
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
