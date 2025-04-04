@@ -8,8 +8,8 @@ import sys
 import logging
 
 # Uncomment the following lines to enable the recording module.
-import subprocess
-subprocess.Popen(["python3", "modules/record.py"])
+# import subprocess
+# subprocess.Popen(["python3", "modules/record.py"])
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
