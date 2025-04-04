@@ -21,7 +21,7 @@ video_receive_dk = cfg.get("ports", {}).get("video_receive_dk")
 video_receive_tn = cfg.get("ports", {}).get("video_receive_tn")
 streaming_settings = cfg.get("streaming_settings_video", {})
 
-recorded_file_tn = "~/mnt/tbdrive/video/recorded_tn.mp4"
+recorded_file_tn = "/mnt/tbdrive/video/recorded_tn.mp4"
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
