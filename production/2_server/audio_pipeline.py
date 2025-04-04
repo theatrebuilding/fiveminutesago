@@ -76,6 +76,13 @@ def build_audio_pipeline():
           rtpL16pay !
           srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener
 
+        tee_tn. ! queue !
+          wavenc ! filesink location=/mnt/tbdrive/video/audio_tn.wav
+
+        tee_dk. ! queue !
+          wavenc ! filesink location=/mnt/tbdrive/video/audio_dk.wav
+          
+
     """
     return pipeline.strip()
 
