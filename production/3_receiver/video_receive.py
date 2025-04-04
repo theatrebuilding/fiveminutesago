@@ -16,17 +16,12 @@ class VideoReceiver:
         self.loop = None
         self.server_address = None
         self.receive_port = None
+        # True if fallback is active; false if primary is active.
         self.fallback_active = False
-        # Time (in seconds) when the last primary buffer was seen.
+        # Last time (seconds) a buffer was seen on the primary monitor branch.
         self.last_primary_buffer_time = None
-        # If no buffer has been seen in this many seconds, switch to fallback.
+        # Timeout threshold (seconds) after which primary is considered down.
         self.primary_timeout_threshold = 5
-        self.clock = None
-    
-    def set_clock(self, clock):
-        self.clock = clock
-        print(f"VideoReceiver: Clock set to {clock}.")
-
 
     def build_pipeline(self):
         config = load_config()
@@ -36,13 +31,16 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
         
-        # Pipeline description:
-        # - The input-selector ("selector") has two branches:
-        #   • Primary branch: the SRT stream is decoded and processed.
-        #   • Fallback branch: a videotestsrc producing the "ball" pattern.
-        # - The primary branch ends in a queue named "primary_queue"
-        #   where a pad probe is attached to record when buffers arrive.
-        # - The output of the input-selector goes to kmssink.
+        # Pipeline structure:
+        #   [srtsrc] -> [queue] -> [tsdemux] -> [queue] -> [h264parse] -> [avdec_h264] ->
+        #   [videoconvert] -> [videoscale] -> [video/x-raw,width=1920,height=1080] -> [queue name=primary_in]
+        #   -> [tee name=primary_tee]
+        #      primary_tee. ! [queue name=primary_selector] ! input-selector (primary branch)
+        #      primary_tee. ! [queue name=primary_monitor] ! fakesink (for monitoring)
+        #
+        #   Meanwhile, videotestsrc (fallback) is processed similarly and goes to input-selector.
+        #
+        # Finally, input-selector output goes to kmssink.
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100" wait-for-connection=false
@@ -53,7 +51,10 @@ class VideoReceiver:
                 ! videoconvert
                 ! videoscale
                 ! video/x-raw,width=1920,height=1080
-                ! queue name=primary_queue ! selector.
+                ! queue name=primary_in
+                ! tee name=primary_tee
+                primary_tee. ! queue name=primary_selector ! selector.
+                primary_tee. ! queue name=primary_monitor ! fakesink sync=false async=false
             videotestsrc pattern=ball
                 ! videoconvert
                 ! videoscale
@@ -63,70 +64,49 @@ class VideoReceiver:
         return pipeline_str.strip()
 
     def primary_buffer_probe(self, pad, info):
-        # This probe is called whenever a buffer is seen on the primary branch.
+        # Called whenever a buffer flows on the primary_monitor branch.
         if info.type & Gst.PadProbeType.BUFFER:
-            now = time.monotonic()
-            if self.last_primary_buffer_time is None:
-                print("VideoReceiver: Primary branch started receiving data.")
-            self.last_primary_buffer_time = now
+            self.last_primary_buffer_time = time.monotonic()
         return Gst.PadProbeReturn.OK
 
     def monitor_primary(self):
-        """Periodically check the primary branch.
-           - If no buffer has been seen for longer than the threshold and
-             we're not in fallback, switch to fallback.
-           - If buffers are being received and we're in fallback, switch back.
+        """Check periodically if the primary branch is healthy.
+           Only print when a switch occurs.
         """
         now = time.monotonic()
-        primary_is_healthy = (
-            self.last_primary_buffer_time is not None and
-            (now - self.last_primary_buffer_time) < self.primary_timeout_threshold
-        )
+        primary_healthy = (self.last_primary_buffer_time is not None and
+                           (now - self.last_primary_buffer_time) < self.primary_timeout_threshold)
         
-        if primary_is_healthy and self.fallback_active:
-            print("VideoReceiver: Primary stream recovered; switching back to primary.")
+        if primary_healthy and self.fallback_active:
+            print("VideoReceiver: Primary stream recovered; switching to primary.")
             self.switch_to_primary()
-        elif not primary_is_healthy and not self.fallback_active:
-            print("VideoReceiver: Primary stream appears down; switching to fallback.")
+        elif not primary_healthy and not self.fallback_active:
+            print("VideoReceiver: Primary stream down; switching to fallback.")
             self.switch_to_fallback()
-        else:
-            if self.fallback_active:
-                print("VideoReceiver: Still in fallback mode; primary stream not healthy yet.")
-            else:
-                print("VideoReceiver: Primary stream healthy; continuing with primary.")
-        return True  # Continue calling this timeout callback
+        # Do not print status if already in the correct state.
+        return True  # Continue the timeout callback
 
     def switch_to_primary(self):
         selector = self.pipeline.get_by_name("selector")
         if not selector:
-            print("VideoReceiver: Input-selector not found!")
             return
         sink_pads = selector.sinkpads
         if not sink_pads:
-            print("VideoReceiver: No sink pads found on input-selector!")
             return
-
-        # Assume the primary branch is connected to the first sink pad.
-        primary_pad = sink_pads[0]
-        selector.set_property("active-pad", primary_pad)
+        # Assume primary branch is connected to the first sink pad.
+        selector.set_property("active-pad", sink_pads[0])
         self.fallback_active = False
-        print("VideoReceiver: Switched to primary video source.")
 
     def switch_to_fallback(self):
         selector = self.pipeline.get_by_name("selector")
         if not selector:
-            print("VideoReceiver: Input-selector not found!")
             return
         sink_pads = selector.sinkpads
         if len(sink_pads) < 2:
-            print("VideoReceiver: Not enough sink pads on input-selector to switch!")
             return
-
-        # Assume the fallback branch is connected to the second sink pad.
-        fallback_pad = sink_pads[1]
-        selector.set_property("active-pad", fallback_pad)
+        # Assume fallback branch is connected to the second sink pad.
+        selector.set_property("active-pad", sink_pads[1])
         self.fallback_active = True
-        print("VideoReceiver: Switched to fallback video source.")
 
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -145,31 +125,30 @@ class VideoReceiver:
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
-
+        
         # Set initial active pad to primary branch.
         selector = self.pipeline.get_by_name("selector")
-        if selector:
-            sink_pads = selector.sinkpads
-            if sink_pads:
-                selector.set_property("active-pad", sink_pads[0])
-                print("VideoReceiver: Starting with primary video source.")
-            else:
-                print("VideoReceiver: No sink pads available in input-selector.")
-
-        # Attach a pad probe to the primary branch queue to track buffer arrival.
-        primary_queue = self.pipeline.get_by_name("primary_queue")
-        if primary_queue:
-            pad = primary_queue.get_static_pad("src")
+        if selector and selector.sinkpads:
+            selector.set_property("active-pad", selector.sinkpads[0])
+            self.fallback_active = False
+            print("VideoReceiver: Starting with primary video source.")
+        else:
+            print("VideoReceiver: Could not set initial active pad.")
+        
+        # Attach pad probe to the 'primary_monitor' queue's src pad.
+        primary_monitor_queue = self.pipeline.get_by_name("primary_monitor")
+        if primary_monitor_queue:
+            pad = primary_monitor_queue.get_static_pad("src")
             if pad:
                 pad.add_probe(Gst.PadProbeType.BUFFER, self.primary_buffer_probe)
             else:
-                print("VideoReceiver: Could not get src pad on primary_queue.")
+                print("VideoReceiver: Could not get src pad on primary_monitor.")
         else:
-            print("VideoReceiver: primary_queue not found!")
-
-        # Set up a periodic timer (every 2 seconds) to monitor the primary stream.
+            print("VideoReceiver: primary_monitor element not found!")
+        
+        # Set up a periodic timer (every 2 seconds) to monitor primary health.
         GLib.timeout_add_seconds(2, self.monitor_primary)
-
+        
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
         try:
