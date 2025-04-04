@@ -7,10 +7,9 @@ import signal
 import sys
 import logging
 
-# Uncomment to enable recording of the pipeline output.
-# import subprocess
-# subprocess.Popen(["python3", "modules/record.py"])
-
+# Uncomment the following lines to enable the recording module.
+import subprocess
+subprocess.Popen(["python3", "modules/record.py"])
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -22,8 +21,7 @@ from video_pipeline import build_video_pipeline
 Gst.init(None)
 main_loop = GLib.MainLoop()
 
-# A dictionary to hold our pipelines along with their pipeline string.
-# Keys are pipeline names.
+# A dictionary to hold our pipelines along with their pipeline strings.
 pipelines = {}
 
 def restart_pipeline(pipeline_name):
