@@ -8,8 +8,8 @@ import sys
 import logging
 
 # Uncomment to enable recording of the pipeline output.
-import subprocess
-subprocess.Popen(["python3", "modules/record.py"])
+# import subprocess
+# subprocess.Popen(["python3", "modules/record.py"])
 
 
 # Configure logging.
