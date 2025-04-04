@@ -16,6 +16,10 @@ class VideoReceiver:
         self.loop = None
         self.server_address = None
         self.receive_port = None
+        self.clock = None
+
+    def set_clock(self, clock):
+        self.clock = clock
 
     def build_pipeline(self):
         # Load configuration and determine the appropriate SRT port.
