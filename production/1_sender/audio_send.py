@@ -74,31 +74,7 @@ class AudioSender:
         limiter = dsp_cfg.get("limiter", True)
 
         pipeline_str = f"""
-            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false
-                ! queue
-                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
-                ! rtpL16depay
-                ! audioconvert
-                ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
-                ! webrtcechoprobe
-                ! queue
-                ! alsasink device={self.device}
-
             alsasrc device=plughw:4,0
-                ! queue
-                ! audioconvert
-                ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
-                ! webrtcdsp
-                    echo-cancel={str(echo_cancel).lower()}
-                    noise-suppression={str(noise_suppression).lower()}
-                    extended-filter={str(extended_filter).lower()}
-                    compression-gain-db={compression_gain}
-                    echo-suppression-level={echo_supp_level}
-                    gain-control={str(gain_control).lower()}
-                    high-pass-filter={str(high_pass).lower()}
-                    limiter={str(limiter).lower()}
                 ! queue
                 ! audioconvert
                 ! audioresample
