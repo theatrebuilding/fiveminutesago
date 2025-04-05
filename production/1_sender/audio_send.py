@@ -75,6 +75,14 @@ class AudioSender:
 
         pipeline_str = f"""
 
+            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=true
+                ! queue
+                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                ! rtpL16depay
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
+                ! alsasink device={self.device}
 
             alsasrc device=plughw:4,0
                 ! queue
