@@ -37,13 +37,13 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
-  compression-gain-db: 10               # Sets the maximum gain the digital compression stage may apply, in dB.
+  compression-gain-db: 5               # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
   echo-cancel: true                     # Enable or disable the echo cancellation algorithm. 
   echo-suppression-level: high          # Options: low, moderate, high. (Controls the aggressiveness of echo suppression)
   extended-filter: true                 # This is an additional filtering stage built into the echo cancellation algorithm. When enabled, it applies extra processing on top of the standard echo cancellation to further reduce residual echo—especially in acoustically challenging or reverberant environments.
-  experimental-agc: true                # Enable or disable experimental automatic gain control.
-  gain-control: true                    # Enable or disable automatic digital gain control.
+  experimental-agc: false                # Enable or disable experimental automatic gain control.
+  gain-control: false                    # Enable or disable automatic digital gain control.
   gain-control-mode: adaptive-digital   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
   high-pass-filter: true                # Enable or disable high pass filtering.
   limiter: true                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
