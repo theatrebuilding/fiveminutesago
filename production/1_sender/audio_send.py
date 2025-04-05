@@ -99,6 +99,7 @@ class AudioSender:
                     gain-control={str(gain_control).lower()}
                     high-pass-filter={str(high_pass).lower()}
                     limiter={str(limiter).lower()}
+                ! queue
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
