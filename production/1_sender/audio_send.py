@@ -91,7 +91,7 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcdsp
-                    echo-cancel={str(echo_cancel).lower()}
+                    echo-cancel=true
                 ! queue
                 ! audioconvert
                 ! audioresample
