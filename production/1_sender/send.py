@@ -10,7 +10,7 @@ import sys
 import time
 
 from audio_send import AudioSender
-from video_send import VideoSender
+# from video_send import VideoSender  <-- Removed for now
 
 Gst.init(None)
 
@@ -19,11 +19,10 @@ class SenderManager:
         self.device = device
         self.country = country
         self.shutdown_event = threading.Event()
-        # Create a shared clock for both sender pipelines.
+        # Create a shared clock for the audio sender.
         self.shared_clock = Gst.SystemClock.obtain()
-        # Hold references to active sender instances.
+        # Hold reference to the active audio sender.
         self.audio_sender = None
-        self.video_sender = None
 
     def run_audio_worker(self):
         while not self.shutdown_event.is_set():
@@ -41,39 +40,18 @@ class SenderManager:
             print("SenderManager: Audio sender stopped unexpectedly. Restarting in 5 seconds...")
             time.sleep(5)
 
-    def run_video_worker(self):
-        while not self.shutdown_event.is_set():
-            print("SenderManager: Starting video sender...")
-            video_sender = VideoSender(self.device, self.country)
-            self.video_sender = video_sender  # Store reference.
-            video_sender.set_clock(self.shared_clock)
-            try:
-                video_sender.run()
-            except Exception as e:
-                print(f"SenderManager: Video sender encountered an exception: {e}")
-            self.video_sender = None
-            if self.shutdown_event.is_set():
-                break
-            print("SenderManager: Video sender stopped unexpectedly. Restarting in 5 seconds...")
-            time.sleep(5)
-
     def start(self):
         self.audio_thread = threading.Thread(target=self.run_audio_worker)
-        self.video_thread = threading.Thread(target=self.run_video_worker)
         self.audio_thread.start()
-        self.video_thread.start()
 
     def stop(self):
         print("SenderManager: Stopping sender manager...")
         self.shutdown_event.set()
-        # Signal the active sender instances to stop their main loops.
+        # Signal the active sender instance to stop its main loop.
         if self.audio_sender is not None:
             self.audio_sender.stop()
-        if self.video_sender is not None:
-            self.video_sender.stop()
         self.audio_thread.join()
-        self.video_thread.join()
-        print("SenderManager: All sender workers stopped.")
+        print("SenderManager: Audio sender worker stopped.")
 
 def signal_handler(sig, frame, manager):
     print("SenderManager: Interrupt received, shutting down...")
@@ -81,7 +59,7 @@ def signal_handler(sig, frame, manager):
     sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description="Robust Sender Script (Video + Audio)")
+    parser = argparse.ArgumentParser(description="Robust Sender Script (Audio Only)")
     parser.add_argument("--device", required=True, help="Audio device to use (e.g., hw:0,0)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
