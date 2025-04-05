@@ -85,7 +85,7 @@ class AudioSender:
                 ! queue
                 ! alsasink device={self.device}
 
-            alsasrc device={self.device}
+            alsasrc device=plughw:4,0
                 ! queue
                 ! audioconvert
                 ! audioresample
