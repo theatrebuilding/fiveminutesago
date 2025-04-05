@@ -74,7 +74,7 @@ class AudioSender:
         limiter = dsp_cfg.get("limiter", True)
 
         pipeline_str = f"""
-            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller"
+            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false
                 ! queue
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
@@ -103,7 +103,7 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
+                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}" wait-for-connection=false
         """
         return pipeline_str.strip()
 
