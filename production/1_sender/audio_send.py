@@ -75,7 +75,7 @@ class AudioSender:
 
         pipeline_str = f"""
             srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false
-                ! queue
+                ! queue max-size-time=2000000000 max-size-buffers=500
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
                 ! audioconvert
