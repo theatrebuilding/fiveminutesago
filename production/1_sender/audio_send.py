@@ -74,7 +74,15 @@ class AudioSender:
         limiter = dsp_cfg.get("limiter", True)
 
         pipeline_str = f"""
+
+
             alsasrc device=plughw:4,0
+                ! queue
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                ! webrtcdsp
+                    echo-cancel=false
                 ! queue
                 ! audioconvert
                 ! audioresample
