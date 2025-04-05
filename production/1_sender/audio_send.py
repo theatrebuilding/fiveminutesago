@@ -74,14 +74,15 @@ class AudioSender:
         limiter = dsp_cfg.get("limiter", True)
 
         pipeline_str = f"""
-
             srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=true
-                ! queue max-size-time=200000000 max-size-buffers=500
+                ! queue
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
+                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                ! webrtcechoprobe
+                ! queue
                 ! alsasink device={self.device} async=false
 
             alsasrc device=plughw:4,0
@@ -90,13 +91,20 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcdsp
-                    echo-cancel=false
-                ! queue
+                    echo-cancel={str(echo_cancel).lower()}
+                    noise-suppression={str(noise_suppression).lower()}
+                    extended-filter={str(extended_filter).lower()}
+                    compression-gain-db={compression_gain}
+                    echo-suppression-level={echo_supp_level}
+                    gain-control={str(gain_control).lower()}
+                    high-pass-filter={str(high_pass).lower()}
+                    limiter={str(limiter).lower()}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}" wait-for-connection=false
+                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
+
         """
         return pipeline_str.strip()
 
