@@ -92,13 +92,6 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcdsp
                     echo-cancel={str(echo_cancel).lower()}
-                    noise-suppression={str(noise_suppression).lower()}
-                    extended-filter={str(extended_filter).lower()}
-                    compression-gain-db={compression_gain}
-                    echo-suppression-level={echo_supp_level}
-                    gain-control={str(gain_control).lower()}
-                    high-pass-filter={str(high_pass).lower()}
-                    limiter={str(limiter).lower()}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
