@@ -82,7 +82,7 @@ class AudioSender:
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
-                ! alsasink device={self.device}
+                ! alsasink device={self.device} sync=false
 
             alsasrc device=plughw:4,0
                 ! queue
