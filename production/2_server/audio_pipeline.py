@@ -48,18 +48,12 @@ def build_audio_pipeline():
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
-          audioconvert !
-          audioresample !
-          audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_tn
 
         srtsrc name=a_send_dk uri=srt://:{audio_send_dk}?mode=listener wait-for-connection=false !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
-          audioconvert !
-          audioresample !
-          audio/x-raw,format=S16LE,channels={channels},rate={clock_rate} !
           tee name=tee_dk
 
 
