@@ -68,13 +68,13 @@ def build_audio_pipeline():
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
+          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false sync=false
 
         tee_dk. ! queue !
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
+          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false sync=false
           
 
     """
