@@ -7,6 +7,13 @@ import sys
 import argparse
 import threading
 import time
+import os
+
+# Insert parent directory for config_loader
+script_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
 
 # Import configuration loader (assumes a config_loader.py module is available)
 from config_loader import load_config
