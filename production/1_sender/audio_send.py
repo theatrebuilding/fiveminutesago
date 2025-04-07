@@ -83,7 +83,7 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe
                 ! queue
-                ! alsasink device={self.device} async=false sync=false
+                ! alsasink device={self.device} async=false
 
             alsasrc device={self.device}
                 ! queue
@@ -97,7 +97,7 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}" sync=false
+                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
 
         """
         return pipeline_str.strip()
