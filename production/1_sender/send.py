@@ -13,13 +13,25 @@ import time
 # Initialize GStreamer
 Gst.init(None)
 
-# Ensure parent directory is in sys.path to import config_loader.
+# Ensure the parent directory is in sys.path to import config_loader.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from config_loader import load_config
+
+#########################################
+# Utility function for clock logging.
+#########################################
+def log_clock(pipeline, sender_name):
+    clock = pipeline.get_clock()
+    if clock:
+        current_time = clock.get_time()
+        print(f"[{sender_name}] Clock time: {current_time}")
+    else:
+        print(f"[{sender_name}] Pipeline clock is None!")
+    return True  # Returning True keeps the timeout active.
 
 #########################################
 # AudioSender Class
@@ -39,6 +51,7 @@ class AudioSender:
 
     def set_clock(self, clock):
         self.clock = clock
+        print("[AudioSender] Shared clock set.")
 
     def build_pipeline(self):
         config = load_config()
@@ -73,9 +86,9 @@ class AudioSender:
         # webrtcdsp settings:
         dsp_cfg = config.get("webrtcdsp_settings", {})
         echo_cancel = dsp_cfg.get("echo-cancel", True)
-        # (Other DSP options can be added if needed)
+        # (Other DSP options can be added here if needed.)
 
-        # Build the pipeline. (Modify as needed.)
+        # Build the pipeline.
         pipeline_str = f"""
             srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
                 ! queue max-size-time=2000000000 max-size-buffers=500
@@ -106,67 +119,69 @@ class AudioSender:
     def on_message(self, bus, message):
         msg_type = message.type
         if msg_type == Gst.MessageType.EOS:
-            print("AudioSender: End of Stream")
+            print("[AudioSender] End of Stream")
             self.stop()
         elif msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"AudioSender: ERROR -> {err}")
+            print(f"[AudioSender] ERROR -> {err}")
             if debug:
-                print(f"Debug info: {debug}")
+                print(f"[AudioSender] Debug info: {debug}")
             self.stop()
+        else:
+            # Uncomment the next line for more verbose bus message logging.
+            # print(f"[AudioSender] Bus message: {message.get_structure()}")
+            pass
 
     def run(self):
         pipeline_str = self.build_pipeline()
-        print("AudioSender (Send+Receive) Pipeline:\n" + pipeline_str + "\n", flush=True)
+        print("[AudioSender] Pipeline:\n" + pipeline_str + "\n", flush=True)
 
         self.pipeline = Gst.parse_launch(pipeline_str)
 
-        def print_clock_time(pipeline):
-            clock = pipeline.get_clock()
-            if clock:
-                current_time = clock.get_time()
-                print("Current pipeline clock time:", current_time)
-            else:
-                print("Pipeline clock is None!")
-            return True  # Returning True keeps the timeout active
-
-        # Use the shared clock if provided.
+        # Set the clock.
         if self.clock:
             self.pipeline.use_clock(self.clock)
-            self.pipeline.set_locked_state(True)  # Force the pipeline to use the provided clock.
+            self.pipeline.set_locked_state(True)
+            print("[AudioSender] Using provided shared clock.")
         else:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
             self.pipeline.set_locked_state(True)
+            print("[AudioSender] Using system clock.")
 
-        print("AudioSender using clock:", self.pipeline.get_clock())
+        # Delay printing the clock so that the pipeline is in PLAYING state.
+        GLib.timeout_add_seconds(1, lambda: (print("[AudioSender] Clock after PLAYING:", self.pipeline.get_clock()), True)[1])
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
 
+        # Start the pipeline.
+        print("[AudioSender] Setting state to PLAYING...")
         self.pipeline.set_state(Gst.State.PLAYING)
-        self.pipeline.set_locked_state(True)  # Ensure the pipeline uses our provided clock
 
-        # Print the clock every 5 seconds:
-        GLib.timeout_add_seconds(5, print_clock_time, self.pipeline)
+        # Log the clock every 5 seconds.
+        GLib.timeout_add_seconds(5, log_clock, self.pipeline, "AudioSender")
+
         self.loop = GLib.MainLoop()
-
         try:
             self.loop.run()
         except Exception as e:
-            print(f"AudioSender: Exception -> {e}")
+            print(f"[AudioSender] Exception -> {e}")
         finally:
             self.pipeline.set_state(Gst.State.NULL)
-            print("AudioSender: Pipeline stopped.")
+            print("[AudioSender] Pipeline stopped.")
 
+    def stop(self):
+        if self.loop:
+            self.loop.quit()
 
 #########################################
 # VideoSender Class
 #########################################
 class VideoSender:
     def __init__(self, device, country):
-        self.device = device  # Not used for video, included for consistency.
+        self.device = device  # Not used for video, but included for consistency.
         self.country = country
         self.pipeline = None
         self.loop = None
@@ -176,6 +191,7 @@ class VideoSender:
 
     def set_clock(self, clock):
         self.clock = clock
+        print("[VideoSender] Shared clock set.")
 
     def build_pipeline(self):
         cfg = load_config()
@@ -184,7 +200,7 @@ class VideoSender:
             print("ERROR: 'server_ip' not defined in config.")
             sys.exit(1)
 
-        # Choose video send port based on country.
+        # Choose the video send port based on country.
         if self.country.lower() == "tn":
             self.video_send_port = cfg.get("ports", {}).get("video_send_tn")
         else:
@@ -223,42 +239,54 @@ class VideoSender:
     def on_message(self, bus, message):
         msg_type = message.type
         if msg_type == Gst.MessageType.EOS:
-            print("VideoSender: End of Stream")
+            print("[VideoSender] End of Stream")
             self.stop()
         elif msg_type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"VideoSender: ERROR -> {err}")
+            print(f"[VideoSender] ERROR -> {err}")
             if debug:
-                print(f"Debug info: {debug}")
+                print(f"[VideoSender] Debug info: {debug}")
             self.stop()
+        else:
+            # Uncomment for more verbose logging:
+            # print(f"[VideoSender] Bus message: {message.get_structure()}")
+            pass
 
     def run(self):
         pipeline_str = self.build_pipeline()
-        print("VideoSender Pipeline:\n" + pipeline_str + "\n", flush=True)
+        print("[VideoSender] Pipeline:\n" + pipeline_str + "\n", flush=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
 
-        # Use the shared clock if provided.
         if self.clock:
             self.pipeline.use_clock(self.clock)
+            self.pipeline.set_locked_state(True)
+            print("[VideoSender] Using provided shared clock.")
         else:
             self.pipeline.use_clock(Gst.SystemClock.obtain())
+            self.pipeline.set_locked_state(True)
+            print("[VideoSender] Using system clock.")
 
-        # (Optional: print the clock to verify)
-        print("VideoSender using clock:", self.pipeline.get_clock())
+        # Delay printing the clock so that the pipeline goes to PLAYING.
+        GLib.timeout_add_seconds(1, lambda: (print("[VideoSender] Clock after PLAYING:", self.pipeline.get_clock()), True)[1])
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
 
+        print("[VideoSender] Setting state to PLAYING...")
         self.pipeline.set_state(Gst.State.PLAYING)
+
+        # Log the clock every 5 seconds.
+        GLib.timeout_add_seconds(5, log_clock, self.pipeline, "VideoSender")
+
         self.loop = GLib.MainLoop()
         try:
             self.loop.run()
         except Exception as e:
-            print(f"VideoSender: Exception -> {e}")
+            print(f"[VideoSender] Exception -> {e}")
         finally:
             self.pipeline.set_state(Gst.State.NULL)
-            print("VideoSender: Pipeline stopped.")
+            print("[VideoSender] Pipeline stopped.")
 
     def stop(self):
         if self.loop:
@@ -274,50 +302,50 @@ class SenderManager:
         self.shutdown_event = threading.Event()
         # Create a shared clock for all pipelines.
         self.shared_clock = Gst.SystemClock.obtain()
+        print("[SenderManager] Shared clock created:", self.shared_clock)
         self.audio_sender = None
         self.video_sender = None
 
     def run_audio_worker(self):
         while not self.shutdown_event.is_set():
-            print("SenderManager: Starting audio sender...")
+            print("[SenderManager] Starting audio sender...")
             audio_sender = AudioSender(self.device, self.country)
             self.audio_sender = audio_sender
             audio_sender.set_clock(self.shared_clock)
             try:
-                audio_sender.run()  # Blocks until the audio pipeline stops
+                audio_sender.run()  # Blocks until the audio pipeline stops.
             except Exception as e:
-                print(f"SenderManager: Audio sender exception: {e}")
+                print(f"[SenderManager] Audio sender exception: {e}")
             self.audio_sender = None
             if self.shutdown_event.is_set():
                 break
-            print("SenderManager: Audio sender stopped unexpectedly. Restarting in 5 seconds...")
+            print("[SenderManager] Audio sender stopped unexpectedly. Restarting in 5 seconds...")
             time.sleep(5)
 
     def run_video_worker(self):
         while not self.shutdown_event.is_set():
-            print("SenderManager: Starting video sender...")
+            print("[SenderManager] Starting video sender...")
             video_sender = VideoSender(self.device, self.country)
             self.video_sender = video_sender
             video_sender.set_clock(self.shared_clock)
             try:
-                video_sender.run()  # Blocks until the video pipeline stops
+                video_sender.run()  # Blocks until the video pipeline stops.
             except Exception as e:
-                print(f"SenderManager: Video sender exception: {e}")
+                print(f"[SenderManager] Video sender exception: {e}")
             self.video_sender = None
             if self.shutdown_event.is_set():
                 break
-            print("SenderManager: Video sender stopped unexpectedly. Restarting in 5 seconds...")
+            print("[SenderManager] Video sender stopped unexpectedly. Restarting in 5 seconds...")
             time.sleep(5)
 
     def start(self):
-        # Start both audio and video sender threads.
         self.audio_thread = threading.Thread(target=self.run_audio_worker)
         self.video_thread = threading.Thread(target=self.run_video_worker)
         self.audio_thread.start()
         self.video_thread.start()
 
     def stop(self):
-        print("SenderManager: Stopping sender manager...")
+        print("[SenderManager] Stopping sender manager...")
         self.shutdown_event.set()
         if self.audio_sender is not None:
             self.audio_sender.stop()
@@ -325,18 +353,18 @@ class SenderManager:
             self.video_sender.stop()
         self.audio_thread.join()
         self.video_thread.join()
-        print("SenderManager: All sender workers stopped.")
+        print("[SenderManager] All sender workers stopped.")
 
 #########################################
 # Signal Handler and Main
 #########################################
 def signal_handler(sig, frame, manager):
-    print("SenderManager: Interrupt received, shutting down...")
+    print("[SenderManager] Interrupt received, shutting down...")
     manager.stop()
     sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description="Combined Audio and Video Sender Script")
+    parser = argparse.ArgumentParser(description="Combined Audio and Video Sender Script with Clock Logging")
     parser.add_argument("--device", required=True, help="Audio device (e.g., hw:0,0)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
