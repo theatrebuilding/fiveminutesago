@@ -83,7 +83,7 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe
                 ! queue
-                ! alsasink device={self.device} async=false
+                ! alsasink device={self.device} async=false sync=false
 
             alsasrc device={self.device}
                 ! queue
