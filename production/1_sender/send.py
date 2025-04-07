@@ -40,6 +40,15 @@ class AudioSender:
     def set_clock(self, clock):
         self.clock = clock
 
+    def print_clock_time(pipeline):
+        clock = pipeline.get_clock()
+        if clock:
+            current_time = clock.get_time()
+            print("Current pipeline clock time:", current_time)
+        else:
+            print("Pipeline clock is None!")
+        return True  # Returning True keeps the timeout active
+
     def build_pipeline(self):
         config = load_config()
 
@@ -137,7 +146,12 @@ class AudioSender:
         bus.connect("message", self.on_message)
 
         self.pipeline.set_state(Gst.State.PLAYING)
+        self.pipeline.set_locked_state(True)  # Ensure the pipeline uses our provided clock
+
+        # Print the clock every 5 seconds:
+        GLib.timeout_add_seconds(5, print_clock_time, self.pipeline)
         self.loop = GLib.MainLoop()
+        
         try:
             self.loop.run()
         except Exception as e:
