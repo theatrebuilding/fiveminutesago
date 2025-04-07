@@ -124,10 +124,12 @@ class AudioSender:
         # Use the shared clock if provided.
         if self.clock:
             self.pipeline.use_clock(self.clock)
+            self.pipeline.set_locked_state(True)  # Force the pipeline to use the provided clock.
         else:
-            self.pipeline.use_clock(Gst.SystemClock.obtain())
+            system_clock = Gst.SystemClock.obtain()
+            self.pipeline.use_clock(system_clock)
+            self.pipeline.set_locked_state(True)
 
-        # (Optional: print the clock to verify)
         print("AudioSender using clock:", self.pipeline.get_clock())
 
         bus = self.pipeline.get_bus()
@@ -144,9 +146,6 @@ class AudioSender:
             self.pipeline.set_state(Gst.State.NULL)
             print("AudioSender: Pipeline stopped.")
 
-    def stop(self):
-        if self.loop:
-            self.loop.quit()
 
 #########################################
 # VideoSender Class
