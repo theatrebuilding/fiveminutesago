@@ -199,7 +199,7 @@ class VideoSender:
         byte_stream_str = "true" if byte_stream else "false"
         
         pipeline_str = f"""
-            {video_source} !
+            {video_source} ! video/x-raw,format=YUY2 !
             videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
             {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} !
             video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline !
