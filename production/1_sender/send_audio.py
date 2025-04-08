@@ -90,7 +90,7 @@ class AudioSender:
                 ! queue
                 ! alsasink device={self.device} async=false
 
-            alsasrc device-name="Scarlett 8i6 USB"
+            alsasrc card-name="Scarlett 8i6 USB"
                 ! queue
                 ! audioconvert
                 ! audioresample
