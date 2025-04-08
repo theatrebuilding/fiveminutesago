@@ -76,7 +76,7 @@ class AudioSender:
 
         # Build the pipeline.
         pipeline_str = f"""
-            srtsrc uri="srt://192.168.0.148:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
+            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
                 ! queue max-size-time=2000000000 max-size-buffers=500
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
@@ -98,7 +98,7 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://192.168.0.148:{self.audio_send_port}?mode=caller&{streaming_settings}"
+                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings}"
         """
         return pipeline_str.strip()
 
@@ -199,14 +199,14 @@ class VideoSender:
         byte_stream_str = "true" if byte_stream else "false"
         
         pipeline_str = f"""
-            {video_source} ! video/x-raw,format=YUY2 !
+            {video_source} !
             videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
             {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} !
             video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline !
             h264parse config-interval={config_interval} !
             queue !
             mpegtsmux alignment={alignment} !
-            srtsink uri="srt://192.168.0.148:{self.video_send_port}?mode=caller&{streaming_settings}"
+            srtsink uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings}"
         """
         return pipeline_str.strip()
 
