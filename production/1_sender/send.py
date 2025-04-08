@@ -76,7 +76,7 @@ class AudioSender:
 
         # Build the pipeline.
         pipeline_str = f"""
-            srtsrc uri="srt://:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
+            srtsrc uri="srt://192.168.0.148:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
                 ! queue max-size-time=2000000000 max-size-buffers=500
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
@@ -98,7 +98,7 @@ class AudioSender:
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://:{self.audio_send_port}?mode=caller&{streaming_settings}"
+                ! srtsink uri="srt://192.168.0.148:{self.audio_send_port}?mode=caller&{streaming_settings}"
         """
         return pipeline_str.strip()
 
@@ -206,7 +206,7 @@ class VideoSender:
             h264parse config-interval={config_interval} !
             queue !
             mpegtsmux alignment={alignment} !
-            srtsink uri="srt://:{self.video_send_port}?mode=caller&{streaming_settings}"
+            srtsink uri="srt://192.168.0.148:{self.video_send_port}?mode=caller&{streaming_settings}"
         """
         return pipeline_str.strip()
 
