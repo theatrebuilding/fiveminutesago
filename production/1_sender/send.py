@@ -22,18 +22,6 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 #########################################
-# Utility function for clock logging.
-#########################################
-def log_clock(pipeline, sender_name):
-    clock = pipeline.get_clock()
-    if clock:
-        current_time = clock.get_time()
-        print(f"[{sender_name}] Clock time: {current_time}")
-    else:
-        print(f"[{sender_name}] Pipeline clock is None!")
-    return True  # Returning True keeps the timeout active.
-
-#########################################
 # AudioSender Class
 #########################################
 class AudioSender:
@@ -51,7 +39,6 @@ class AudioSender:
 
     def set_clock(self, clock):
         self.clock = clock
-        print("[AudioSender] Shared clock set.")
 
     def build_pipeline(self):
         config = load_config()
@@ -86,7 +73,6 @@ class AudioSender:
         # webrtcdsp settings:
         dsp_cfg = config.get("webrtcdsp_settings", {})
         echo_cancel = dsp_cfg.get("echo-cancel", True)
-        # (Other DSP options can be added here if needed.)
 
         # Build the pipeline.
         pipeline_str = f"""
@@ -99,7 +85,7 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe
                 ! queue
-                ! pulsesink device={self.device} sync=true async=false stream-properties="props,media.role=music"
+                ! alsasink device={self.device} async=false
 
             alsasrc device={self.device}
                 ! queue
@@ -128,8 +114,6 @@ class AudioSender:
                 print(f"[AudioSender] Debug info: {debug}")
             self.stop()
         else:
-            # Uncomment the next line for more verbose bus message logging.
-            # print(f"[AudioSender] Bus message: {message.get_structure()}")
             pass
 
     def run(self):
@@ -138,30 +122,21 @@ class AudioSender:
 
         self.pipeline = Gst.parse_launch(pipeline_str)
 
-        # Set the clock.
+        # Set the clock without logging clock information.
         if self.clock:
             self.pipeline.use_clock(self.clock)
             self.pipeline.set_locked_state(True)
-            print("[AudioSender] Using provided shared clock.")
         else:
             system_clock = Gst.SystemClock.obtain()
             self.pipeline.use_clock(system_clock)
             self.pipeline.set_locked_state(True)
-            print("[AudioSender] Using system clock.")
-
-        # Delay printing the clock so that the pipeline is in PLAYING state.
-        GLib.timeout_add_seconds(1, lambda: (print("[AudioSender] Clock after PLAYING:", self.pipeline.get_clock()), True)[1])
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
 
-        # Start the pipeline.
         print("[AudioSender] Setting state to PLAYING...")
         self.pipeline.set_state(Gst.State.PLAYING)
-
-        # Log the clock every 5 seconds.
-        GLib.timeout_add_seconds(5, log_clock, self.pipeline, "AudioSender")
 
         self.loop = GLib.MainLoop()
         try:
@@ -191,7 +166,6 @@ class VideoSender:
 
     def set_clock(self, clock):
         self.clock = clock
-        print("[VideoSender] Shared clock set.")
 
     def build_pipeline(self):
         cfg = load_config()
@@ -248,8 +222,6 @@ class VideoSender:
                 print(f"[VideoSender] Debug info: {debug}")
             self.stop()
         else:
-            # Uncomment for more verbose logging:
-            # print(f"[VideoSender] Bus message: {message.get_structure()}")
             pass
 
     def run(self):
@@ -257,17 +229,13 @@ class VideoSender:
         print("[VideoSender] Pipeline:\n" + pipeline_str + "\n", flush=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
 
+        # Set the clock without logging clock details.
         if self.clock:
             self.pipeline.use_clock(self.clock)
             self.pipeline.set_locked_state(True)
-            print("[VideoSender] Using provided shared clock.")
         else:
             self.pipeline.use_clock(Gst.SystemClock.obtain())
             self.pipeline.set_locked_state(True)
-            print("[VideoSender] Using system clock.")
-
-        # Delay printing the clock so that the pipeline goes to PLAYING.
-        GLib.timeout_add_seconds(1, lambda: (print("[VideoSender] Clock after PLAYING:", self.pipeline.get_clock()), True)[1])
 
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
@@ -275,9 +243,6 @@ class VideoSender:
 
         print("[VideoSender] Setting state to PLAYING...")
         self.pipeline.set_state(Gst.State.PLAYING)
-
-        # Log the clock every 5 seconds.
-        GLib.timeout_add_seconds(5, log_clock, self.pipeline, "VideoSender")
 
         self.loop = GLib.MainLoop()
         try:
@@ -302,7 +267,6 @@ class SenderManager:
         self.shutdown_event = threading.Event()
         # Create a shared clock for all pipelines.
         self.shared_clock = Gst.SystemClock.obtain()
-        print("[SenderManager] Shared clock created:", self.shared_clock)
         self.audio_sender = None
         self.video_sender = None
 
@@ -364,7 +328,7 @@ def signal_handler(sig, frame, manager):
     sys.exit(0)
 
 def main():
-    parser = argparse.ArgumentParser(description="Combined Audio and Video Sender Script with Clock Logging")
+    parser = argparse.ArgumentParser(description="Combined Audio and Video Sender Script without Clock Logging")
     parser.add_argument("--device", required=True, help="Audio device (e.g., hw:0,0)")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
