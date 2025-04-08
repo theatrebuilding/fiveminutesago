@@ -85,17 +85,10 @@ class AudioSender:
                 ! rtpL16depay
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
-                ! webrtcechoprobe
-                ! queue
+                ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! alsasink device={self.device} async=false
 
             alsasrc card-name="Scarlett 8i6 USB"
-                ! queue
-                ! audioconvert
-                ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
-                ! webrtcdsp echo-cancel={str(echo_cancel).lower()}
                 ! queue
                 ! audioconvert
                 ! audioresample
