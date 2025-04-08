@@ -86,6 +86,7 @@ class AudioSender:
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
+                ! queue
                 ! alsasink device={self.device} async=false
 
             alsasrc card-name="Scarlett 8i6 USB"
