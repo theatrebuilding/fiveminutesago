@@ -8,6 +8,13 @@ import sys
 import signal
 import argparse
 import time
+
+# Ensure the parent directory is in sys.path to import config_loader.
+script_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+
 from config_loader import load_config
 
 # Initialize GStreamer.
@@ -37,13 +44,6 @@ class AudioSender:
         self.clock = clock
 
     def build_pipeline(self):
-        # Ensure the parent directory is in sys.path to import config_loader.
-        script_dir = os.path.dirname(os.path.realpath(__file__))
-        parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
-        if parent_dir not in sys.path:
-            sys.path.insert(0, parent_dir)
-        
-        from config_loader import load_config
 
         config = load_config()
 
