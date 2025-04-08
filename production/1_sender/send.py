@@ -8,7 +8,7 @@ import sys
 import signal
 import argparse
 import time
-import subprocess  # New: to run the audio sender
+import subprocess
 
 # Initialize GStreamer.
 Gst.init(None)
@@ -22,7 +22,7 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 #########################################
-# VideoSender Class
+# VideoSender Class (unchanged)
 #########################################
 class VideoSender:
     def __init__(self, country):
@@ -129,18 +129,23 @@ class VideoSender:
             self.loop.quit()
 
 #########################################
-# Signal Handler and Main
+# Main Function with Option for Audio
 #########################################
 def main():
-    parser = argparse.ArgumentParser(description="Video and Audio Sender Script with Fallback")
+    parser = argparse.ArgumentParser(description="Video Sender Script with Optional Audio Subprocess")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
-    # Start the audio sender as a subprocess.
-    # Adjust the script name if needed.
-    audio_cmd = ["python3", "send_audio.py", "--country", args.country]
-    print("Launching audio sender subprocess:", " ".join(audio_cmd))
-    audio_proc = subprocess.Popen(audio_cmd)
+    # Prompt the user whether to run audio in a subprocess.
+    run_audio_input = input("Do you want to run with audio subprocess? (y/n): ").strip().lower()
+    run_audio = run_audio_input.startswith('y')
+
+    # If audio is enabled, launch the audio sender subprocess.
+    audio_proc = None
+    if run_audio:
+        audio_cmd = ["python3", "send_audio.py", "--country", args.country]
+        print("Launching audio sender subprocess:", " ".join(audio_cmd))
+        audio_proc = subprocess.Popen(audio_cmd)
 
     video_sender = VideoSender(args.country)
     shared_clock = Gst.SystemClock.obtain()
@@ -150,14 +155,14 @@ def main():
     def handle_signal(sig, frame):
         print("[Main] Interrupt received, shutting down...")
         video_sender.stop()
-        audio_proc.terminate()
+        if audio_proc:
+            audio_proc.terminate()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    # Run the video sender in a loop so that if it stops unexpectedly,
-    # the pipeline is restarted (fallback).
+    # Run the video sender in a loop (with fallback if it stops unexpectedly).
     while True:
         try:
             video_sender.run()
