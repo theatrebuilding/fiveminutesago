@@ -27,7 +27,7 @@ video:
   encoder: "x264enc"
   tune: "zerolatency"
   bitrate: 10000
-  key_int_max: 15
+  key_int_max: 1
   framerate: 25
   bframes: 0
   aud: true

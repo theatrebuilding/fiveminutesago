@@ -8,6 +8,7 @@ import sys
 import signal
 import argparse
 import time
+import subprocess  # New: to run the audio sender
 
 # Initialize GStreamer.
 Gst.init(None)
@@ -130,23 +131,30 @@ class VideoSender:
 #########################################
 # Signal Handler and Main
 #########################################
-def signal_handler(sig, frame, sender):
-    print("[VideoSender] Interrupt received, shutting down...")
-    sender.stop()
-    sys.exit(0)
-
 def main():
-    parser = argparse.ArgumentParser(description="Video Sender Script with Fallback")
+    parser = argparse.ArgumentParser(description="Video and Audio Sender Script with Fallback")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     args = parser.parse_args()
 
-    video_sender = VideoSender(args.country)
-    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, video_sender))
-    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, video_sender))
+    # Start the audio sender as a subprocess.
+    # Adjust the script name if needed.
+    audio_cmd = ["python3", "send_audio.py", "--country", args.country]
+    print("Launching audio sender subprocess:", " ".join(audio_cmd))
+    audio_proc = subprocess.Popen(audio_cmd)
 
-    # Optionally use a shared clock.
+    video_sender = VideoSender(args.country)
     shared_clock = Gst.SystemClock.obtain()
     video_sender.set_clock(shared_clock)
+
+    # Define a signal handler to gracefully shutdown both video and audio.
+    def handle_signal(sig, frame):
+        print("[Main] Interrupt received, shutting down...")
+        video_sender.stop()
+        audio_proc.terminate()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, handle_signal)
+    signal.signal(signal.SIGTERM, handle_signal)
 
     # Run the video sender in a loop so that if it stops unexpectedly,
     # the pipeline is restarted (fallback).
