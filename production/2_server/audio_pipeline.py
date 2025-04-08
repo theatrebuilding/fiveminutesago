@@ -56,19 +56,17 @@ def build_audio_pipeline():
           rtpL16depay !
           tee name=tee_dk
 
-
-
         tee_tn. ! queue ! 
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false sync=false
+          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
 
         tee_dk. ! queue !
           audioconvert ! audioresample !
           audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
           rtpL16pay !
-          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false sync=false
+          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
           
 
     """
