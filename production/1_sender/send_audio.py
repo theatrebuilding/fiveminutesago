@@ -24,36 +24,34 @@ Gst.init(None)
 # AudioSender Class
 #########################################
 class AudioSender:
-    def __init__(self, country):
+    def __init__(self, country, device=None):
         self.country = country
         self.pipeline = None
         self.loop = None
         self.clock = None
 
-        # These will be loaded from config.
+        # Load configuration.
+        config = load_config()
+
+        # Allow override via CLI.
+        self.device = device or config.get("audio", {}).get("device", "default")
+
         self.server_ip = None
         self.audio_send_port = None
         self.audio_recv_port = None
-
-        # Instead of requiring a device parameter, we load it from the config,
-        # or use a fallback value ("default") if not specified.
-        config = load_config()
-        self.device = config.get("audio", {}).get("device", "default")
 
     def set_clock(self, clock):
         self.clock = clock
 
     def build_pipeline(self):
-
         config = load_config()
 
-        # Obtain the server IP.
+        # Server IP and ports
         self.server_ip = config.get("server_ip", "127.0.0.1")
         if not self.server_ip:
             print("ERROR: 'server_ip' not defined in config.")
             sys.exit(1)
 
-        # Choose the audio send/receive ports based on the country.
         if self.country.lower() == "tn":
             self.audio_send_port = config.get("ports", {}).get("audio_send_tn")
             self.audio_recv_port = config.get("ports", {}).get("audio_receive_tn")
@@ -65,16 +63,12 @@ class AudioSender:
             print("ERROR: Missing audio ports in config (send/receive).")
             sys.exit(1)
 
-        # Basic audio parameters.
+        # Audio settings
         audio_format = config.get("audio", {}).get("format", "S16LE")
         audio_rate = config.get("audio", {}).get("rate", 48000)
         channels = config.get("audio", {}).get("channels", 2)
         encoding_name = config.get("audio", {}).get("encoding_name", "L16")
-
-        # SRT streaming settings for audio.
         streaming_settings = config.get("streaming_settings_audio", "")
-
-        # webrtcdsp settings (only echo-cancel is used in our pipeline).
         dsp_cfg = config.get("webrtcdsp_settings", {})
         echo_cancel = dsp_cfg.get("echo-cancel", True)
 
@@ -90,7 +84,7 @@ class AudioSender:
                 ! queue
                 ! alsasink device={self.device} async=true
 
-            alsasrc card-name="Scarlett 8i6 USB"
+            alsasrc device={self.device}
                 ! queue
                 ! audioconvert
                 ! audioresample
@@ -121,7 +115,7 @@ class AudioSender:
         print("[AudioSender] Pipeline:\n" + pipeline_str + "\n", flush=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
 
-        # Set the clock (use the provided one or a new system clock).
+        # Set clock
         if self.clock:
             self.pipeline.use_clock(self.clock)
             self.pipeline.set_locked_state(True)
@@ -160,16 +154,16 @@ def signal_handler(sig, frame, sender):
 def main():
     parser = argparse.ArgumentParser(description="Audio Sender Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    parser.add_argument("--device", help="ALSA audio device name (e.g., 'hw:1,0' or 'default')")
     args = parser.parse_args()
 
-    audio_sender = AudioSender(args.country)
+    audio_sender = AudioSender(args.country, args.device)
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, audio_sender))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, audio_sender))
 
     shared_clock = Gst.SystemClock.obtain()
     audio_sender.set_clock(shared_clock)
 
-    # Run the audio sender in a loop for fallback behavior.
     while True:
         try:
             audio_sender.run()
