@@ -28,13 +28,13 @@ def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
     pipeline1 = (
         f'srtsrc name=v_send_tn uri="srt://:{video_send_tn}?mode=listener" '
-        f'! queue max-size-time=9000000000 max-size-buffers=900 '
+        f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_tn '
         f' tee_tn. ! queue ! srtsink name=v_recv_dk uri="srt://:{video_receive_dk}?mode=listener"'   
     )
     pipeline2 = (
         f'srtsrc name=v_send_dk uri="srt://:{video_send_dk}?mode=listener" '
-        f'! queue max-size-time=9000000000 max-size-buffers=900 '
+        f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_dk '
         f' tee_dk. ! queue ! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener"'  
     )
