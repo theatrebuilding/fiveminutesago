@@ -47,7 +47,7 @@ class VideoReceiver:
         pipeline_str = f"""
             input-selector name=selector ! kmssink sync=false
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller&latency=100"
-                ! queue max-size-time=2000000000 max-size-buffers=500
+                ! queue queue max-size-buffers=1 max-size-bytes=0 max-size-time=33000000 min-threshold-buffers=0 min-threshold-bytes=0 min-threshold-time=0 leaky=downstream
                 ! tsdemux name=demux
                 demux. ! queue ! h264parse config-interval=1
                 ! avdec_h264
