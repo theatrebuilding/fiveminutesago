@@ -160,8 +160,16 @@ def main():
         print("[Main] Interrupt received, shutting down...")
         video_sender.stop()
         if audio_proc:
+            print("[Main] Terminating audio process...")
             audio_proc.terminate()
+            try:
+                # Wait up to 5 seconds for the audio process to exit.
+                audio_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                print("[Main] Audio process did not terminate in time; force killing it.")
+                audio_proc.kill()
         sys.exit(0)
+
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
