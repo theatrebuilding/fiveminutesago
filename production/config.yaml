@@ -26,9 +26,9 @@ video:
   height: 1080
   encoder: "x264enc"
   tune: "zerolatency"
-  bitrate: 10000
+  bitrate: 1000
   key_int_max: 1
-  framerate: 25
+  framerate: 30
   bframes: 0
   aud: true
   byte_stream: true
