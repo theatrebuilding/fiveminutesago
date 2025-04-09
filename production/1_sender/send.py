@@ -137,13 +137,17 @@ def main():
     args = parser.parse_args()
 
     # Prompt the user whether to run audio in a subprocess.
-    run_audio_input = input("Do you want to run with audio subprocess? (y/n): ").strip().lower()
+    run_audio_input = input("Do you want to run the audio subprocess? (y/n): ").strip().lower()
     run_audio = run_audio_input.startswith('y')
 
-    # If audio is enabled, launch the audio sender subprocess.
     audio_proc = None
     if run_audio:
+        # Ask the user to specify the audio device.
+        device = input("Enter the audio device name (or leave blank for default): ").strip()
+        # Build the command to pass the audio device.
         audio_cmd = ["python3", "send_audio.py", "--country", args.country]
+        if device:
+            audio_cmd.extend(["--device", device])
         print("Launching audio sender subprocess:", " ".join(audio_cmd))
         audio_proc = subprocess.Popen(audio_cmd)
 
@@ -151,7 +155,7 @@ def main():
     shared_clock = Gst.SystemClock.obtain()
     video_sender.set_clock(shared_clock)
 
-    # Define a signal handler to gracefully shutdown both video and audio.
+    # Signal handler to gracefully shutdown both video and audio.
     def handle_signal(sig, frame):
         print("[Main] Interrupt received, shutting down...")
         video_sender.stop()
