@@ -21,8 +21,8 @@ video_receive_dk = cfg.get("ports", {}).get("video_receive_dk")
 video_receive_tn = cfg.get("ports", {}).get("video_receive_tn")
 streaming_settings = cfg.get("streaming_settings_video", {})
 
-recorded_file_tn = "/mnt/tbdrive/video/video_tn.ts"
-recorded_file_dk = "/mnt/tbdrive/video/video_dk.ts"
+recorded_file_tn = "/mnt/tbdrive/video/video_tn.mp4"
+recorded_file_dk = "/mnt/tbdrive/video/video_dk.mp4"
 
 def build_video_pipeline():
     # These pipelines relay the stream between ports with low latency and bounded buffering.
@@ -30,15 +30,41 @@ def build_video_pipeline():
         f'srtsrc name=v_send_tn uri="srt://:{video_send_tn}?mode=listener" '
         f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_tn '
-        f' tee_tn. ! queue ! srtsink name=v_recv_dk uri="srt://:{video_receive_dk}?mode=listener"'   
+        f' tee_tn. ! queue ! srtsink name=v_recv_dk uri="srt://:{video_receive_dk}?mode=listener"'  
+        f' tee_tn. ! queue ' 
+        f'! tsdemux name=demux_tn '
+        f' demux_tn. ! queue ! h264parse config-interval=1 ! avdec_h264 '
+        f'! videoconvert '
+        f'! videoscale '
+        f'! videorate ! video/x-raw,width=1920,height=1080,framerate=30/1 '
+        f'! x264enc bitrate=10000 speed-preset=ultrafast tune=zerolatency '
+        f'! h264parse '
+        f'! mp4mux '
+        f'! filesink location="{recorded_file_tn}" ' 
     )
     pipeline2 = (
         f'srtsrc name=v_send_dk uri="srt://:{video_send_dk}?mode=listener" '
         f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_dk '
-        f' tee_dk. ! queue ! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener"'  
+        f' tee_dk. ! queue ! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener"'
+        f' tee_dk. ! queue '
+        f'! tsdemux name=demux_dk '
+        f' demux_dk. ! queue ! h264parse config-interval=1 ! avdec_h264 '
+        f'! videoconvert '
+        f'! videoscale '
+        f'! videorate ! video/x-raw,width=1920,height=1080,framerate=30/1 '
+        f'! x264enc bitrate=10000 speed-preset=ultrafast tune=zerolatency '
+        f'! h264parse '
+        f'! mp4mux '
+        f'! filesink location="{recorded_file_dk}"'
     )
     return pipeline1, pipeline2
+
+                
+                
+                
+                
+                
 
 
 if __name__ == "__main__":
