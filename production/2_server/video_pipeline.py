@@ -31,12 +31,14 @@ def build_video_pipeline():
         f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_tn '
         f' tee_tn. ! queue ! srtsink name=v_recv_dk uri="srt://:{video_receive_dk}?mode=listener"'  
+        f' tee_tn. ! queue ! filesink location="{recorded_file_tn}" '
     )
     pipeline2 = (
         f'srtsrc name=v_send_dk uri="srt://:{video_send_dk}?mode=listener" '
         f'! queue max-size-time=5000000000 max-size-buffers=500 '
         f'! tee name=tee_dk '
         f' tee_dk. ! queue ! srtsink name=v_recv_tn uri="srt://:{video_receive_tn}?mode=listener"'
+        f' tee_dk. ! queue ! filesink location="{recorded_file_dk}" '
     )
     return pipeline1, pipeline2
 
