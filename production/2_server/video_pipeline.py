@@ -42,13 +42,6 @@ def build_video_pipeline():
     )
     return pipeline1, pipeline2
 
-                
-                
-                
-                
-                
-
-
 if __name__ == "__main__":
     pipelines = build_video_pipeline()
     print("Video Pipeline 1:")
