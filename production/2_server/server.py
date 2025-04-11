@@ -77,7 +77,7 @@ def copy_file_and_restart(pipeline_name, restart_callback):
         GLib.idle_add(restart_callback, pipeline_name)
         return
 
-    dest_dir = "/tbdrive/video"
+    dest_dir = "/mnt/tbdrive/video"
     # Construct a new file name with a timestamp appended.
     base, ext = os.path.splitext(os.path.basename(src))
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
