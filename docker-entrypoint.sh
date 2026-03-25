@@ -26,21 +26,17 @@ fi
 TS_PID=$!
 
 cleanup() {
-  [[ -n "${APP_PID:-}" ]] && kill "${APP_PID}" 2>/dev/null || true
   kill "${TS_PID}" 2>/dev/null || true
-  wait "${TS_PID}" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
 
-for _ in $(seq 1 60); do
-  if /usr/local/bin/tailscale --socket="${TS_SOCKET}" status >/dev/null 2>&1; then
-    break
-  fi
+# Wait for the local socket to exist.
+for _ in $(seq 1 30); do
+  [[ -S "${TS_SOCKET}" ]] && break
   sleep 1
 done
 
-/usr/local/bin/tailscale --socket="${TS_SOCKET}" status >/dev/null
-
+# Try tailscale up until tailscaled is actually ready.
 up_args=()
 
 if [[ -n "${TS_AUTHKEY:-}" ]]; then
@@ -57,8 +53,13 @@ if [[ -n "${TS_EXTRA_ARGS:-}" ]]; then
   up_args+=("${extra_up[@]}")
 fi
 
-/usr/local/bin/tailscale --socket="${TS_SOCKET}" up "${up_args[@]}"
+for _ in $(seq 1 30); do
+  if /usr/local/bin/tailscale --socket="${TS_SOCKET}" up "${up_args[@]}"; then
+    break
+  fi
+  sleep 2
+done
 
-"$@" &
-APP_PID=$!
-wait "${APP_PID}"
+/usr/local/bin/tailscale --socket="${TS_SOCKET}" status
+
+exec "$@"
