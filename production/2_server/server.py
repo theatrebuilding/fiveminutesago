@@ -6,11 +6,11 @@ from gi.repository import Gst, GLib
 import signal
 import sys
 import logging
-import subprocess
 import threading
 import time
 import os
 import datetime  # For timestamp generation
+import shutil
 
 # Configure logging.
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s")
@@ -31,12 +31,13 @@ pipelines = {}
 
 def _copy_file(src, pipeline_label, msg_prefix=""):
     """
-    Helper function that copies a file (using sudo cp) to the /tbdrive/video directory.
+    Helper function that copies a file to the /tbdrive/video directory.
     The destination filename is constructed as:
         {original_name}_{YYYYMMDDHHMMSS}.{extension}
     This function will keep retrying until the copy is successful.
     """
     dest_dir = "/mnt/tbdrive/video"
+    os.makedirs(dest_dir, exist_ok=True)
     base, ext = os.path.splitext(os.path.basename(src))
     timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
     dest_filename = f"{base}_{timestamp}{ext}"
@@ -46,15 +47,9 @@ def _copy_file(src, pipeline_label, msg_prefix=""):
     copy_successful = False
     while not copy_successful:
         try:
-            result = subprocess.run(["sudo", "cp", src, dest_path],
-                                    capture_output=True, text=True)
-            if result.returncode == 0:
-                copy_successful = True
-                logging.info(f"[{pipeline_label}] File copy successful.")
-            else:
-                logging.error(f"[{pipeline_label}] File copy failed with return code {result.returncode}. Retrying in 3 seconds...")
-                logging.error(f"[{pipeline_label}] cp stderr: {result.stderr}")
-                time.sleep(3)
+            shutil.copy2(src, dest_path)
+            copy_successful = True
+            logging.info(f"[{pipeline_label}] File copy successful.")
         except Exception as e:
             logging.error(f"[{pipeline_label}] Exception during file copy: {e}. Retrying in 3 seconds...")
             time.sleep(3)

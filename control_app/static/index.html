@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Five Minutes Ago Control</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Relay Control Surface</p>
+          <h1>Five Minutes Ago</h1>
+          <p class="hero-copy">
+            Monitor the relay, inspect live logs, and apply config changes without logging into the server shell.
+          </p>
+        </div>
+        <div class="hero-status">
+          <span id="relay-pill" class="status-pill">Unknown</span>
+          <p id="refresh-label">Waiting for first status refresh…</p>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="panel command-panel">
+          <div class="panel-heading">
+            <h2>Relay Controls</h2>
+            <p>Start, stop, or restart the underlying GStreamer relay process.</p>
+          </div>
+          <div class="button-row">
+            <button data-action="start">Start Relay</button>
+            <button data-action="stop" class="button-muted">Stop Relay</button>
+            <button data-action="restart" class="button-accent">Restart Relay</button>
+          </div>
+          <p id="action-message" class="action-message"></p>
+        </section>
+
+        <section class="panel metrics-panel">
+          <div class="metric-grid">
+            <article class="metric-card">
+              <p class="metric-label">Process</p>
+              <p id="process-state" class="metric-value">Unknown</p>
+              <p id="process-meta" class="metric-meta"></p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Config</p>
+              <p id="config-state" class="metric-value">Unknown</p>
+              <p id="config-meta" class="metric-meta"></p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Recordings</p>
+              <p id="recording-state" class="metric-value">Unknown</p>
+              <p id="recording-meta" class="metric-meta"></p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel storage-panel">
+          <div class="panel-heading">
+            <h2>Storage</h2>
+            <p>Current working files plus the latest archived recordings.</p>
+          </div>
+          <div id="working-files" class="storage-list"></div>
+          <div class="archive-block">
+            <p id="archive-summary" class="archive-summary"></p>
+            <ul id="archive-files" class="archive-files"></ul>
+          </div>
+        </section>
+
+        <section class="panel logs-panel">
+          <div class="panel-heading">
+            <h2>Relay Log Tail</h2>
+            <p>Latest control events and subprocess output.</p>
+          </div>
+          <pre id="log-output" class="log-output">Loading logs…</pre>
+        </section>
+
+        <section class="panel config-panel">
+          <div class="panel-heading">
+            <h2>Config Editor</h2>
+            <p>Save the YAML only, or apply it immediately by restarting the relay with the updated config.</p>
+          </div>
+          <div class="button-row">
+            <button id="save-config" class="button-muted">Save Config</button>
+            <button id="apply-config" class="button-accent">Save + Restart Relay</button>
+          </div>
+          <textarea id="config-editor" spellcheck="false"></textarea>
+          <p id="config-message" class="action-message"></p>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>
