@@ -4,7 +4,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Environment folders
+# Environment folders and variables
+.env
 env/
 venv/
 .venv/
+
+# Tailscale runtime state
+tailscale/state/*
+!tailscale/state/.gitkeep

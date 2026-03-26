@@ -10,10 +10,14 @@ services:
       TS_AUTH_ONCE: "true"
       TS_HOSTNAME: teateroen-server
       TS_EXTRA_ARGS: --advertise-tags=tag:container
+      TS_SERVE_CONFIG: /config/control-app-funnel.json
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
       TS_ENABLE_HEALTH_CHECK: "true"
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
     volumes:
+      - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
       - /mnt/tbdrive:/mnt/tbdrive
     devices:
