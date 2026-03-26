@@ -10,7 +10,8 @@ services:
       TS_AUTH_ONCE: "true"
       TS_HOSTNAME: teateroen-server
       TS_EXTRA_ARGS: --advertise-tags=tag:container
-      TS_SERVE_CONFIG: /config/control-app-funnel.json
+      TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
+      TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
       TS_ENABLE_HEALTH_CHECK: "true"

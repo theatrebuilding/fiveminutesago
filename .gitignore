@@ -13,3 +13,5 @@ venv/
 # Tailscale runtime state
 tailscale/state/*
 !tailscale/state/.gitkeep
+tailscale/config/generated/*
+!tailscale/config/generated/.gitkeep
