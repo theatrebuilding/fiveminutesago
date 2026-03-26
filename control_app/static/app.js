@@ -126,7 +126,7 @@ function renderStatus(status) {
   const config = status.config;
   const storage = status.storage;
 
-  relayPill.textContent = relay.running ? "Relay Running" : "Relay Stopped";
+  relayPill.textContent = relay.running ? "Server Running" : "Server Stopped";
   relayPill.className = `status-pill ${relay.running ? "status-running" : "status-stopped"}`;
   refreshLabel.textContent = `Last refreshed ${new Date().toLocaleTimeString()}`;
 
