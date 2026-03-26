@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from .config_service import ConfigService
-from .relay_supervisor import RelaySupervisor
+from .runtime_service import RuntimeService
 from .storage_service import StorageService
 
 
@@ -12,29 +12,28 @@ class DashboardService:
     def __init__(
         self,
         config_service: ConfigService,
-        relay_supervisor: RelaySupervisor,
+        runtime_service: RuntimeService,
         storage_service: StorageService,
     ) -> None:
         self._config_service = config_service
-        self._relay_supervisor = relay_supervisor
+        self._runtime_service = runtime_service
         self._storage_service = storage_service
 
     def build_status(self) -> dict[str, Any]:
-        relay = self._relay_supervisor.snapshot()
+        runtime = self._runtime_service.snapshot()
 
         try:
-            config_data = self._config_service.read_data()
-            config = self.build_config_summary(config_data, relay)
+            config = self.build_config_summary()
         except Exception as exc:
             config = {
                 "path": str(self._config_service.config_path),
                 "updated_at": _safe_mtime_iso(self._config_service.config_path),
                 "error": str(exc),
-                "pending_restart": False,
+                "pending_relaunch": False,
             }
 
         return {
-            "relay": relay,
+            "runtime": runtime,
             "config": config,
             "storage": self._storage_service.snapshot(),
         }
@@ -42,16 +41,16 @@ class DashboardService:
     def build_config_summary(
         self,
         config_data: dict[str, Any] | None = None,
-        relay: dict[str, Any] | None = None,
+        runtime: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         config_data = config_data or self._config_service.read_data()
-        relay = relay or self._relay_supervisor.snapshot()
+        runtime = runtime or self._runtime_service.snapshot()
         config_mtime = _safe_mtime(self._config_service.config_path)
 
-        pending_restart = False
-        started_at = relay.get("started_at_ts")
-        if relay.get("running") and config_mtime is not None and started_at is not None:
-            pending_restart = config_mtime > started_at
+        pending_relaunch = False
+        started_at = runtime.get("started_at_ts")
+        if runtime.get("running") and config_mtime is not None and started_at is not None:
+            pending_relaunch = config_mtime > started_at
 
         return {
             "path": str(self._config_service.config_path),
@@ -62,7 +61,7 @@ class DashboardService:
             "video": config_data.get("video", {}),
             "streaming_settings_audio": config_data.get("streaming_settings_audio"),
             "streaming_settings_video": config_data.get("streaming_settings_video"),
-            "pending_restart": pending_restart,
+            "pending_relaunch": pending_relaunch,
         }
 
 

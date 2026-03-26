@@ -134,17 +134,25 @@ class VideoSender:
 def main():
     parser = argparse.ArgumentParser(description="Video Sender Script with Optional Audio Subprocess")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    audio_group = parser.add_mutually_exclusive_group()
+    audio_group.add_argument("--with-audio", dest="with_audio", action="store_true", help="Launch the audio subprocess.")
+    audio_group.add_argument("--no-audio", dest="with_audio", action="store_false", help="Do not launch the audio subprocess.")
+    parser.set_defaults(with_audio=None)
+    parser.add_argument("--device", help="ALSA audio device name passed to the audio subprocess.")
     args = parser.parse_args()
 
-    # Prompt the user whether to run audio in a subprocess.
-    run_audio_input = input("Do you want to run the audio subprocess? (y/n): ").strip().lower()
-    run_audio = run_audio_input.startswith('y')
+    if args.with_audio is None:
+        run_audio_input = input("Do you want to run the audio subprocess? (y/n): ").strip().lower()
+        run_audio = run_audio_input.startswith("y")
+    else:
+        run_audio = args.with_audio
 
     audio_proc = None
     if run_audio:
-        # Ask the user to specify the audio device.
-        device = input("Enter the audio device name (or leave blank for default): ").strip()
-        # Build the command to pass the audio device.
+        device = args.device
+        if args.with_audio is None:
+            device = input("Enter the audio device name (or leave blank for default): ").strip()
+
         audio_cmd = ["python3", "send_audio.py", "--country", args.country]
         if device:
             audio_cmd.extend(["--device", device])

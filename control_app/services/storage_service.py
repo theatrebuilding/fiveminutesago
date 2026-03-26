@@ -11,15 +11,9 @@ class StorageService:
         self._archive_dir = archive_dir
 
     def snapshot(self) -> dict[str, Any]:
-        working_files = [
-            self._describe_file(self._storage_root / "video_tn.ts"),
-            self._describe_file(self._storage_root / "video_dk.ts"),
-        ]
-        archive = self._describe_archive_dir()
         return {
             "storage_root": str(self._storage_root),
-            "working_files": working_files,
-            "archive": archive,
+            "archive": self._describe_archive_dir(),
         }
 
     def _describe_archive_dir(self) -> dict[str, Any]:

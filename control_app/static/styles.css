@@ -190,6 +190,53 @@ h2 {
   margin: 16px 0;
 }
 
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.field-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.checkbox-field {
+  justify-content: flex-end;
+}
+
+.checkbox-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid rgba(24, 33, 38, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+select,
+input[type="text"] {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(24, 33, 38, 0.16);
+  border-radius: 14px;
+  padding: 0 14px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--ink);
+  font: inherit;
+}
+
 button {
   appearance: none;
   border: 0;
@@ -234,6 +281,59 @@ button:disabled {
   border-radius: 18px;
   padding: 14px 16px;
   background: rgba(255, 255, 255, 0.66);
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.preview-card {
+  border: 1px solid rgba(24, 33, 38, 0.1);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.panel-heading-inline {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+
+.panel-heading-inline h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+.preview-frame {
+  position: relative;
+  min-height: 240px;
+  border-radius: 16px;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(24, 33, 38, 0.12), rgba(24, 33, 38, 0.22));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.preview-empty {
+  margin: 0;
+  color: rgba(255, 250, 240, 0.9);
+  text-align: center;
+  padding: 18px;
 }
 
 .storage-item h3,
@@ -292,6 +392,10 @@ button:disabled {
   margin: 0;
 }
 
+.hidden {
+  display: none !important;
+}
+
 @keyframes pulse {
   0% {
     opacity: 0.4;
@@ -315,7 +419,13 @@ button:disabled {
   }
 
   .metric-grid,
-  .storage-list {
+  .storage-list,
+  .preview-grid,
+  .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .panel-heading-inline {
+    flex-direction: column;
   }
 }
