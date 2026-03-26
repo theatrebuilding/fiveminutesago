@@ -44,3 +44,4 @@ RUN chmod +x /usr/local/bin/start.sh \
 VOLUME ["/mnt/tbdrive", "/var/lib/tailscale"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/start.sh"]
+CMD ["uvicorn", "control_app.main:app", "--host", "0.0.0.0", "--port", "8000"]
