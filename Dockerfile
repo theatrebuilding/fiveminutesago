@@ -5,9 +5,7 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
-    TS_STATE_DIR=/var/lib/tailscale \
-    TS_SOCKET=/var/run/tailscale/tailscaled.sock \
-    TS_USERSPACE=false
+    TS_SOCKET=/var/run/tailscale/tailscaled.sock
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
@@ -29,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
 COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled
+COPY --from=tailscale /usr/local/bin/containerboot /usr/local/bin/containerboot
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
@@ -37,12 +36,11 @@ RUN python3 -m venv --system-site-packages /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir -r /app/requirements.txt
 
 COPY . /app
-COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+COPY start.sh /usr/local/bin/start.sh
 
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh \
+RUN chmod +x /usr/local/bin/start.sh \
  && mkdir -p /mnt/tbdrive/video /var/lib/tailscale /var/run/tailscale
 
 VOLUME ["/mnt/tbdrive", "/var/lib/tailscale"]
 
-ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
-CMD ["python3", "/app/server.py"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/start.sh"]
