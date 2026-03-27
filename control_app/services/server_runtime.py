@@ -297,9 +297,18 @@ class ServerRuntime:
             err, debug = message.parse_error()
             self._log(f"[{feed}] ERROR: {err}. {debug or ''}".strip())
             GLib.timeout_add_seconds(3, self._restart_video_feed, feed)
+        elif message.type == Gst.MessageType.WARNING:
+            err, debug = message.parse_warning()
+            self._log(f"[{feed}] WARNING: {err}. {debug or ''}".strip())
         elif message.type == Gst.MessageType.EOS:
             self._log(f"[{feed}] End of stream detected.")
             GLib.timeout_add_seconds(3, self._restart_video_feed, feed)
+        elif message.type == Gst.MessageType.ELEMENT:
+            structure = message.get_structure()
+            if structure is not None and structure.get_name() == "GstMultiFileSink":
+                filename = structure.get_value("filename") if structure.has_field("filename") else None
+                if filename:
+                    self._log(f"[{feed}] Preview updated: {filename}")
         return True
 
     def _start_recording_on_loop(self) -> None:
@@ -443,20 +452,20 @@ class ServerRuntime:
         pipeline_str = f"""
             srtsrc name={feed_state.feed}_source uri="srt://:{feed_state.send_port}?mode=listener" wait-for-connection=false !
             queue max-size-time=5000000000 max-size-buffers=500 !
+            tsparse set-timestamps=true !
             tee name={feed_state.feed}_stream_tee
 
             {feed_state.feed}_stream_tee. ! queue !
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
 
             {feed_state.feed}_stream_tee. ! queue !
-            tsparse set-timestamps=true !
             tsdemux name={feed_state.feed}_preview_demux
             {feed_state.feed}_preview_demux. ! queue ! h264parse config-interval=1 !
             avdec_h264 !
             videoconvert ! videoscale ! videorate !
             video/x-raw,width=640,height=360,framerate=1/1 !
             jpegenc quality=70 !
-            multifilesink location="{feed_state.preview_pattern}" max-files=2
+            multifilesink location="{feed_state.preview_pattern}" max-files=2 post-messages=true
         """
         return Gst.parse_launch(pipeline_str.strip())
 
