@@ -475,10 +475,11 @@ class ServerRuntime:
             {feed_state.feed}_stream_tee. ! queue !
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
 
-            {feed_state.feed}_stream_tee. ! queue leaky=downstream max-size-buffers=120 max-size-bytes=0 max-size-time=0 !
+            {feed_state.feed}_stream_tee. ! queue max-size-buffers=120 max-size-bytes=0 max-size-time=0 !
             tsdemux name={feed_state.feed}_preview_demux
-            {feed_state.feed}_preview_demux. ! queue leaky=downstream max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse config-interval=1 !
+            {feed_state.feed}_preview_demux. ! queue max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse config-interval=1 !
             avdec_h264 !
+            queue leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 !
             videoconvert ! videoscale ! videorate drop-only=true !
             video/x-raw,width=640,height=360,framerate=1/5 !
             jpegenc quality=70 !
