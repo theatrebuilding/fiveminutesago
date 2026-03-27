@@ -212,7 +212,29 @@ async def server_preview(feed: str, request: Request) -> FileResponse:
         raise HTTPException(status_code=404, detail="Unknown preview feed.")
 
     services = _services(request)
-    path = services.runtime_service.snapshot().get("server", {}).get("previews", {}).get(feed, {}).get("path")
+    runtime = services.runtime_service.snapshot()
+    server = runtime.get("server") or {}
+    previews = server.get("previews") or {}
+    path = (previews.get(feed) or {}).get("path")
+    if not path:
+        raise HTTPException(status_code=404, detail="Preview not available.")
+
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/api/receiver/preview.jpg")
+async def receiver_preview(request: Request) -> FileResponse:
+    services = _services(request)
+    runtime = services.runtime_service.snapshot()
+    receiver = runtime.get("receiver") or {}
+    path = (receiver.get("preview") or {}).get("path")
     if not path:
         raise HTTPException(status_code=404, detail="Preview not available.")
 

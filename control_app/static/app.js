@@ -32,6 +32,7 @@ const stopRoleButton = document.getElementById("stop-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
 const serverPanel = document.getElementById("server-panel");
+const receiverPanel = document.getElementById("receiver-panel");
 const recordToggleButton = document.getElementById("record-toggle");
 
 const previewTnMeta = document.getElementById("preview-tn-meta");
@@ -40,6 +41,10 @@ const previewTnEmpty = document.getElementById("preview-tn-empty");
 const previewDkMeta = document.getElementById("preview-dk-meta");
 const previewDkImage = document.getElementById("preview-dk-image");
 const previewDkEmpty = document.getElementById("preview-dk-empty");
+const receiverPreviewTitle = document.getElementById("receiver-preview-title");
+const receiverPreviewMeta = document.getElementById("receiver-preview-meta");
+const receiverPreviewImage = document.getElementById("receiver-preview-image");
+const receiverPreviewEmpty = document.getElementById("receiver-preview-empty");
 
 let refreshTimer = null;
 let latestStatus = null;
@@ -127,6 +132,16 @@ function describeLaunch(launch) {
   }
 
   return `Receiver ${site}`;
+}
+
+function formatCountryLabel(country) {
+  if (country === "tn") {
+    return "Tunisia";
+  }
+  if (country === "dk") {
+    return "Denmark";
+  }
+  return country ? country.toUpperCase() : "Receiver";
 }
 
 function renderArchive(archive) {
@@ -279,7 +294,7 @@ function renderAudioDevices(devices) {
   audioDeviceMessage.textContent = `${devices.length} audio input${devices.length === 1 ? "" : "s"} discovered inside the container.`;
 }
 
-function renderPreview(feed, preview, image, meta, empty) {
+function renderPreview(preview, imageUrl, image, meta, empty) {
   if (!preview || !preview.available) {
     image.removeAttribute("src");
     image.classList.add("hidden");
@@ -288,10 +303,18 @@ function renderPreview(feed, preview, image, meta, empty) {
     return;
   }
 
-  image.src = `/api/server/preview/${feed}.jpg?t=${Date.now()}`;
+  image.src = `${imageUrl}?t=${Date.now()}`;
   image.classList.remove("hidden");
   empty.classList.add("hidden");
   meta.textContent = `Updated ${formatSeconds(preview.age_seconds)} ago`;
+}
+
+function renderReceiverPreview(receiver) {
+  const country = receiver?.country || latestStatus?.runtime?.launch?.country || null;
+  const countryLabel = formatCountryLabel(country);
+  receiverPreviewTitle.textContent = `${countryLabel} Feed`;
+  receiverPreviewImage.alt = `${countryLabel} receiver preview`;
+  renderPreview(receiver?.preview, "/api/receiver/preview.jpg", receiverPreviewImage, receiverPreviewMeta, receiverPreviewEmpty);
 }
 
 function renderStatus(status) {
@@ -300,9 +323,11 @@ function renderStatus(status) {
   const config = status.config;
   const storage = status.storage;
   const server = runtime.server;
+  const receiver = runtime.receiver;
   const recording = server?.recording;
   const launch = runtime.launch;
   const serverActive = runtime.running && runtime.role === "server";
+  const receiverActive = runtime.running && runtime.role === "receiver";
   const serverContext = (runtime.running ? runtime.role : roleSelect.value) === "server";
 
   syncFormFromRuntime(runtime);
@@ -346,9 +371,11 @@ function renderStatus(status) {
 
   recordingMetric.classList.toggle("hidden", !serverContext);
   serverPanel.classList.toggle("hidden", !serverActive);
+  receiverPanel.classList.toggle("hidden", !receiverActive);
   archivePanel.classList.toggle("hidden", !serverContext);
-  renderPreview("tn", server?.previews?.tn, previewTnImage, previewTnMeta, previewTnEmpty);
-  renderPreview("dk", server?.previews?.dk, previewDkImage, previewDkMeta, previewDkEmpty);
+  renderPreview(server?.previews?.tn, "/api/server/preview/tn.jpg", previewTnImage, previewTnMeta, previewTnEmpty);
+  renderPreview(server?.previews?.dk, "/api/server/preview/dk.jpg", previewDkImage, previewDkMeta, previewDkEmpty);
+  renderReceiverPreview(receiver);
 
   renderArchive(storage.archive);
   logOutput.textContent = runtime.log_tail.length ? runtime.log_tail.join("\n") : "No logs yet.";

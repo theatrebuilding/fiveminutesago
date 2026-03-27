@@ -13,6 +13,8 @@ import yaml
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from .preview_catalog import build_server_preview_pattern, describe_latest_preview
+
 
 Gst.init(None)
 
@@ -109,7 +111,7 @@ class ServerRuntime:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             previews = {
-                feed: self._describe_preview(feed_state.preview_pattern)
+                feed: describe_latest_preview(self._preview_dir, feed_state.preview_pattern)
                 for feed, feed_state in self._video_feeds.items()
             }
             return {
@@ -135,7 +137,7 @@ class ServerRuntime:
             feed_state = self._video_feeds.get(feed)
             if feed_state is None:
                 return None
-            preview = self._describe_preview(feed_state.preview_pattern)
+            preview = describe_latest_preview(self._preview_dir, feed_state.preview_pattern)
             path = preview.get("path")
             return Path(path) if path else None
 
@@ -190,13 +192,13 @@ class ServerRuntime:
                 feed="tn",
                 send_port=int(ports["video_send_tn"]),
                 receive_port=int(ports["video_receive_dk"]),
-                preview_pattern=str(self._preview_dir / "tn-preview-%05d.jpg"),
+                preview_pattern=build_server_preview_pattern(self._preview_dir, "tn"),
             ),
             "dk": VideoFeedState(
                 feed="dk",
                 send_port=int(ports["video_send_dk"]),
                 receive_port=int(ports["video_receive_tn"]),
-                preview_pattern=str(self._preview_dir / "dk-preview-%05d.jpg"),
+                preview_pattern=build_server_preview_pattern(self._preview_dir, "dk"),
             ),
         }
 
@@ -456,32 +458,6 @@ class ServerRuntime:
             multifilesink location="{feed_state.preview_pattern}" max-files=2
         """
         return Gst.parse_launch(pipeline_str.strip())
-
-    def _describe_preview(self, pattern: str) -> dict[str, Any]:
-        prefix = Path(pattern).name.split("%", 1)[0]
-        candidates = sorted(
-            self._preview_dir.glob(f"{prefix}*.jpg"),
-            key=lambda path: path.stat().st_mtime,
-            reverse=True,
-        )
-        if not candidates:
-            return {
-                "available": False,
-                "path": None,
-                "updated_at": None,
-                "updated_at_ts": None,
-                "age_seconds": None,
-            }
-
-        latest = candidates[0]
-        modified_at = latest.stat().st_mtime
-        return {
-            "available": True,
-            "path": str(latest),
-            "updated_at": _to_iso(modified_at),
-            "updated_at_ts": modified_at,
-            "age_seconds": max(0, int(time.time() - modified_at)),
-        }
 
     def _log(self, message: str) -> None:
         if self._log_callback is not None:

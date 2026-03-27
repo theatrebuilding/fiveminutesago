@@ -19,8 +19,9 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 class VideoReceiver:
-    def __init__(self, country):
+    def __init__(self, country, preview_pattern=None):
         self.country = country
+        self.preview_pattern = preview_pattern
         self.pipeline = None
         self.loop = None
         self.server_address = None
@@ -43,9 +44,22 @@ class VideoReceiver:
             self.receive_port = config.get("ports", {}).get("video_receive_tn")
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
-        
+
+        selector_output = "input-selector name=selector ! kmssink sync=false"
+        if self.preview_pattern:
+            preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
+            selector_output = f"""
+                input-selector name=selector ! queue ! tee name=output_tee
+                output_tee. ! queue ! kmssink sync=false
+                output_tee. ! queue !
+                videoconvert ! videoscale ! videorate !
+                video/x-raw,width=640,height=360,framerate=1/1 !
+                jpegenc quality=70 !
+                multifilesink location="{preview_location}" max-files=2
+            """.strip()
+
         pipeline_str = f"""
-            input-selector name=selector ! kmssink sync=false
+            {selector_output}
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller"
                 ! queue max-size-time=2000000000 max-size-buffers=500
                 ! tsdemux name=demux
@@ -118,6 +132,8 @@ class VideoReceiver:
     def run(self):
         pipeline_str = self.build_pipeline()
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
+        if self.preview_pattern:
+            os.makedirs(os.path.dirname(os.path.abspath(self.preview_pattern)), exist_ok=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
         
         bus = self.pipeline.get_bus()
@@ -163,8 +179,9 @@ class VideoReceiver:
             self.loop.quit()
 
 class ReceiverManager:
-    def __init__(self, country):
+    def __init__(self, country, preview_pattern=None):
         self.country = country
+        self.preview_pattern = preview_pattern
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -173,7 +190,7 @@ class ReceiverManager:
     def run_video_worker(self):
         while not self.shutdown_event.is_set():
             print("ReceiverManager: Starting video receiver...")
-            video_receiver = VideoReceiver(self.country)
+            video_receiver = VideoReceiver(self.country, preview_pattern=self.preview_pattern)
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
             try:
@@ -207,9 +224,10 @@ def signal_handler(sig, frame, manager):
 def main():
     parser = argparse.ArgumentParser(description="Video Receiver Manager Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
     args = parser.parse_args()
 
-    manager = ReceiverManager(args.country)
+    manager = ReceiverManager(args.country, preview_pattern=args.preview_pattern)
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))
     manager.start()

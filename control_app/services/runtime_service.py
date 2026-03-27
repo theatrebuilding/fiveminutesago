@@ -10,6 +10,7 @@ import threading
 import time
 from typing import Any
 
+from .preview_catalog import build_receiver_preview_pattern, describe_latest_preview
 from .server_runtime import ServerRuntime
 
 
@@ -213,6 +214,7 @@ class RuntimeService:
             self._sync_state_locked()
             request = self._current_request
             server = self._server_runtime.snapshot() if self._server_runtime is not None else None
+            receiver = self._build_receiver_snapshot_locked(request)
             running = self._process is not None or (server is not None and server.get("running"))
             return {
                 "running": running,
@@ -227,6 +229,7 @@ class RuntimeService:
                 "pid": self._process.pid if self._process is not None else None,
                 "log_tail": list(self._log_lines),
                 "server": server,
+                "receiver": receiver,
             }
 
     def record_event(self, message: str) -> None:
@@ -246,11 +249,30 @@ class RuntimeService:
             return command, working_dir
 
         if request.role == "receiver":
-            command = [self._python_executable, "receive.py", "--country", request.country or "tn"]
+            self._preview_dir.mkdir(parents=True, exist_ok=True)
+            preview_pattern = build_receiver_preview_pattern(self._preview_dir, request.country or "tn")
+            command = [
+                self._python_executable,
+                "receive.py",
+                "--country",
+                request.country or "tn",
+                "--preview-pattern",
+                preview_pattern,
+            ]
             working_dir = self._project_root / "production" / "3_receiver"
             return command, working_dir
 
         raise ValueError(f"Unsupported subprocess role: {request.role}")
+
+    def _build_receiver_snapshot_locked(self, request: RuntimeLaunchRequest | None) -> dict[str, Any] | None:
+        if request is None or request.role != "receiver" or request.country is None:
+            return None
+
+        preview_pattern = build_receiver_preview_pattern(self._preview_dir, request.country)
+        return {
+            "country": request.country,
+            "preview": describe_latest_preview(self._preview_dir, preview_pattern),
+        }
 
     def _drain_output(self, process: subprocess.Popen[str]) -> None:
         if process.stdout is None:

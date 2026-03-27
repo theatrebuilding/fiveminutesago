@@ -278,6 +278,10 @@ button:disabled {
   gap: 24px;
 }
 
+.preview-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .preview-card {
   display: flex;
   flex-direction: column;
