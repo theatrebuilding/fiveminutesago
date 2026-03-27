@@ -1,4 +1,4 @@
-server_ip: 178.249.52.14
+server_ip: 100.119.85.108
 streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"
 streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
 
