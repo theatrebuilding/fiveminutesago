@@ -21,6 +21,7 @@ class AppPaths:
     storage_root: Path
     archive_dir: Path
     preview_dir: Path
+    host_device_root: Path
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ def build_settings() -> AppSettings:
         storage_root=storage_root,
         archive_dir=storage_root / "video",
         preview_dir=storage_root / "previews",
+        host_device_root=Path(os.getenv("HOST_DEVICE_ROOT", "/host-dev")),
     )
 
     return AppSettings(

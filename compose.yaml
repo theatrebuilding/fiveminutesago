@@ -1,14 +1,14 @@
 services:
-  teateroen-server:
+  ldn-sender:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: teateroen-server
+    hostname: ldn-sender
     userns_mode: "host"
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_AUTH_ONCE: "true"
-      TS_HOSTNAME: teateroen-server
+      TS_HOSTNAME: ldn-sender
       TS_EXTRA_ARGS: --advertise-tags=tag:container
       TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
       TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
@@ -20,9 +20,12 @@ services:
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
-      - /mnt/tbdrive:/mnt/tbdrive
+      - /dev:/host-dev
     devices:
       - /dev/net/tun:/dev/net/tun
+    device_cgroup_rules:
+      - "c 81:* rmw"
+      - "c 116:* rmw"
     cap_add:
       - NET_ADMIN
     restart: unless-stopped

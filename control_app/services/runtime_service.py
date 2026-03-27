@@ -23,6 +23,7 @@ class RuntimeLaunchRequest:
     country: str | None = None
     audio_enabled: bool = False
     audio_device: str | None = None
+    video_device: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +31,7 @@ class RuntimeLaunchRequest:
             "country": self.country,
             "audio_enabled": self.audio_enabled,
             "audio_device": self.audio_device,
+            "video_device": self.video_device,
         }
 
     @classmethod
@@ -51,15 +53,19 @@ class RuntimeLaunchRequest:
         audio_enabled = bool(payload.get("audio_enabled"))
         audio_device_raw = payload.get("audio_device")
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
+        video_device_raw = payload.get("video_device")
+        video_device = str(video_device_raw).strip() or None if video_device_raw is not None else None
         if role != "sender":
             audio_enabled = False
             audio_device = None
+            video_device = None
 
         return cls(
             role=role,
             country=country,
             audio_enabled=audio_enabled,
             audio_device=audio_device,
+            video_device=video_device,
         )
 
 
@@ -234,6 +240,8 @@ class RuntimeService:
             command.append("--with-audio" if request.audio_enabled else "--no-audio")
             if request.audio_device:
                 command.extend(["--device", request.audio_device])
+            if request.video_device:
+                command.extend(["--video-device", request.video_device])
             working_dir = self._project_root / "production" / "1_sender"
             return command, working_dir
 

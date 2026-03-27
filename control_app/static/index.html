@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Five Minutes Ago Control</title>
+    <title>Crying By the Sea Control</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
@@ -11,7 +11,7 @@
       <header class="hero">
         <div>
           <p class="eyebrow">Runtime Control Surface</p>
-          <h1>Five Minutes Ago</h1>
+          <h1>Crying By the Sea</h1>
           <p class="hero-copy">
             Launch the machine as a server, sender, or receiver. When the server role is active, preview both incoming feeds
             and control recording manually.
@@ -47,17 +47,20 @@
               </select>
             </label>
 
-            <div id="audio-toggle-field" class="field checkbox-field">
-              <span class="field-label">Sender Audio</span>
-              <label class="checkbox-row">
-                <input id="audio-enabled" type="checkbox" />
-                <span>Launch audio sender too</span>
-              </label>
-            </div>
+            <label id="video-device-field" class="field">
+              <span class="field-label">Camera</span>
+              <select id="video-device-select">
+                <option value="">Loading cameras…</option>
+              </select>
+              <p id="video-device-message" class="field-help">Scanning container-visible cameras…</p>
+            </label>
 
             <label id="audio-device-field" class="field">
-              <span class="field-label">Audio Device</span>
-              <input id="audio-device" type="text" placeholder="default or hw:1,0" />
+              <span class="field-label">Audio Input</span>
+              <select id="audio-device-select">
+                <option value="">No audio input</option>
+              </select>
+              <p id="audio-device-message" class="field-help">If nothing is selected, sender audio stays disabled.</p>
             </label>
           </div>
           <div class="button-row">
@@ -84,7 +87,7 @@
               <p id="config-state" class="metric-value">Unknown</p>
               <p id="config-meta" class="metric-meta"></p>
             </article>
-            <article class="metric-card">
+            <article id="recording-metric" class="metric-card hidden">
               <p class="metric-label">Recording</p>
               <p id="recording-state" class="metric-value">Unknown</p>
               <p id="recording-meta" class="metric-meta"></p>
@@ -125,7 +128,7 @@
           </div>
         </section>
 
-        <section class="panel storage-panel">
+        <section id="archive-panel" class="panel storage-panel hidden">
           <div class="panel-heading">
             <h2>Recording Archive</h2>
             <p>Latest timestamped recordings stored on the machine.</p>

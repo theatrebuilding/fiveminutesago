@@ -9,6 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
+    alsa-utils \
     ca-certificates \
     iproute2 \
     iptables \
@@ -19,11 +20,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-base \
     gstreamer1.0-plugins-good \
+    gstreamer1.0-plugins-ugly \
     gstreamer1.0-tools \
     python3 \
     python3-gi \
     python3-gst-1.0 \
     python3-venv \
+    v4l-utils \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
@@ -40,9 +43,9 @@ COPY . /app
 COPY start.sh /usr/local/bin/start.sh
 
 RUN chmod +x /usr/local/bin/start.sh \
- && mkdir -p /mnt/tbdrive/video /var/lib/tailscale /var/run/tailscale
+ && mkdir -p /var/lib/tailscale /var/run/tailscale
 
-VOLUME ["/mnt/tbdrive", "/var/lib/tailscale"]
+VOLUME ["/var/lib/tailscale"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/start.sh"]
 CMD ["uvicorn", "control_app.main:app", "--host", "0.0.0.0", "--port", "8000"]

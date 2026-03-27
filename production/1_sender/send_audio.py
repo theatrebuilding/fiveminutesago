@@ -33,8 +33,9 @@ class AudioSender:
         # Load configuration.
         config = load_config()
 
-        # Allow override via CLI.
-        self.device = device or config.get("audio", {}).get("device", "default")
+        # Allow the dashboard to override the capture device while playback stays on the configured/default sink.
+        self.capture_device = device or config.get("audio", {}).get("device", "default")
+        self.playback_device = config.get("audio", {}).get("playback_device", "default")
 
         self.server_ip = None
         self.audio_send_port = None
@@ -82,9 +83,9 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe
                 ! queue
-                ! alsasink device={self.device} async=true
+                ! alsasink device={self.playback_device} async=true
 
-            alsasrc device={self.device}
+            alsasrc device={self.capture_device}
                 ! queue
                 ! audioconvert
                 ! audioresample
@@ -154,7 +155,7 @@ def signal_handler(sig, frame, sender):
 def main():
     parser = argparse.ArgumentParser(description="Audio Sender Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
-    parser.add_argument("--device", help="ALSA audio device name (e.g., 'hw:1,0' or 'default')")
+    parser.add_argument("--device", help="ALSA audio capture device name (e.g., 'hw:1,0')")
     args = parser.parse_args()
 
     audio_sender = AudioSender(args.country, args.device)

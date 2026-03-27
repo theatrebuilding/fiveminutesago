@@ -7,8 +7,10 @@ const processState = document.getElementById("process-state");
 const processMeta = document.getElementById("process-meta");
 const configState = document.getElementById("config-state");
 const configMeta = document.getElementById("config-meta");
+const recordingMetric = document.getElementById("recording-metric");
 const recordingState = document.getElementById("recording-state");
 const recordingMeta = document.getElementById("recording-meta");
+const archivePanel = document.getElementById("archive-panel");
 const archiveSummary = document.getElementById("archive-summary");
 const archiveFiles = document.getElementById("archive-files");
 const logOutput = document.getElementById("log-output");
@@ -19,10 +21,12 @@ const recordMessage = document.getElementById("record-message");
 const roleSelect = document.getElementById("role-select");
 const countryField = document.getElementById("country-field");
 const countrySelect = document.getElementById("country-select");
-const audioToggleField = document.getElementById("audio-toggle-field");
-const audioEnabled = document.getElementById("audio-enabled");
+const videoDeviceField = document.getElementById("video-device-field");
+const videoDeviceSelect = document.getElementById("video-device-select");
+const videoDeviceMessage = document.getElementById("video-device-message");
 const audioDeviceField = document.getElementById("audio-device-field");
-const audioDeviceInput = document.getElementById("audio-device");
+const audioDeviceSelect = document.getElementById("audio-device-select");
+const audioDeviceMessage = document.getElementById("audio-device-message");
 const startRoleButton = document.getElementById("start-role");
 const stopRoleButton = document.getElementById("stop-role");
 const saveConfigButton = document.getElementById("save-config");
@@ -39,6 +43,8 @@ const previewDkEmpty = document.getElementById("preview-dk-empty");
 
 let refreshTimer = null;
 let latestStatus = null;
+let videoDevices = [];
+let audioDevices = [];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -113,9 +119,10 @@ function describeLaunch(launch) {
   }
 
   const site = launch.country ? launch.country.toUpperCase() : "Unknown site";
+  const cameraLabel = launch.video_device ? ` • ${launch.video_device.split("/").pop()}` : "";
   if (launch.role === "sender") {
     const audioLabel = launch.audio_enabled ? `audio on${launch.audio_device ? ` (${launch.audio_device})` : ""}` : "audio off";
-    return `Sender ${site} • ${audioLabel}`;
+    return `Sender ${site}${cameraLabel} • ${audioLabel}`;
   }
 
   return `Receiver ${site}`;
@@ -141,10 +148,14 @@ function applyRoleFormState() {
   const role = roleSelect.value;
   const sender = role === "sender";
   const receiver = role === "receiver";
+  const runtimeRole = latestStatus?.runtime?.running ? latestStatus.runtime.role : null;
+  const serverContext = (runtimeRole || role) === "server";
 
   countryField.classList.toggle("hidden", !(sender || receiver));
-  audioToggleField.classList.toggle("hidden", !sender);
-  audioDeviceField.classList.toggle("hidden", !sender || !audioEnabled.checked);
+  videoDeviceField.classList.toggle("hidden", !sender);
+  audioDeviceField.classList.toggle("hidden", !sender);
+  recordingMetric.classList.toggle("hidden", !serverContext);
+  archivePanel.classList.toggle("hidden", !serverContext);
 }
 
 function syncFormFromRuntime(runtime) {
@@ -158,9 +169,104 @@ function syncFormFromRuntime(runtime) {
   if (launch.country) {
     countrySelect.value = launch.country;
   }
-  audioEnabled.checked = Boolean(launch.audio_enabled);
-  audioDeviceInput.value = launch.audio_device || "";
+  if (launch.video_device) {
+    ensureVideoDeviceOption(launch.video_device);
+    videoDeviceSelect.value = launch.video_device;
+  }
+  ensureAudioDeviceOption(launch.audio_device);
+  audioDeviceSelect.value = launch.audio_enabled ? (launch.audio_device || "") : "";
   applyRoleFormState();
+}
+
+function ensureVideoDeviceOption(path) {
+  const existing = Array.from(videoDeviceSelect.options).find((option) => option.value === path);
+  if (existing) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = path;
+  option.textContent = path.split("/").pop() || path;
+  videoDeviceSelect.appendChild(option);
+}
+
+function ensureAudioDeviceOption(path) {
+  if (!path) {
+    return;
+  }
+
+  const existing = Array.from(audioDeviceSelect.options).find((option) => option.value === path);
+  if (existing) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = path;
+  option.textContent = path;
+  audioDeviceSelect.appendChild(option);
+}
+
+function renderVideoDevices(devices) {
+  const currentValue = videoDeviceSelect.value;
+  videoDeviceSelect.innerHTML = "";
+
+  if (!devices.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No cameras found";
+    videoDeviceSelect.appendChild(option);
+    videoDeviceSelect.disabled = true;
+    videoDeviceMessage.textContent = "No camera devices are currently visible inside the container.";
+    return;
+  }
+
+  videoDeviceSelect.disabled = false;
+  devices.forEach((device) => {
+    const option = document.createElement("option");
+    option.value = device.path;
+    option.textContent = device.alias_path
+      ? `${device.label} (${device.alias_path.split("/").pop()})`
+      : `${device.label} (${device.path.split("/").pop()})`;
+    videoDeviceSelect.appendChild(option);
+  });
+
+  const selected = devices.some((device) => device.path === currentValue)
+    ? currentValue
+    : latestStatus?.runtime?.launch?.video_device || devices[0].path;
+  videoDeviceSelect.value = selected;
+  videoDeviceMessage.textContent = `${devices.length} camera device${devices.length === 1 ? "" : "s"} discovered inside the container.`;
+}
+
+function renderAudioDevices(devices) {
+  const currentValue = audioDeviceSelect.value;
+  audioDeviceSelect.innerHTML = "";
+
+  const blankOption = document.createElement("option");
+  blankOption.value = "";
+  blankOption.textContent = "No audio input";
+  audioDeviceSelect.appendChild(blankOption);
+
+  if (!devices.length) {
+    audioDeviceSelect.disabled = true;
+    audioDeviceMessage.textContent = "No capture devices are currently visible inside the container. Audio will stay disabled.";
+    return;
+  }
+
+  audioDeviceSelect.disabled = false;
+  devices.forEach((device) => {
+    const option = document.createElement("option");
+    option.value = device.path;
+    option.textContent = `${device.label} (${device.path})`;
+    audioDeviceSelect.appendChild(option);
+  });
+
+  const selected = devices.some((device) => device.path === currentValue)
+    ? currentValue
+    : latestStatus?.runtime?.launch?.audio_enabled
+      ? latestStatus.runtime.launch.audio_device || ""
+      : "";
+  audioDeviceSelect.value = selected;
+  audioDeviceMessage.textContent = `${devices.length} audio input${devices.length === 1 ? "" : "s"} discovered inside the container.`;
 }
 
 function renderPreview(feed, preview, image, meta, empty) {
@@ -187,6 +293,7 @@ function renderStatus(status) {
   const recording = server?.recording;
   const launch = runtime.launch;
   const serverActive = runtime.running && runtime.role === "server";
+  const serverContext = (runtime.running ? runtime.role : roleSelect.value) === "server";
 
   syncFormFromRuntime(runtime);
 
@@ -227,7 +334,9 @@ function renderStatus(status) {
   recordToggleButton.textContent = recording?.active ? "Stop Recording" : "Start Recording";
   recordToggleButton.disabled = !serverActive;
 
+  recordingMetric.classList.toggle("hidden", !serverContext);
   serverPanel.classList.toggle("hidden", !serverActive);
+  archivePanel.classList.toggle("hidden", !serverContext);
   renderPreview("tn", server?.previews?.tn, previewTnImage, previewTnMeta, previewTnEmpty);
   renderPreview("dk", server?.previews?.dk, previewDkImage, previewDkMeta, previewDkEmpty);
 
@@ -256,6 +365,32 @@ async function loadConfig() {
   }
 }
 
+async function loadVideoDevices() {
+  try {
+    const payload = await api("/api/devices/video", { method: "GET" });
+    videoDevices = payload.devices || [];
+    renderVideoDevices(videoDevices);
+  } catch (error) {
+    videoDevices = [];
+    videoDeviceSelect.innerHTML = '<option value="">Camera scan failed</option>';
+    videoDeviceSelect.disabled = true;
+    videoDeviceMessage.textContent = error.message;
+  }
+}
+
+async function loadAudioDevices() {
+  try {
+    const payload = await api("/api/devices/audio", { method: "GET" });
+    audioDevices = payload.devices || [];
+    renderAudioDevices(audioDevices);
+  } catch (error) {
+    audioDevices = [];
+    audioDeviceSelect.innerHTML = '<option value="">Audio scan failed</option>';
+    audioDeviceSelect.disabled = true;
+    audioDeviceMessage.textContent = error.message;
+  }
+}
+
 function buildLaunchPayload() {
   const payload = {
     role: roleSelect.value,
@@ -266,8 +401,9 @@ function buildLaunchPayload() {
   }
 
   if (payload.role === "sender") {
-    payload.audio_enabled = audioEnabled.checked;
-    payload.audio_device = audioDeviceInput.value.trim();
+    payload.video_device = videoDeviceSelect.value || null;
+    payload.audio_device = audioDeviceSelect.value || null;
+    payload.audio_enabled = Boolean(payload.audio_device);
   }
 
   return payload;
@@ -348,8 +484,12 @@ async function saveConfig(restart) {
   }
 }
 
-roleSelect.addEventListener("change", applyRoleFormState);
-audioEnabled.addEventListener("change", applyRoleFormState);
+roleSelect.addEventListener("change", async () => {
+  applyRoleFormState();
+  if (roleSelect.value === "sender") {
+    await Promise.all([loadVideoDevices(), loadAudioDevices()]);
+  }
+});
 startRoleButton.addEventListener("click", startRole);
 stopRoleButton.addEventListener("click", stopRole);
 recordToggleButton.addEventListener("click", toggleRecording);
@@ -365,7 +505,7 @@ window.addEventListener("keydown", (event) => {
 
 async function boot() {
   applyRoleFormState();
-  await Promise.all([refreshStatus(), loadConfig()]);
+  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices()]);
   refreshTimer = window.setInterval(refreshStatus, 3000);
 }
 

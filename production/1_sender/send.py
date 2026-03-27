@@ -25,8 +25,9 @@ from config_loader import load_config
 # VideoSender Class (unchanged)
 #########################################
 class VideoSender:
-    def __init__(self, country):
+    def __init__(self, country, video_device=None):
         self.country = country
+        self.video_device = video_device
         self.pipeline = None
         self.loop = None
         self.server_ip = None
@@ -56,6 +57,8 @@ class VideoSender:
         streaming_settings = cfg.get("streaming_settings_video", "")
         video_opts = cfg.get("video", {})
         video_source = video_opts.get("source", "/dev/video0")
+        if self.video_device:
+            video_source = f"v4l2src device={self.video_device}"
         bitrate = video_opts.get("bitrate", 1000)
         key_int_max = video_opts.get("key_int_max", 15)
         tune = video_opts.get("tune", "zerolatency")
@@ -139,6 +142,7 @@ def main():
     audio_group.add_argument("--no-audio", dest="with_audio", action="store_false", help="Do not launch the audio subprocess.")
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio device name passed to the audio subprocess.")
+    parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
     args = parser.parse_args()
 
     if args.with_audio is None:
@@ -159,7 +163,7 @@ def main():
         print("Launching audio sender subprocess:", " ".join(audio_cmd))
         audio_proc = subprocess.Popen(audio_cmd)
 
-    video_sender = VideoSender(args.country)
+    video_sender = VideoSender(args.country, video_device=args.video_device)
     shared_clock = Gst.SystemClock.obtain()
     video_sender.set_clock(shared_clock)
 

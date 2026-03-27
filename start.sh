@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+expose_optional_host_sound() {
+  local host_sound_dir="/host-dev/snd"
+
+  [[ -e "$host_sound_dir" ]] || return 0
+
+  if [[ -L /dev/snd ]]; then
+    return 0
+  fi
+
+  if [[ -e /dev/snd && ! -L /dev/snd ]]; then
+    return 0
+  fi
+
+  ln -s "$host_sound_dir" /dev/snd
+}
+
 render_serve_config() {
   local template_path="${TS_SERVE_TEMPLATE:-/config/control-app-funnel.template.json}"
   local output_path="${TS_SERVE_CONFIG:-}"
@@ -53,6 +69,7 @@ for _ in $(seq 1 15); do
   sleep 1
 done
 
+expose_optional_host_sound
 render_serve_config &
 
 exec "$@"

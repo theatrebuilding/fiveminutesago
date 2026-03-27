@@ -11,9 +11,11 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .services.config_service import ConfigService, ConfigValidationError
+from .services.audio_device_service import AudioDeviceService
 from .services.dashboard_service import DashboardService
 from .services.runtime_service import RuntimeLaunchRequest, RuntimeService
 from .services.storage_service import StorageService
+from .services.video_device_service import VideoDeviceService
 from .settings import AppSettings, build_settings
 
 
@@ -23,6 +25,8 @@ class AppServices:
     config_service: ConfigService
     runtime_service: RuntimeService
     dashboard_service: DashboardService
+    audio_device_service: AudioDeviceService
+    video_device_service: VideoDeviceService
 
 
 settings = build_settings()
@@ -48,12 +52,16 @@ async def lifespan(app: FastAPI):
         runtime_service=runtime_service,
         storage_service=storage_service,
     )
+    audio_device_service = AudioDeviceService()
+    video_device_service = VideoDeviceService(settings.paths.host_device_root)
 
     app.state.services = AppServices(
         settings=settings,
         config_service=config_service,
         runtime_service=runtime_service,
         dashboard_service=dashboard_service,
+        audio_device_service=audio_device_service,
+        video_device_service=video_device_service,
     )
 
     yield
@@ -106,6 +114,23 @@ async def get_config(request: Request) -> dict[str, Any]:
         "path": str(services.config_service.config_path),
         "text": services.config_service.read_text(),
         "summary": services.dashboard_service.build_config_summary(),
+    }
+
+
+@app.get("/api/devices/video")
+async def get_video_devices(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    return {
+        "devices": services.video_device_service.list_devices(),
+        "root": str(services.settings.paths.host_device_root),
+    }
+
+
+@app.get("/api/devices/audio")
+async def get_audio_devices(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    return {
+        "devices": services.audio_device_service.list_devices(),
     }
 
 
