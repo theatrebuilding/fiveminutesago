@@ -8,16 +8,11 @@
   </head>
   <body>
     <div class="page-shell">
-      <header class="hero">
+      <header class="header">
         <div>
-          <p class="eyebrow">Runtime Control Surface</p>
           <h1>Crying By the Sea</h1>
-          <p class="hero-copy">
-            Launch the machine as a server, sender, or receiver. When the server role is active, preview both incoming feeds
-            and control recording manually.
-          </p>
         </div>
-        <div class="hero-status">
+        <div class="header-status">
           <span id="runtime-pill" class="status-pill">Unknown</span>
           <p id="refresh-label">Waiting for first status refresh…</p>
         </div>
@@ -27,7 +22,6 @@
         <section class="panel command-panel">
           <div class="panel-heading">
             <h2>Role Launcher</h2>
-            <p>Starting a new role automatically replaces the currently running one.</p>
           </div>
           <div class="form-grid">
             <label class="field">
@@ -141,8 +135,7 @@
 
         <section class="panel logs-panel">
           <div class="panel-heading">
-            <h2>Runtime Log Tail</h2>
-            <p>Latest control events and subprocess or in-process runtime output.</p>
+            <h2>Terminal Output</h2>
           </div>
           <pre id="log-output" class="log-output">Loading logs…</pre>
         </section>
@@ -150,7 +143,6 @@
         <section class="panel config-panel">
           <div class="panel-heading">
             <h2>Config Editor</h2>
-            <p>Save the YAML only, or apply it immediately by relaunching the currently active role.</p>
           </div>
           <div class="button-row">
             <button id="save-config" class="button-muted">Save Config</button>

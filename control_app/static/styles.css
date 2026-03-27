@@ -34,7 +34,7 @@ body {
   padding: 24px;
 }
 
-.hero {
+.header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 24px;
@@ -42,7 +42,6 @@ body {
   margin-bottom: 32px;
 }
 
-.eyebrow,
 .field-label,
 .metric-label {
   margin: 0;
@@ -79,7 +78,7 @@ h3 {
   color: var(--text);
 }
 
-.hero-copy,
+
 .panel-heading p,
 .metric-meta,
 .archive-summary,
@@ -91,11 +90,8 @@ h3 {
   font-size: 0.88rem;
 }
 
-.hero-copy {
-  max-width: 60rem;
-}
 
-.hero-status {
+.header-status {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -378,7 +374,7 @@ button:disabled {
     padding: 18px;
   }
 
-  .hero,
+  .header,
   .panel-heading,
   .panel-heading-inline,
   .metric-grid,
@@ -388,7 +384,7 @@ button:disabled {
     flex-direction: column;
   }
 
-  .hero-status {
+  .header-status {
     align-items: flex-start;
     text-align: left;
   }
