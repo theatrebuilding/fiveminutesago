@@ -8,6 +8,7 @@ import argparse
 import threading
 import time
 import os
+from pathlib import Path
 
 # Insert parent directory for config_loader
 script_dir = os.path.dirname(os.path.realpath(__file__))
@@ -18,10 +19,16 @@ if parent_dir not in sys.path:
 # Import configuration loader (assumes a config_loader.py module is available)
 from config_loader import load_config
 
+
+DEFAULT_VIDEO_SINK = "auto"
+KMS_VIDEO_SINK = "kmssink sync=false"
+HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
+
 class VideoReceiver:
-    def __init__(self, country, preview_pattern=None):
+    def __init__(self, country, preview_pattern=None, video_sink=DEFAULT_VIDEO_SINK):
         self.country = country
         self.preview_pattern = preview_pattern
+        self.video_sink = video_sink
         self.pipeline = None
         self.loop = None
         self.server_address = None
@@ -45,12 +52,15 @@ class VideoReceiver:
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
 
-        selector_output = "input-selector name=selector ! kmssink sync=false"
+        sink_name, sink_pipeline, sink_reason = self.resolve_video_sink()
+        print(f"VideoReceiver: Using video sink '{sink_name}' ({sink_reason}).")
+
+        selector_output = f"input-selector name=selector ! {sink_pipeline}"
         if self.preview_pattern:
             preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
             selector_output = f"""
                 input-selector name=selector ! queue ! tee name=output_tee
-                output_tee. ! queue ! kmssink sync=false
+                output_tee. ! queue ! {sink_pipeline}
                 output_tee. ! queue !
                 videoconvert ! videoscale ! videorate !
                 video/x-raw,width=640,height=360,framerate=1/1 !
@@ -79,6 +89,42 @@ class VideoReceiver:
                 ! queue ! selector.
         """
         return pipeline_str.strip()
+
+    def resolve_video_sink(self):
+        requested_sink = (self.video_sink or DEFAULT_VIDEO_SINK).strip().lower()
+        if requested_sink in {"", DEFAULT_VIDEO_SINK}:
+            return self.auto_select_video_sink()
+        if requested_sink == "kms":
+            self.require_kms_sink()
+            return "kmssink", KMS_VIDEO_SINK, "explicitly requested"
+        if requested_sink in {"fake", "fakesink", "headless"}:
+            return "fakesink", HEADLESS_VIDEO_SINK, "headless mode requested"
+        raise ValueError("Unsupported video sink. Use one of: auto, kms, fake.")
+
+    def auto_select_video_sink(self):
+        if Gst.ElementFactory.find("kmssink") is None:
+            return "fakesink", HEADLESS_VIDEO_SINK, "kmssink plugin unavailable; running headless"
+
+        drm_cards = sorted(Path("/dev/dri").glob("card*"))
+        if not drm_cards:
+            return "fakesink", HEADLESS_VIDEO_SINK, "no /dev/dri/card* device is available; running headless"
+
+        accessible_cards = [path for path in drm_cards if os.access(path, os.R_OK | os.W_OK)]
+        if not accessible_cards:
+            return "fakesink", HEADLESS_VIDEO_SINK, "DRM devices exist but are not readable and writable; running headless"
+
+        return "kmssink", KMS_VIDEO_SINK, f"using {accessible_cards[0]}"
+
+    def require_kms_sink(self):
+        if Gst.ElementFactory.find("kmssink") is None:
+            raise RuntimeError("kmssink is not available in this environment.")
+
+        drm_cards = sorted(Path("/dev/dri").glob("card*"))
+        if not drm_cards:
+            raise RuntimeError("No DRM device is available under /dev/dri. Use --video-sink fake to run the receiver headless.")
+
+        if not any(os.access(path, os.R_OK | os.W_OK) for path in drm_cards):
+            raise RuntimeError("DRM devices are present but not readable and writable. Use --video-sink fake to run the receiver headless.")
 
     def primary_buffer_probe(self, pad, info):
         if info.type & Gst.PadProbeType.BUFFER:
@@ -179,9 +225,10 @@ class VideoReceiver:
             self.loop.quit()
 
 class ReceiverManager:
-    def __init__(self, country, preview_pattern=None):
+    def __init__(self, country, preview_pattern=None, video_sink=DEFAULT_VIDEO_SINK):
         self.country = country
         self.preview_pattern = preview_pattern
+        self.video_sink = video_sink
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -190,7 +237,11 @@ class ReceiverManager:
     def run_video_worker(self):
         while not self.shutdown_event.is_set():
             print("ReceiverManager: Starting video receiver...")
-            video_receiver = VideoReceiver(self.country, preview_pattern=self.preview_pattern)
+            video_receiver = VideoReceiver(
+                self.country,
+                preview_pattern=self.preview_pattern,
+                video_sink=self.video_sink,
+            )
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
             try:
@@ -225,9 +276,14 @@ def main():
     parser = argparse.ArgumentParser(description="Video Receiver Manager Script")
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
+    parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
     args = parser.parse_args()
 
-    manager = ReceiverManager(args.country, preview_pattern=args.preview_pattern)
+    manager = ReceiverManager(
+        args.country,
+        preview_pattern=args.preview_pattern,
+        video_sink=args.video_sink,
+    )
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))
     manager.start()
