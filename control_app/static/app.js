@@ -45,6 +45,7 @@ let refreshTimer = null;
 let latestStatus = null;
 let videoDevices = [];
 let audioDevices = [];
+let launchFormDirty = false;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -158,7 +159,16 @@ function applyRoleFormState() {
   archivePanel.classList.toggle("hidden", !serverContext);
 }
 
+function markLaunchFormDirty() {
+  launchFormDirty = true;
+}
+
 function syncFormFromRuntime(runtime) {
+  if (!runtime.running || launchFormDirty) {
+    applyRoleFormState();
+    return;
+  }
+
   const launch = runtime.launch;
   if (!launch) {
     applyRoleFormState();
@@ -419,6 +429,7 @@ async function startRole() {
       body: JSON.stringify(buildLaunchPayload()),
     });
     actionMessage.textContent = payload.message;
+    launchFormDirty = false;
     await refreshStatus();
   } catch (error) {
     actionMessage.textContent = error.message;
@@ -485,11 +496,15 @@ async function saveConfig(restart) {
 }
 
 roleSelect.addEventListener("change", async () => {
+  markLaunchFormDirty();
   applyRoleFormState();
   if (roleSelect.value === "sender") {
     await Promise.all([loadVideoDevices(), loadAudioDevices()]);
   }
 });
+countrySelect.addEventListener("change", markLaunchFormDirty);
+videoDeviceSelect.addEventListener("change", markLaunchFormDirty);
+audioDeviceSelect.addEventListener("change", markLaunchFormDirty);
 startRoleButton.addEventListener("click", startRole);
 stopRoleButton.addEventListener("click", stopRole);
 recordToggleButton.addEventListener("click", toggleRecording);
