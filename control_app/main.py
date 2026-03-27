@@ -248,6 +248,25 @@ async def receiver_preview(request: Request) -> FileResponse:
     )
 
 
+@app.get("/api/sender/preview.jpg")
+async def sender_preview(request: Request) -> FileResponse:
+    services = _services(request)
+    runtime = services.runtime_service.snapshot()
+    sender = runtime.get("sender") or {}
+    path = (sender.get("preview") or {}).get("path")
+    if not path:
+        raise HTTPException(status_code=404, detail="Preview not available.")
+
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
+
+
 def _services(request: Request) -> AppServices:
     return request.app.state.services
 

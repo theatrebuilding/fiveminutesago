@@ -19,6 +19,11 @@ def build_receiver_preview_pattern(preview_dir: Path, country: str) -> str:
     return str(preview_dir / f"receiver-{normalized_country}-preview-%05d.jpg")
 
 
+def build_sender_preview_pattern(preview_dir: Path, country: str) -> str:
+    normalized_country = _normalize_feed(country)
+    return str(preview_dir / f"sender-{normalized_country}-preview-%05d.jpg")
+
+
 def describe_latest_preview(preview_dir: Path, pattern: str) -> dict[str, Any]:
     prefix = Path(pattern).name.split("%", 1)[0]
     candidates = sorted(

@@ -31,6 +31,7 @@ const startRoleButton = document.getElementById("start-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
 const serverPanel = document.getElementById("server-panel");
+const senderPanel = document.getElementById("sender-panel");
 const receiverPanel = document.getElementById("receiver-panel");
 const recordToggleButton = document.getElementById("record-toggle");
 
@@ -40,6 +41,10 @@ const previewTnEmpty = document.getElementById("preview-tn-empty");
 const previewDkMeta = document.getElementById("preview-dk-meta");
 const previewDkImage = document.getElementById("preview-dk-image");
 const previewDkEmpty = document.getElementById("preview-dk-empty");
+const senderPreviewTitle = document.getElementById("sender-preview-title");
+const senderPreviewMeta = document.getElementById("sender-preview-meta");
+const senderPreviewImage = document.getElementById("sender-preview-image");
+const senderPreviewEmpty = document.getElementById("sender-preview-empty");
 const receiverPreviewTitle = document.getElementById("receiver-preview-title");
 const receiverPreviewMeta = document.getElementById("receiver-preview-meta");
 const receiverPreviewImage = document.getElementById("receiver-preview-image");
@@ -124,10 +129,10 @@ function describeLaunch(launch) {
   }
 
   const site = launch.country ? launch.country.toUpperCase() : "Unknown site";
-  const cameraLabel = launch.video_device ? ` • ${launch.video_device.split("/").pop()}` : "";
   if (launch.role === "sender") {
+    const videoLabel = launch.video_device ? launch.video_device.split("/").pop() : "test signal";
     const audioLabel = launch.audio_enabled ? `audio on${launch.audio_device ? ` (${launch.audio_device})` : ""}` : "audio off";
-    return `Sender ${site}${cameraLabel} • ${audioLabel}`;
+    return `Sender ${site} • ${videoLabel} • ${audioLabel}`;
   }
 
   return `Receiver ${site}`;
@@ -193,9 +198,13 @@ function syncFormFromRuntime(runtime) {
   if (launch.country) {
     countrySelect.value = launch.country;
   }
-  if (launch.video_device) {
-    ensureVideoDeviceOption(launch.video_device);
-    videoDeviceSelect.value = launch.video_device;
+  if (launch.role === "sender") {
+    if (launch.video_device) {
+      ensureVideoDeviceOption(launch.video_device);
+      videoDeviceSelect.value = launch.video_device;
+    } else {
+      videoDeviceSelect.value = "";
+    }
   }
   ensureAudioDeviceOption(launch.audio_device);
   audioDeviceSelect.value = launch.audio_enabled ? (launch.audio_device || "") : "";
@@ -232,15 +241,19 @@ function ensureAudioDeviceOption(path) {
 
 function renderVideoDevices(devices) {
   const currentValue = videoDeviceSelect.value;
+  const runtimeLaunch = latestStatus?.runtime?.launch;
+  const runtimeSenderVideoDevice = runtimeLaunch?.role === "sender" ? runtimeLaunch.video_device : undefined;
   videoDeviceSelect.innerHTML = "";
 
+  const testOption = document.createElement("option");
+  testOption.value = "";
+  testOption.textContent = "Test signal";
+  videoDeviceSelect.appendChild(testOption);
+
   if (!devices.length) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = "No cameras found";
-    videoDeviceSelect.appendChild(option);
-    videoDeviceSelect.disabled = true;
-    videoDeviceMessage.textContent = "No camera devices are currently visible inside the container.";
+    videoDeviceSelect.disabled = false;
+    videoDeviceSelect.value = "";
+    videoDeviceMessage.textContent = "No camera devices are currently visible inside the container. Sender will use the test signal.";
     return;
   }
 
@@ -254,11 +267,18 @@ function renderVideoDevices(devices) {
     videoDeviceSelect.appendChild(option);
   });
 
-  const selected = devices.some((device) => device.path === currentValue)
-    ? currentValue
-    : latestStatus?.runtime?.launch?.video_device || devices[0].path;
+  let selected = devices[0].path;
+  if (runtimeSenderVideoDevice === null) {
+    selected = "";
+  } else if (devices.some((device) => device.path === currentValue)) {
+    selected = currentValue;
+  } else if (currentValue === "" && launchFormDirty) {
+    selected = "";
+  } else if (runtimeSenderVideoDevice && devices.some((device) => device.path === runtimeSenderVideoDevice)) {
+    selected = runtimeSenderVideoDevice;
+  }
   videoDeviceSelect.value = selected;
-  videoDeviceMessage.textContent = `${devices.length} camera device${devices.length === 1 ? "" : "s"} discovered inside the container.`;
+  videoDeviceMessage.textContent = `${devices.length} camera device${devices.length === 1 ? "" : "s"} discovered inside the container. Leave Test signal selected to send the fallback pattern.`;
 }
 
 function renderAudioDevices(devices) {
@@ -308,6 +328,14 @@ function renderPreview(preview, imageUrl, image, meta, empty) {
   meta.textContent = `Updated ${formatSeconds(preview.age_seconds)} ago`;
 }
 
+function renderSenderPreview(sender) {
+  const country = sender?.country || latestStatus?.runtime?.launch?.country || null;
+  const countryLabel = formatCountryLabel(country);
+  senderPreviewTitle.textContent = `${countryLabel} Feed`;
+  senderPreviewImage.alt = `${countryLabel} sender preview`;
+  renderPreview(sender?.preview, "/api/sender/preview.jpg", senderPreviewImage, senderPreviewMeta, senderPreviewEmpty);
+}
+
 function renderReceiverPreview(receiver) {
   const country = receiver?.country || latestStatus?.runtime?.launch?.country || null;
   const countryLabel = formatCountryLabel(country);
@@ -329,10 +357,12 @@ function renderStatus(status) {
   const config = status.config;
   const storage = status.storage;
   const server = runtime.server;
+  const sender = runtime.sender;
   const receiver = runtime.receiver;
   const recording = server?.recording;
   const launch = runtime.launch;
   const serverActive = runtime.running && runtime.role === "server";
+  const senderActive = runtime.running && runtime.role === "sender";
   const receiverActive = runtime.running && runtime.role === "receiver";
   const serverContext = (runtime.running ? runtime.role : roleSelect.value) === "server";
 
@@ -378,10 +408,12 @@ function renderStatus(status) {
 
   recordingMetric.classList.toggle("hidden", !serverContext);
   serverPanel.classList.toggle("hidden", !serverActive);
+  senderPanel.classList.toggle("hidden", !senderActive);
   receiverPanel.classList.toggle("hidden", !receiverActive);
   archivePanel.classList.toggle("hidden", !serverContext);
   renderPreview(server?.previews?.tn, "/api/server/preview/tn.jpg", previewTnImage, previewTnMeta, previewTnEmpty);
   renderPreview(server?.previews?.dk, "/api/server/preview/dk.jpg", previewDkImage, previewDkMeta, previewDkEmpty);
+  renderSenderPreview(sender);
   renderReceiverPreview(receiver);
 
   renderArchive(storage.archive);

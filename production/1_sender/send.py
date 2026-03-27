@@ -22,12 +22,14 @@ if parent_dir not in sys.path:
 from config_loader import load_config
 
 #########################################
-# VideoSender Class (unchanged)
+# VideoSender Class
 #########################################
 class VideoSender:
-    def __init__(self, country, video_device=None):
+    def __init__(self, country, video_device=None, video_source="config", preview_pattern=None):
         self.country = country
         self.video_device = video_device
+        self.video_source = video_source
+        self.preview_pattern = preview_pattern
         self.pipeline = None
         self.loop = None
         self.server_ip = None
@@ -56,9 +58,6 @@ class VideoSender:
 
         streaming_settings = cfg.get("streaming_settings_video", "")
         video_opts = cfg.get("video", {})
-        video_source = video_opts.get("source", "/dev/video0")
-        if self.video_device:
-            video_source = f"v4l2src device={self.video_device}"
         bitrate = video_opts.get("bitrate", 1000)
         key_int_max = video_opts.get("key_int_max", 15)
         tune = video_opts.get("tune", "zerolatency")
@@ -70,22 +69,64 @@ class VideoSender:
         config_interval = video_opts.get("config_interval", 1)
         video_width = video_opts.get("width", 1920)
         video_height = video_opts.get("height", 1080)
+        video_source, source_label = self.resolve_video_source(video_opts)
 
         aud_str = "true" if aud_bool else "false"
         byte_stream_str = "true" if byte_stream else "false"
 
-        # The pipeline string contains the video source and a branch for fallback video.
-        pipeline_str = f"""
-            {video_source} !
-            videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
+        print(f"[VideoSender] Using source: {source_label}", flush=True)
+
+        preview_branch = ""
+        stream_source = """
+            video_tee. ! queue !
             {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} !
             video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline !
             h264parse config-interval={config_interval} !
             queue !
             mpegtsmux alignment={alignment} !
-            srtsink uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings}"
+            srtsink uri="srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}"
+        """.format(
+            video_encoder=video_encoder,
+            bitrate=bitrate,
+            tune=tune,
+            key_int_max=key_int_max,
+            bframes=bframes,
+            aud_str=aud_str,
+            byte_stream_str=byte_stream_str,
+            config_interval=config_interval,
+            alignment=alignment,
+            server_ip=self.server_ip,
+            video_send_port=self.video_send_port,
+            streaming_settings=streaming_settings,
+        )
+        if self.preview_pattern:
+            preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
+            preview_branch = f"""
+                video_tee. ! queue !
+                videoconvert ! videoscale ! videorate !
+                video/x-raw,width=640,height=360,framerate=1/1 !
+                jpegenc quality=70 !
+                multifilesink location="{preview_location}" max-files=2
+            """
+
+        pipeline_str = f"""
+            {video_source} !
+            videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
+            tee name=video_tee
+            {stream_source}
+            {preview_branch}
         """
         return pipeline_str.strip()
+
+    def resolve_video_source(self, video_opts):
+        if self.video_device:
+            return f"v4l2src device={self.video_device}", f"camera {self.video_device}"
+
+        if (self.video_source or "config").strip().lower() == "test":
+            return "videotestsrc pattern=snow is-live=true", "test signal fallback"
+
+        config_source = video_opts.get("source", "v4l2src device=/dev/video0")
+        return config_source, f"config source ({config_source})"
 
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -101,6 +142,8 @@ class VideoSender:
     def run(self):
         pipeline_str = self.build_pipeline()
         print("[VideoSender] Pipeline:\n" + pipeline_str + "\n", flush=True)
+        if self.preview_pattern:
+            os.makedirs(os.path.dirname(os.path.abspath(self.preview_pattern)), exist_ok=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
 
         # Set the clock (either the provided one or a new system clock).
@@ -143,6 +186,8 @@ def main():
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio device name passed to the audio subprocess.")
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
+    parser.add_argument("--video-source", choices=["config", "test"], default="config", help="Video source mode. Use 'test' to send a test signal instead of a camera.")
+    parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/sender-tn-preview-%05d.jpg.")
     args = parser.parse_args()
 
     if args.with_audio is None:
@@ -163,7 +208,12 @@ def main():
         print("Launching audio sender subprocess:", " ".join(audio_cmd))
         audio_proc = subprocess.Popen(audio_cmd)
 
-    video_sender = VideoSender(args.country, video_device=args.video_device)
+    video_sender = VideoSender(
+        args.country,
+        video_device=args.video_device,
+        video_source=args.video_source,
+        preview_pattern=args.preview_pattern,
+    )
     shared_clock = Gst.SystemClock.obtain()
     video_sender.set_clock(shared_clock)
 

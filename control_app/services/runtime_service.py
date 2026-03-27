@@ -10,7 +10,7 @@ import threading
 import time
 from typing import Any
 
-from .preview_catalog import build_receiver_preview_pattern, describe_latest_preview
+from .preview_catalog import build_receiver_preview_pattern, build_sender_preview_pattern, describe_latest_preview
 from .server_runtime import ServerRuntime
 
 
@@ -214,6 +214,7 @@ class RuntimeService:
             self._sync_state_locked()
             request = self._current_request
             server = self._server_runtime.snapshot() if self._server_runtime is not None else None
+            sender = self._build_sender_snapshot_locked(request)
             receiver = self._build_receiver_snapshot_locked(request)
             running = self._process is not None or (server is not None and server.get("running"))
             return {
@@ -229,6 +230,7 @@ class RuntimeService:
                 "pid": self._process.pid if self._process is not None else None,
                 "log_tail": list(self._log_lines),
                 "server": server,
+                "sender": sender,
                 "receiver": receiver,
             }
 
@@ -239,12 +241,17 @@ class RuntimeService:
 
     def _build_process_command(self, request: RuntimeLaunchRequest) -> tuple[list[str], Path]:
         if request.role == "sender":
+            self._preview_dir.mkdir(parents=True, exist_ok=True)
+            preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country or "tn")
             command = [self._python_executable, "send.py", "--country", request.country or "tn"]
             command.append("--with-audio" if request.audio_enabled else "--no-audio")
             if request.audio_device:
                 command.extend(["--device", request.audio_device])
             if request.video_device:
                 command.extend(["--video-device", request.video_device])
+            else:
+                command.extend(["--video-source", "test"])
+            command.extend(["--preview-pattern", preview_pattern])
             working_dir = self._project_root / "production" / "1_sender"
             return command, working_dir
 
@@ -263,6 +270,16 @@ class RuntimeService:
             return command, working_dir
 
         raise ValueError(f"Unsupported subprocess role: {request.role}")
+
+    def _build_sender_snapshot_locked(self, request: RuntimeLaunchRequest | None) -> dict[str, Any] | None:
+        if request is None or request.role != "sender" or request.country is None:
+            return None
+
+        preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country)
+        return {
+            "country": request.country,
+            "preview": describe_latest_preview(self._preview_dir, preview_pattern),
+        }
 
     def _build_receiver_snapshot_locked(self, request: RuntimeLaunchRequest | None) -> dict[str, Any] | None:
         if request is None or request.role != "receiver" or request.country is None:
