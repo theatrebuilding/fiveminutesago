@@ -69,6 +69,7 @@ class VideoSender:
         config_interval = video_opts.get("config_interval", 1)
         video_width = video_opts.get("width", 1920)
         video_height = video_opts.get("height", 1080)
+        video_framerate = video_opts.get("framerate", 30)
         video_source, source_label = self.resolve_video_source(video_opts)
 
         aud_str = "true" if aud_bool else "false"
@@ -111,7 +112,8 @@ class VideoSender:
 
         pipeline_str = f"""
             {video_source} !
-            videoconvert ! videoscale ! video/x-raw,width={video_width},height={video_height} !
+            videoconvert ! videoscale ! videorate !
+            video/x-raw,format=I420,width={video_width},height={video_height},framerate={video_framerate}/1,pixel-aspect-ratio=1/1,interlace-mode=progressive !
             tee name=video_tee
             {stream_source}
             {preview_branch}

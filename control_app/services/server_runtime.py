@@ -449,6 +449,7 @@ class ServerRuntime:
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
 
             {feed_state.feed}_stream_tee. ! queue !
+            tsparse set-timestamps=true !
             tsdemux name={feed_state.feed}_preview_demux
             {feed_state.feed}_preview_demux. ! queue ! h264parse config-interval=1 !
             avdec_h264 !
