@@ -13,7 +13,7 @@ import yaml
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
-from .preview_catalog import build_server_preview_pattern, describe_latest_preview
+from .preview_catalog import build_server_preview_pattern, describe_latest_preview, prune_preview_files
 
 
 Gst.init(None)
@@ -63,6 +63,8 @@ class ServerRuntime:
         self._stopped_at: float | None = None
         self._last_exit_code: int | None = None
         self._running = False
+        self._last_preview_log_at: dict[str, float] = {}
+        self._last_continuity_warning_at: dict[str, float] = {}
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -201,10 +203,15 @@ class ServerRuntime:
                 preview_pattern=build_server_preview_pattern(self._preview_dir, "dk"),
             ),
         }
+        for feed_state in self._video_feeds.values():
+            prune_preview_files(self._preview_dir, feed_state.preview_pattern, keep=0)
 
         self._audio_pipeline = self._build_audio_pipeline(config)
         self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
         self._audio_pipeline.set_state(Gst.State.PLAYING)
+
+        self._last_preview_log_at = {}
+        self._last_continuity_warning_at = {}
 
         for feed in self._video_feeds.values():
             self._start_video_feed(feed)
@@ -299,7 +306,17 @@ class ServerRuntime:
             GLib.timeout_add_seconds(3, self._restart_video_feed, feed)
         elif message.type == Gst.MessageType.WARNING:
             err, debug = message.parse_warning()
-            self._log(f"[{feed}] WARNING: {err}. {debug or ''}".strip())
+            warning_text = str(err)
+            if "CONTINUITY:" in warning_text:
+                now = time.monotonic()
+                last_logged_at = self._last_continuity_warning_at.get(feed)
+                if last_logged_at is None or (now - last_logged_at) >= 10:
+                    self._last_continuity_warning_at[feed] = now
+                    self._log(
+                        f"[{feed}] WARNING: TS continuity mismatches detected on the preview branch; preview frames may skip until the stream settles."
+                    )
+            else:
+                self._log(f"[{feed}] WARNING: {err}. {debug or ''}".strip())
         elif message.type == Gst.MessageType.EOS:
             self._log(f"[{feed}] End of stream detected.")
             GLib.timeout_add_seconds(3, self._restart_video_feed, feed)
@@ -307,7 +324,7 @@ class ServerRuntime:
             structure = message.get_structure()
             if structure is not None and structure.get_name() == "GstMultiFileSink":
                 filename = structure.get_value("filename") if structure.has_field("filename") else None
-                if filename:
+                if filename and self._should_log_preview_update(feed):
                     self._log(f"[{feed}] Preview updated: {filename}")
         return True
 
@@ -458,20 +475,28 @@ class ServerRuntime:
             {feed_state.feed}_stream_tee. ! queue !
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
 
-            {feed_state.feed}_stream_tee. ! queue !
+            {feed_state.feed}_stream_tee. ! queue leaky=downstream max-size-buffers=120 max-size-bytes=0 max-size-time=0 !
             tsdemux name={feed_state.feed}_preview_demux
-            {feed_state.feed}_preview_demux. ! queue ! h264parse config-interval=1 !
+            {feed_state.feed}_preview_demux. ! queue leaky=downstream max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse config-interval=1 !
             avdec_h264 !
-            videoconvert ! videoscale ! videorate !
-            video/x-raw,width=640,height=360,framerate=1/1 !
+            videoconvert ! videoscale ! videorate drop-only=true !
+            video/x-raw,width=640,height=360,framerate=1/5 !
             jpegenc quality=70 !
-            multifilesink location="{feed_state.preview_pattern}" max-files=2 post-messages=true
+            multifilesink location="{feed_state.preview_pattern}" max-files=2 post-messages=true sync=false async=false
         """
         return Gst.parse_launch(pipeline_str.strip())
 
     def _log(self, message: str) -> None:
         if self._log_callback is not None:
             self._log_callback(message)
+
+    def _should_log_preview_update(self, feed: str) -> bool:
+        now = time.monotonic()
+        last_logged_at = self._last_preview_log_at.get(feed)
+        if last_logged_at is not None and (now - last_logged_at) < 5:
+            return False
+        self._last_preview_log_at[feed] = now
+        return True
 
 
 def _load_config(config_path: Path) -> dict[str, Any]:

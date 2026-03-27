@@ -61,11 +61,11 @@ class VideoReceiver:
             selector_output = f"""
                 input-selector name=selector ! queue ! tee name=output_tee
                 output_tee. ! queue ! {sink_pipeline}
-                output_tee. ! queue !
-                videoconvert ! videoscale ! videorate !
-                video/x-raw,width=640,height=360,framerate=1/1 !
+                output_tee. ! queue leaky=downstream max-size-buffers=30 max-size-bytes=0 max-size-time=0 !
+                videoconvert ! videoscale ! videorate drop-only=true !
+                video/x-raw,width=640,height=360,framerate=1/5 !
                 jpegenc quality=70 !
-                multifilesink location="{preview_location}" max-files=2
+                multifilesink location="{preview_location}" max-files=2 sync=false async=false
             """.strip()
 
         pipeline_str = f"""

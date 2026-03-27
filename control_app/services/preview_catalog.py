@@ -25,12 +25,7 @@ def build_sender_preview_pattern(preview_dir: Path, country: str) -> str:
 
 
 def describe_latest_preview(preview_dir: Path, pattern: str) -> dict[str, Any]:
-    prefix = Path(pattern).name.split("%", 1)[0]
-    candidates = sorted(
-        preview_dir.glob(f"{prefix}*.jpg"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
+    candidates = _preview_candidates(preview_dir, pattern)
     if not candidates:
         return {
             "available": False,
@@ -40,7 +35,7 @@ def describe_latest_preview(preview_dir: Path, pattern: str) -> dict[str, Any]:
             "age_seconds": None,
         }
 
-    latest = candidates[0]
+    latest = _select_settled_preview(candidates)
     modified_at = latest.stat().st_mtime
     return {
         "available": True,
@@ -49,6 +44,34 @@ def describe_latest_preview(preview_dir: Path, pattern: str) -> dict[str, Any]:
         "updated_at_ts": modified_at,
         "age_seconds": max(0, int(time.time() - modified_at)),
     }
+
+
+def prune_preview_files(preview_dir: Path, pattern: str, keep: int = 0) -> None:
+    candidates = _preview_candidates(preview_dir, pattern)
+    for path in candidates[keep:]:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            continue
+
+
+def _preview_candidates(preview_dir: Path, pattern: str) -> list[Path]:
+    prefix = Path(pattern).name.split("%", 1)[0]
+    return sorted(
+        preview_dir.glob(f"{prefix}*.jpg"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+
+
+def _select_settled_preview(candidates: list[Path]) -> Path:
+    latest = candidates[0]
+    if len(candidates) == 1:
+        return latest
+
+    if (time.time() - latest.stat().st_mtime) < 1:
+        return candidates[1]
+    return latest
 
 
 def _normalize_feed(value: str) -> str:

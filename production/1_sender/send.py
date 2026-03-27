@@ -103,11 +103,11 @@ class VideoSender:
         if self.preview_pattern:
             preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
             preview_branch = f"""
-                video_tee. ! queue !
-                videoconvert ! videoscale ! videorate !
-                video/x-raw,width=640,height=360,framerate=1/1 !
+                video_tee. ! queue leaky=downstream max-size-buffers=30 max-size-bytes=0 max-size-time=0 !
+                videoconvert ! videoscale ! videorate drop-only=true !
+                video/x-raw,width=640,height=360,framerate=1/5 !
                 jpegenc quality=70 !
-                multifilesink location="{preview_location}" max-files=2
+                multifilesink location="{preview_location}" max-files=2 sync=false async=false
             """
 
         pipeline_str = f"""

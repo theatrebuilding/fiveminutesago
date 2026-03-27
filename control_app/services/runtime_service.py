@@ -10,7 +10,12 @@ import threading
 import time
 from typing import Any
 
-from .preview_catalog import build_receiver_preview_pattern, build_sender_preview_pattern, describe_latest_preview
+from .preview_catalog import (
+    build_receiver_preview_pattern,
+    build_sender_preview_pattern,
+    describe_latest_preview,
+    prune_preview_files,
+)
 from .server_runtime import ServerRuntime
 
 
@@ -243,6 +248,7 @@ class RuntimeService:
         if request.role == "sender":
             self._preview_dir.mkdir(parents=True, exist_ok=True)
             preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country or "tn")
+            prune_preview_files(self._preview_dir, preview_pattern, keep=0)
             command = [self._python_executable, "send.py", "--country", request.country or "tn"]
             command.append("--with-audio" if request.audio_enabled else "--no-audio")
             if request.audio_device:
@@ -258,6 +264,7 @@ class RuntimeService:
         if request.role == "receiver":
             self._preview_dir.mkdir(parents=True, exist_ok=True)
             preview_pattern = build_receiver_preview_pattern(self._preview_dir, request.country or "tn")
+            prune_preview_files(self._preview_dir, preview_pattern, keep=0)
             command = [
                 self._python_executable,
                 "receive.py",
