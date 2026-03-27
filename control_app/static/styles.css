@@ -227,49 +227,67 @@ textarea:focus {
 }
 
 button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   appearance: none;
-  border: 0;
+  border: 1px solid var(--text-faint);
   border-radius: 0;
-  padding: 0;
-  background: transparent;
+  min-height: 32px;
+  padding: 0 10px;
+  background: var(--bg-soft);
   color: var(--text);
   font: inherit;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
+  font-size: 0.82rem;
+  line-height: 1;
   cursor: pointer;
 }
 
 button::before {
-  content: "[";
-  color: var(--text-faint);
+  content: none;
 }
 
 button::after {
-  content: "]";
-  color: var(--text-faint);
+  content: none;
 }
 
 button:hover {
+  border-color: var(--accent);
+  background: var(--bg-strong);
   color: var(--accent);
 }
 
 button:disabled {
   cursor: default;
+  border-color: var(--bg-strong);
+  background: transparent;
   color: var(--text-faint);
 }
 
 .button-accent {
   color: var(--accent);
+  border-color: var(--accent-dim);
 }
 
 .button-muted {
   color: var(--text-dim);
 }
 
+.button-danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.button-danger:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+  background: rgba(240, 125, 125, 0.08);
+}
+
 .button-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: 8px;
 }
 
 .preview-grid {

@@ -59,7 +59,6 @@
           </div>
           <div class="button-row">
             <button id="start-role" class="button-accent">Start Selected Role</button>
-            <button id="stop-role" class="button-muted">Stop Active Role</button>
           </div>
           <p id="action-message" class="action-message"></p>
         </section>
@@ -87,6 +86,25 @@
               <p id="recording-meta" class="metric-meta"></p>
             </article>
           </div>
+        </section>
+
+        <section class="panel logs-panel">
+          <div class="panel-heading">
+            <h2>Terminal Output</h2>
+          </div>
+          <pre id="log-output" class="log-output">Loading logs…</pre>
+        </section>
+
+        <section class="panel config-panel">
+          <div class="panel-heading">
+            <h2>Config Editor</h2>
+          </div>
+          <div class="button-row">
+            <button id="save-config" class="button-muted">Save Config</button>
+            <button id="apply-config" class="button-accent">Save + Relaunch Active Role</button>
+          </div>
+          <textarea id="config-editor" spellcheck="false"></textarea>
+          <p id="config-message" class="action-message"></p>
         </section>
 
         <section id="server-panel" class="panel storage-panel hidden">
@@ -149,25 +167,6 @@
             <p id="archive-summary" class="archive-summary"></p>
             <ul id="archive-files" class="archive-files"></ul>
           </div>
-        </section>
-
-        <section class="panel logs-panel">
-          <div class="panel-heading">
-            <h2>Terminal Output</h2>
-          </div>
-          <pre id="log-output" class="log-output">Loading logs…</pre>
-        </section>
-
-        <section class="panel config-panel">
-          <div class="panel-heading">
-            <h2>Config Editor</h2>
-          </div>
-          <div class="button-row">
-            <button id="save-config" class="button-muted">Save Config</button>
-            <button id="apply-config" class="button-accent">Save + Relaunch Active Role</button>
-          </div>
-          <textarea id="config-editor" spellcheck="false"></textarea>
-          <p id="config-message" class="action-message"></p>
         </section>
       </main>
     </div>

@@ -28,7 +28,6 @@ const audioDeviceField = document.getElementById("audio-device-field");
 const audioDeviceSelect = document.getElementById("audio-device-select");
 const audioDeviceMessage = document.getElementById("audio-device-message");
 const startRoleButton = document.getElementById("start-role");
-const stopRoleButton = document.getElementById("stop-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
 const serverPanel = document.getElementById("server-panel");
@@ -317,6 +316,13 @@ function renderReceiverPreview(receiver) {
   renderPreview(receiver?.preview, "/api/receiver/preview.jpg", receiverPreviewImage, receiverPreviewMeta, receiverPreviewEmpty);
 }
 
+function renderRoleActionButton(runtime) {
+  const running = Boolean(runtime?.running);
+  startRoleButton.textContent = running ? "Stop Selected Role" : "Start Selected Role";
+  startRoleButton.classList.toggle("button-accent", !running);
+  startRoleButton.classList.toggle("button-danger", running);
+}
+
 function renderStatus(status) {
   latestStatus = status;
   const runtime = status.runtime;
@@ -335,6 +341,7 @@ function renderStatus(status) {
   runtimePill.textContent = runtime.running ? `${runtime.role || "Role"} Running` : "No Active Role";
   runtimePill.className = `status-pill ${runtime.running ? "status-running" : "status-stopped"}`;
   refreshLabel.textContent = `Last refreshed ${new Date().toLocaleTimeString()}`;
+  renderRoleActionButton(runtime);
 
   roleState.textContent = launch?.role ? launch.role.toUpperCase() : "Idle";
   roleMeta.textContent = describeLaunch(launch);
@@ -380,8 +387,6 @@ function renderStatus(status) {
   renderArchive(storage.archive);
   logOutput.textContent = runtime.log_tail.length ? runtime.log_tail.join("\n") : "No logs yet.";
   logOutput.scrollTop = logOutput.scrollHeight;
-
-  stopRoleButton.disabled = !runtime.running;
 }
 
 async function refreshStatus() {
@@ -447,7 +452,7 @@ function buildLaunchPayload() {
 }
 
 async function startRole() {
-  setBusy([startRoleButton, stopRoleButton], true);
+  setBusy([startRoleButton], true);
   actionMessage.textContent = "Starting selected role…";
 
   try {
@@ -461,13 +466,13 @@ async function startRole() {
   } catch (error) {
     actionMessage.textContent = error.message;
   } finally {
-    setBusy([startRoleButton, stopRoleButton], false);
+    setBusy([startRoleButton], false);
   }
 }
 
 async function stopRole() {
-  setBusy([startRoleButton, stopRoleButton], true);
-  actionMessage.textContent = "Stopping active role…";
+  setBusy([startRoleButton], true);
+  actionMessage.textContent = "Stopping selected role…";
 
   try {
     const payload = await api("/api/runtime/stop", { method: "POST" });
@@ -476,8 +481,16 @@ async function stopRole() {
   } catch (error) {
     actionMessage.textContent = error.message;
   } finally {
-    setBusy([startRoleButton, stopRoleButton], false);
+    setBusy([startRoleButton], false);
   }
+}
+
+async function toggleRoleAction() {
+  if (latestStatus?.runtime?.running) {
+    await stopRole();
+    return;
+  }
+  await startRole();
 }
 
 async function toggleRecording() {
@@ -532,8 +545,7 @@ roleSelect.addEventListener("change", async () => {
 countrySelect.addEventListener("change", markLaunchFormDirty);
 videoDeviceSelect.addEventListener("change", markLaunchFormDirty);
 audioDeviceSelect.addEventListener("change", markLaunchFormDirty);
-startRoleButton.addEventListener("click", startRole);
-stopRoleButton.addEventListener("click", stopRole);
+startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
