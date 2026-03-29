@@ -26,13 +26,17 @@ video:
   height: 1080
   encoder: "x264enc"
   tune: "zerolatency"
-  bitrate: 10000
-  key_int_max: 1
+  bitrate: 20000
+  key_int_max: 30
   framerate: 30
   bframes: 0
   aud: true
   byte_stream: true
-  option_str: ""
+  profile: "high"
+  speed_preset: "medium"
+  pass: ""
+  quantizer:
+  option_string: ""
   config_interval: 1
   alignment: 7
 
@@ -54,7 +58,6 @@ webrtcdsp_settings:
   voice-detection: false                # Enable or disable the voice activity detector.
   voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
-
 
 
 

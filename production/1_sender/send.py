@@ -58,42 +58,31 @@ class VideoSender:
 
         streaming_settings = cfg.get("streaming_settings_video", "")
         video_opts = cfg.get("video", {})
-        bitrate = video_opts.get("bitrate", 1000)
-        key_int_max = video_opts.get("key_int_max", 15)
-        tune = video_opts.get("tune", "zerolatency")
         video_encoder = video_opts.get("encoder", "x264enc")
         alignment = video_opts.get("alignment", "nal")
-        bframes = video_opts.get("bframes", 0)
-        aud_bool = video_opts.get("aud", True)
-        byte_stream = video_opts.get("byte_stream", True)
         config_interval = video_opts.get("config_interval", 1)
         video_width = video_opts.get("width", 1920)
         video_height = video_opts.get("height", 1080)
         video_framerate = video_opts.get("framerate", 30)
         video_source, source_label = self.resolve_video_source(video_opts)
-
-        aud_str = "true" if aud_bool else "false"
-        byte_stream_str = "true" if byte_stream else "false"
+        encoder_properties = self.build_encoder_properties(video_opts, video_encoder)
+        profile_caps = self.build_profile_caps(video_opts, video_encoder)
 
         print(f"[VideoSender] Using source: {source_label}", flush=True)
 
         preview_branch = ""
         stream_source = """
             video_tee. ! queue !
-            {video_encoder} bitrate={bitrate} tune={tune} key-int-max={key_int_max} bframes={bframes} aud={aud_str} byte-stream={byte_stream_str} !
-            video/x-h264,stream-format=byte-stream,alignment=au,profile=baseline !
+            {video_encoder} {encoder_properties} !
+            video/x-h264,stream-format=byte-stream,alignment=au{profile_caps} !
             h264parse config-interval={config_interval} !
             queue !
             mpegtsmux alignment={alignment} !
             srtsink uri="srt://{server_ip}:{video_send_port}?mode=caller&{streaming_settings}"
         """.format(
             video_encoder=video_encoder,
-            bitrate=bitrate,
-            tune=tune,
-            key_int_max=key_int_max,
-            bframes=bframes,
-            aud_str=aud_str,
-            byte_stream_str=byte_stream_str,
+            encoder_properties=encoder_properties,
+            profile_caps=profile_caps,
             config_interval=config_interval,
             alignment=alignment,
             server_ip=self.server_ip,
@@ -129,6 +118,65 @@ class VideoSender:
 
         config_source = video_opts.get("source", "v4l2src device=/dev/video0")
         return config_source, f"config source ({config_source})"
+
+    def build_encoder_properties(self, video_opts, video_encoder):
+        bitrate = video_opts.get("bitrate", 1000)
+        key_int_max = video_opts.get("key_int_max", 15)
+        tune = video_opts.get("tune", "zerolatency")
+        bframes = video_opts.get("bframes", 0)
+        aud_bool = video_opts.get("aud", True)
+        byte_stream = video_opts.get("byte_stream", True)
+
+        properties = [
+            f"bitrate={bitrate}",
+            f"key-int-max={key_int_max}",
+            f"bframes={bframes}",
+            f'aud={"true" if aud_bool else "false"}',
+            f'byte-stream={"true" if byte_stream else "false"}',
+        ]
+        if tune:
+            properties.append(f"tune={tune}")
+
+        if (video_encoder or "").strip() == "x264enc":
+            speed_preset = self.first_non_empty(video_opts, "speed_preset", "speed-preset")
+            pass_mode = self.first_non_empty(video_opts, "pass")
+            quantizer = video_opts.get("quantizer")
+            option_string = self.first_non_empty(video_opts, "option_string", "option_str", "option-string")
+
+            if speed_preset:
+                properties.append(f"speed-preset={speed_preset}")
+            if pass_mode:
+                properties.append(f"pass={pass_mode}")
+            if quantizer not in {None, ""}:
+                properties.append(f"quantizer={quantizer}")
+            if option_string:
+                properties.append(f'option-string="{self.gst_escape(str(option_string))}"')
+
+        return " ".join(properties)
+
+    def build_profile_caps(self, video_opts, video_encoder):
+        if (video_encoder or "").strip() != "x264enc":
+            return ""
+        profile = self.first_non_empty(video_opts, "profile")
+        if not profile:
+            return ""
+        return f",profile={profile}"
+
+    def first_non_empty(self, mapping, *keys):
+        for key in keys:
+            value = mapping.get(key)
+            if value is None:
+                continue
+            if isinstance(value, str):
+                stripped = value.strip()
+                if stripped:
+                    return stripped
+            else:
+                return value
+        return None
+
+    def gst_escape(self, value):
+        return value.replace("\\", "\\\\").replace('"', '\\"')
 
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
