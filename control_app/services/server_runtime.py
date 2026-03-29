@@ -24,7 +24,14 @@ class RecordingBranch:
     tee_pad: Gst.Pad
     queue: Gst.Element
     sink: Gst.Element
-    path: Path
+    temp_path: Path
+
+
+@dataclass(frozen=True)
+class RecordingPaths:
+    temp_path: Path
+    final_path: Path
+    failed_path: Path
 
 
 @dataclass
@@ -42,11 +49,13 @@ class ServerRuntime:
     def __init__(
         self,
         config_path: Path,
+        recording_dir: Path,
         archive_dir: Path,
         preview_dir: Path,
         log_callback: Callable[[str], None] | None = None,
     ) -> None:
         self._config_path = config_path
+        self._recording_dir = recording_dir
         self._archive_dir = archive_dir
         self._preview_dir = preview_dir
         self._log_callback = log_callback
@@ -58,13 +67,14 @@ class ServerRuntime:
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
         self._recording_started_at: float | None = None
-        self._recording_files: dict[str, Path] = {}
+        self._recording_files: dict[str, RecordingPaths] = {}
         self._started_at: float | None = None
         self._stopped_at: float | None = None
         self._last_exit_code: int | None = None
         self._running = False
         self._last_preview_log_at: dict[str, float] = {}
         self._last_continuity_warning_at: dict[str, float] = {}
+        self._logged_missing_h264_timestamper = False
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -89,7 +99,7 @@ class ServerRuntime:
             loop = self._main_loop
             loop_thread = self._loop_thread
 
-        self._run_on_loop(self._stop_runtime)
+        self._run_on_loop(self._stop_runtime, timeout=300)
 
         if loop is not None:
             GLib.idle_add(self._quit_loop)
@@ -107,7 +117,7 @@ class ServerRuntime:
         return self.snapshot()
 
     def stop_recording(self) -> dict[str, Any]:
-        self._run_on_loop(self._stop_recording_on_loop)
+        self._run_on_loop(self._stop_recording_on_loop, timeout=300)
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
@@ -128,7 +138,7 @@ class ServerRuntime:
                     "started_at": _to_iso(self._recording_started_at),
                     "started_at_ts": self._recording_started_at,
                     "files": {
-                        feed: str(path) for feed, path in self._recording_files.items()
+                        feed: str(paths.temp_path) for feed, paths in self._recording_files.items()
                     },
                 },
                 "previews": previews,
@@ -158,7 +168,7 @@ class ServerRuntime:
             loop.quit()
         return False
 
-    def _run_on_loop(self, func: Callable[[], Any]) -> Any:
+    def _run_on_loop(self, func: Callable[[], Any], timeout: float = 20) -> Any:
         with self._lock:
             loop = self._main_loop
         if loop is None:
@@ -177,7 +187,7 @@ class ServerRuntime:
             return False
 
         GLib.idle_add(invoke)
-        if not done.wait(timeout=20):
+        if not done.wait(timeout=timeout):
             raise RuntimeError("Server runtime operation timed out.")
         if "error" in result:
             raise result["error"]
@@ -185,6 +195,7 @@ class ServerRuntime:
 
     def _start_runtime(self) -> None:
         config = _load_config(self._config_path)
+        self._recording_dir.mkdir(parents=True, exist_ok=True)
         self._archive_dir.mkdir(parents=True, exist_ok=True)
         self._preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -256,9 +267,9 @@ class ServerRuntime:
         )
         pipeline.set_state(Gst.State.PLAYING)
         if self._recording_active:
-            record_path = self._recording_files.get(feed_state.feed)
-            if record_path is not None:
-                self._attach_recording_branch(feed_state, record_path, append=True)
+            record_paths = self._recording_files.get(feed_state.feed)
+            if record_paths is not None:
+                self._attach_recording_branch(feed_state, record_paths.temp_path, append=True)
 
     def _restart_video_feed(self, feed: str) -> bool:
         if not self._running:
@@ -336,14 +347,22 @@ class ServerRuntime:
 
         timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
         files = {
-            "tn": self._archive_dir / f"video_tn_{timestamp}.ts",
-            "dk": self._archive_dir / f"video_dk_{timestamp}.ts",
+            "tn": RecordingPaths(
+                temp_path=self._recording_dir / f"video_tn_{timestamp}.recording.ts",
+                final_path=self._archive_dir / f"video_tn_{timestamp}.mp4",
+                failed_path=self._archive_dir / f"video_tn_{timestamp}.failed.ts",
+            ),
+            "dk": RecordingPaths(
+                temp_path=self._recording_dir / f"video_dk_{timestamp}.recording.ts",
+                final_path=self._archive_dir / f"video_dk_{timestamp}.mp4",
+                failed_path=self._archive_dir / f"video_dk_{timestamp}.failed.ts",
+            ),
         }
 
-        for feed, path in files.items():
+        for feed, paths in files.items():
             feed_state = self._video_feeds.get(feed)
             if feed_state is not None:
-                self._attach_recording_branch(feed_state, path, append=False)
+                self._attach_recording_branch(feed_state, paths.temp_path, append=False)
 
         with self._lock:
             self._recording_active = True
@@ -358,6 +377,7 @@ class ServerRuntime:
         if not self._recording_active:
             return
 
+        recording_files = dict(self._recording_files)
         for feed_state in self._video_feeds.values():
             self._detach_recording_branch(feed_state)
 
@@ -366,7 +386,11 @@ class ServerRuntime:
             self._recording_started_at = None
             self._recording_files = {}
 
-        self._log("Recording stopped for both feeds.")
+        self._log("Recording stopped. Finalizing archive files...")
+        for feed, paths in recording_files.items():
+            self._finalize_recording_file(feed, paths)
+
+        self._log("Recording finalization complete.")
 
     def _attach_recording_branch(self, feed_state: VideoFeedState, path: Path, append: bool) -> None:
         if feed_state.pipeline is None or feed_state.tee is None:
@@ -403,7 +427,7 @@ class ServerRuntime:
             tee_pad=tee_pad,
             queue=queue,
             sink=sink,
-            path=path,
+            temp_path=path,
         )
 
     def _detach_recording_branch(self, feed_state: VideoFeedState) -> None:
@@ -422,6 +446,96 @@ class ServerRuntime:
         feed_state.pipeline.remove(branch.sink)
         feed_state.pipeline.remove(branch.queue)
         feed_state.recording_branch = None
+
+    def _finalize_recording_file(self, feed: str, paths: RecordingPaths) -> None:
+        if not paths.temp_path.exists():
+            self._log(f"[{feed}] Recording temp file was missing; nothing to finalize.")
+            return
+
+        if paths.temp_path.stat().st_size == 0:
+            self._safe_unlink(paths.temp_path)
+            self._log(f"[{feed}] Recording captured no video data; removed empty temp file.")
+            return
+
+        pipeline: Gst.Pipeline | None = None
+        self._safe_unlink(paths.final_path)
+        self._log(f"[{feed}] Finalizing {paths.temp_path.name} -> {paths.final_path.name}")
+
+        try:
+            pipeline = self._build_recording_finalize_pipeline(paths)
+            bus = pipeline.get_bus()
+            pipeline.set_state(Gst.State.PLAYING)
+
+            deadline = time.monotonic() + 300
+            while True:
+                message = bus.timed_pop_filtered(
+                    5 * Gst.SECOND,
+                    Gst.MessageType.ERROR | Gst.MessageType.EOS,
+                )
+                if message is None:
+                    if time.monotonic() > deadline:
+                        raise RuntimeError("Archive finalization timed out.")
+                    continue
+
+                if message.type == Gst.MessageType.ERROR:
+                    err, debug = message.parse_error()
+                    raise RuntimeError(f"{err}. {debug or ''}".strip())
+
+                if message.type == Gst.MessageType.EOS:
+                    break
+        except Exception as exc:
+            self._safe_unlink(paths.final_path)
+            self._preserve_failed_recording(paths)
+            self._log(f"[{feed}] ERROR: Recording finalization failed. {exc}")
+            return
+        finally:
+            if pipeline is not None:
+                pipeline.set_state(Gst.State.NULL)
+
+        if not paths.final_path.exists() or paths.final_path.stat().st_size == 0:
+            self._safe_unlink(paths.final_path)
+            self._preserve_failed_recording(paths)
+            self._log(f"[{feed}] ERROR: Recording finalization produced no MP4 output.")
+            return
+
+        self._safe_unlink(paths.temp_path)
+        self._log(f"[{feed}] Final archive ready: {paths.final_path}")
+
+    def _build_recording_finalize_pipeline(self, paths: RecordingPaths) -> Gst.Pipeline:
+        if Gst.ElementFactory.find("mp4mux") is None:
+            raise RuntimeError("mp4mux is not available in this environment.")
+
+        timestamper = ""
+        if Gst.ElementFactory.find("h264timestamper") is not None:
+            timestamper = "h264timestamper !"
+        elif not self._logged_missing_h264_timestamper:
+            self._logged_missing_h264_timestamper = True
+            self._log("[recording] h264timestamper is not available; finalizing MP4 without it.")
+
+        pipeline_str = f"""
+            filesrc location="{_gst_escape(paths.temp_path)}" !
+            tsparse set-timestamps=true !
+            tsdemux name=demux
+            demux. ! queue !
+            h264parse config-interval=1 !
+            {timestamper}
+            mp4mux !
+            filesink location="{_gst_escape(paths.final_path)}" sync=false async=false
+        """
+        return Gst.parse_launch(pipeline_str.strip())
+
+    def _preserve_failed_recording(self, paths: RecordingPaths) -> None:
+        if not paths.temp_path.exists():
+            return
+        self._safe_unlink(paths.failed_path)
+        paths.temp_path.replace(paths.failed_path)
+        self._log(f"[recording] Preserved failed TS artifact: {paths.failed_path}")
+
+    def _safe_unlink(self, path: Path) -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
 
     def _configure_bus(
         self,
@@ -506,6 +620,10 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("Config must be a top-level YAML mapping.")
     return data
+
+
+def _gst_escape(path: Path) -> str:
+    return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _to_iso(timestamp: float | None) -> str | None:

@@ -179,10 +179,21 @@
         <section id="archive-panel" class="panel storage-panel hidden">
           <div class="panel-heading">
             <h2>Recording Archive</h2>
-            <p>Latest timestamped recordings stored on the machine.</p>
+            <p>TS and MP4 recordings stored on the machine.</p>
           </div>
           <div class="archive-block">
             <p id="archive-summary" class="archive-summary"></p>
+            <div class="archive-preview">
+              <div class="preview-frame archive-preview-frame">
+                <video id="archive-player" class="hidden" controls playsinline preload="metadata"></video>
+                <p id="archive-preview-empty" class="preview-empty">Select an archive file to preview it here.</p>
+              </div>
+              <div class="archive-preview-meta">
+                <strong id="archive-selected-name">No file selected</strong>
+                <p id="archive-selected-meta" class="storage-meta">Browser playback depends on the file format.</p>
+                <a id="archive-open-link" class="archive-open-link hidden" target="_blank" rel="noopener noreferrer">Open selected file</a>
+              </div>
+            </div>
             <ul id="archive-files" class="archive-files"></ul>
           </div>
         </section>

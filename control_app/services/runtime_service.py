@@ -81,6 +81,7 @@ class RuntimeService:
         python_executable: str,
         project_root: Path,
         config_path: Path,
+        recording_dir: Path,
         archive_dir: Path,
         preview_dir: Path,
         log_capacity: int = 500,
@@ -88,6 +89,7 @@ class RuntimeService:
         self._python_executable = python_executable
         self._project_root = project_root
         self._config_path = config_path
+        self._recording_dir = recording_dir
         self._archive_dir = archive_dir
         self._preview_dir = preview_dir
         self._log_capacity = log_capacity
@@ -109,6 +111,7 @@ class RuntimeService:
         if request.role == "server":
             runtime = ServerRuntime(
                 config_path=self._config_path,
+                recording_dir=self._recording_dir,
                 archive_dir=self._archive_dir,
                 preview_dir=self._preview_dir,
                 log_callback=self.record_event,

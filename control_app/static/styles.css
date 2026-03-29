@@ -337,6 +337,36 @@ button:disabled {
   gap: 10px;
 }
 
+.archive-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.archive-preview-frame {
+  min-height: 200px;
+}
+
+.archive-preview-frame video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.archive-preview-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.archive-open-link {
+  width: fit-content;
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .archive-files {
   list-style: none;
   padding: 0;
@@ -349,6 +379,24 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.archive-file-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.archive-file-button.is-selected {
+  border-color: var(--text);
 }
 
 .archive-files strong {

@@ -25,6 +25,7 @@ class AppServices:
     config_service: ConfigService
     runtime_service: RuntimeService
     dashboard_service: DashboardService
+    storage_service: StorageService
     audio_device_service: AudioDeviceService
     video_device_service: VideoDeviceService
 
@@ -39,6 +40,7 @@ async def lifespan(app: FastAPI):
         python_executable=settings.python_executable,
         project_root=settings.paths.project_root,
         config_path=settings.paths.config_path,
+        recording_dir=settings.paths.recording_dir,
         archive_dir=settings.paths.archive_dir,
         preview_dir=settings.paths.preview_dir,
         log_capacity=settings.log_capacity,
@@ -60,6 +62,7 @@ async def lifespan(app: FastAPI):
         config_service=config_service,
         runtime_service=runtime_service,
         dashboard_service=dashboard_service,
+        storage_service=storage_service,
         audio_device_service=audio_device_service,
         video_device_service=video_device_service,
     )
@@ -263,6 +266,25 @@ async def sender_preview(request: Request) -> FileResponse:
         headers={
             "Cache-Control": "no-store, max-age=0",
             "Pragma": "no-cache",
+        },
+    )
+
+
+@app.get("/api/archive/files/{filename}")
+async def archive_file(filename: str, request: Request) -> FileResponse:
+    services = _services(request)
+    path = services.storage_service.get_archive_file(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Archive file not available.")
+
+    return FileResponse(
+        path,
+        media_type=services.storage_service.media_type_for(path),
+        filename=path.name,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Content-Disposition": f'inline; filename="{path.name}"',
         },
     )
 

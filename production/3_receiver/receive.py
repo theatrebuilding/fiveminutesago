@@ -72,6 +72,7 @@ class VideoReceiver:
             {selector_output}
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller"
                 ! queue max-size-time=2000000000 max-size-buffers=500
+                ! tsparse set-timestamps=true
                 ! tsdemux name=demux
                 demux. ! queue ! h264parse config-interval=1
                 ! avdec_h264

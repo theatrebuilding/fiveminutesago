@@ -122,10 +122,10 @@ class VideoSender:
 
     def resolve_video_source(self, video_opts):
         if self.video_device:
-            return f"v4l2src device={self.video_device}", f"camera {self.video_device}"
+            return f"v4l2src device={self.video_device} do-timestamp=true", f"camera {self.video_device}"
 
         if (self.video_source or "config").strip().lower() == "test":
-            return "videotestsrc pattern=snow is-live=true", "test signal fallback"
+            return "videotestsrc pattern=snow is-live=true do-timestamp=true", "test signal fallback"
 
         config_source = video_opts.get("source", "v4l2src device=/dev/video0")
         return config_source, f"config source ({config_source})"

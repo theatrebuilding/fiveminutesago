@@ -13,6 +13,11 @@ const recordingMeta = document.getElementById("recording-meta");
 const archivePanel = document.getElementById("archive-panel");
 const archiveSummary = document.getElementById("archive-summary");
 const archiveFiles = document.getElementById("archive-files");
+const archivePlayer = document.getElementById("archive-player");
+const archivePreviewEmpty = document.getElementById("archive-preview-empty");
+const archiveSelectedName = document.getElementById("archive-selected-name");
+const archiveSelectedMeta = document.getElementById("archive-selected-meta");
+const archiveOpenLink = document.getElementById("archive-open-link");
 const logOutput = document.getElementById("log-output");
 const configEditor = document.getElementById("config-editor");
 const configMessage = document.getElementById("config-message");
@@ -55,6 +60,8 @@ let latestStatus = null;
 let videoDevices = [];
 let audioDevices = [];
 let launchFormDirty = false;
+let selectedArchiveName = null;
+let selectedArchiveRevision = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -148,20 +155,85 @@ function formatCountryLabel(country) {
   return country ? country.toUpperCase() : "Receiver";
 }
 
+function archiveFileUrl(file) {
+  return `/api/archive/files/${encodeURIComponent(file.name)}`;
+}
+
+function clearArchivePreview(message = "Select an archive file to preview it here.") {
+  archivePlayer.pause();
+  archivePlayer.removeAttribute("src");
+  archivePlayer.load();
+  archivePlayer.classList.add("hidden");
+  archivePreviewEmpty.classList.remove("hidden");
+  archivePreviewEmpty.textContent = message;
+  archiveSelectedName.textContent = "No file selected";
+  archiveSelectedMeta.textContent = "Browser playback depends on the file format.";
+  archiveOpenLink.removeAttribute("href");
+  archiveOpenLink.classList.add("hidden");
+  selectedArchiveRevision = null;
+}
+
+function renderArchivePreview(file) {
+  const nextRevision = String(file.modified_at_ts || file.size_bytes || file.name);
+  if (selectedArchiveName !== file.name) {
+    selectedArchiveName = file.name;
+  }
+
+  if (selectedArchiveRevision !== nextRevision || archivePlayer.dataset.fileName !== file.name) {
+    archivePlayer.src = `${archiveFileUrl(file)}?t=${nextRevision}`;
+    archivePlayer.dataset.fileName = file.name;
+    archivePlayer.load();
+    selectedArchiveRevision = nextRevision;
+  }
+
+  archivePlayer.classList.remove("hidden");
+  archivePreviewEmpty.classList.add("hidden");
+  archiveSelectedName.textContent = file.name;
+  archiveSelectedMeta.textContent = `${formatBytes(file.size_bytes)} • ${file.modified_at || "Unknown timestamp"}`;
+  archiveOpenLink.href = archiveFileUrl(file);
+  archiveOpenLink.classList.remove("hidden");
+}
+
 function renderArchive(archive) {
   archiveSummary.textContent = archive.exists
     ? `${archive.file_count} files in ${archive.path} • ${formatBytes(archive.total_size_bytes)} total`
     : `Archive directory missing: ${archive.path}`;
 
   archiveFiles.innerHTML = "";
-  archive.latest_files.forEach((file) => {
+  const files = archive.latest_files || [];
+  files.forEach((file) => {
     const item = document.createElement("li");
-    item.innerHTML = `
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "archive-file-button";
+    if (file.name === selectedArchiveName) {
+      button.classList.add("is-selected");
+    }
+    button.innerHTML = `
       <strong>${file.name}</strong>
       <div class="storage-meta">${formatBytes(file.size_bytes)} • ${file.modified_at || "Unknown timestamp"}</div>
     `;
+    button.addEventListener("click", () => {
+      selectedArchiveName = file.name;
+      renderArchive(latestStatus?.storage?.archive || archive);
+    });
+    item.appendChild(button);
     archiveFiles.appendChild(item);
   });
+
+  if (!files.length) {
+    selectedArchiveName = null;
+    clearArchivePreview("No archived TS or MP4 files are available yet.");
+    return;
+  }
+
+  const selectedFile = files.find((file) => file.name === selectedArchiveName) || null;
+  if (selectedFile) {
+    renderArchivePreview(selectedFile);
+    return;
+  }
+
+  clearArchivePreview("Select an archive file to preview it here.");
 }
 
 function applyRoleFormState() {
@@ -532,7 +604,7 @@ async function toggleRecording() {
 
   const action = latestStatus.runtime.server?.recording?.active ? "stop" : "start";
   setBusy([recordToggleButton], true);
-  recordMessage.textContent = action === "start" ? "Starting recording…" : "Stopping recording…";
+  recordMessage.textContent = action === "start" ? "Starting recording…" : "Stopping recording and finalizing…";
 
   try {
     const payload = await api(`/api/server/recording/${action}`, { method: "POST" });
