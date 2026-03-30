@@ -9,6 +9,7 @@
   --accent-dim: #4eb953;
   --warn: #f3c677;
   --danger: #f07d7d;
+  --border: #c0c0c0;
 }
 
 * {
@@ -144,7 +145,7 @@ h3 {
 
 .storage-panel,
 .server-panel {
-  grid-column: span 12;
+  grid-column: span 6;
 }
 
 .logs-panel {
@@ -315,6 +316,7 @@ button:disabled {
   justify-content: center;
   background: var(--bg-soft);
   overflow: hidden;
+  border: 1px solid var(--border);
 }
 
 .preview-frame img {
