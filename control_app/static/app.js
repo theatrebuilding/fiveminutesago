@@ -17,6 +17,10 @@ const archiveFiles = document.getElementById("archive-files");
 const archiveSelectedName = document.getElementById("archive-selected-name");
 const archiveSelectedMeta = document.getElementById("archive-selected-meta");
 const archiveOpenLink = document.getElementById("archive-open-link");
+const archiveDownloadLink = document.getElementById("archive-download-link");
+const archiveRenameButton = document.getElementById("archive-rename-button");
+const archiveDeleteButton = document.getElementById("archive-delete-button");
+const archiveActionMessage = document.getElementById("archive-action-message");
 const logOutput = document.getElementById("log-output");
 const configEditor = document.getElementById("config-editor");
 const configMessage = document.getElementById("config-message");
@@ -65,6 +69,7 @@ let audioDevices = [];
 let launchFormDirty = false;
 let selectedArchiveName = null;
 let selectedArchiveRevision = null;
+let selectedArchiveFile = null;
 
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
@@ -192,15 +197,25 @@ function archiveFileUrl(file) {
   return `/api/archive/files/${encodeURIComponent(file.name)}`;
 }
 
+function archiveDownloadUrl(file) {
+  return `/api/archive/files/${encodeURIComponent(file.name)}/download`;
+}
+
 function clearArchiveSelection(message = "Select a file and open it in a new tab.") {
+  selectedArchiveFile = null;
   archiveSelectedName.textContent = "No file selected";
   archiveSelectedMeta.textContent = message;
   archiveOpenLink.removeAttribute("href");
   archiveOpenLink.classList.add("hidden");
+  archiveDownloadLink.removeAttribute("href");
+  archiveDownloadLink.classList.add("hidden");
+  archiveRenameButton.disabled = true;
+  archiveDeleteButton.disabled = true;
   selectedArchiveRevision = null;
 }
 
 function renderArchiveSelection(file) {
+  selectedArchiveFile = file;
   const nextRevision = String(file.modified_at_ts || file.size_bytes || file.name);
   if (selectedArchiveName !== file.name) {
     selectedArchiveName = file.name;
@@ -214,6 +229,10 @@ function renderArchiveSelection(file) {
   archiveSelectedMeta.textContent = `${formatBytes(file.size_bytes)} • ${file.modified_at || "Unknown timestamp"}`;
   archiveOpenLink.href = archiveFileUrl(file);
   archiveOpenLink.classList.remove("hidden");
+  archiveDownloadLink.href = archiveDownloadUrl(file);
+  archiveDownloadLink.classList.remove("hidden");
+  archiveRenameButton.disabled = false;
+  archiveDeleteButton.disabled = false;
 }
 
 function renderArchive(storage) {
@@ -240,7 +259,7 @@ function renderArchive(storage) {
     `;
     button.addEventListener("click", () => {
       selectedArchiveName = file.name;
-      renderArchive(latestStatus?.storage?.archive || archive);
+      renderArchive(latestStatus?.storage || storage);
     });
     item.appendChild(button);
     archiveFiles.appendChild(item);
@@ -703,6 +722,68 @@ async function toggleRecording() {
   }
 }
 
+function selectedArchiveBaseName() {
+  if (!selectedArchiveFile) {
+    return "";
+  }
+  return selectedArchiveFile.base_name || selectedArchiveFile.name;
+}
+
+async function renameSelectedArchive() {
+  if (!selectedArchiveFile) {
+    return;
+  }
+
+  const nextBaseName = window.prompt("Rename selected file", selectedArchiveBaseName());
+  if (nextBaseName == null) {
+    return;
+  }
+
+  setBusy([archiveRenameButton, archiveDeleteButton], true);
+  archiveActionMessage.textContent = "Renaming selected file…";
+
+  try {
+    const payload = await api(`/api/archive/files/${encodeURIComponent(selectedArchiveFile.name)}/rename`, {
+      method: "POST",
+      body: JSON.stringify({
+        base_name: nextBaseName,
+      }),
+    });
+    selectedArchiveName = payload.file?.name || selectedArchiveName;
+    archiveActionMessage.textContent = payload.message;
+    await refreshStatus();
+  } catch (error) {
+    archiveActionMessage.textContent = error.message;
+  } finally {
+    setBusy([archiveRenameButton, archiveDeleteButton], false);
+  }
+}
+
+async function deleteSelectedArchive() {
+  if (!selectedArchiveFile) {
+    return;
+  }
+  if (!window.confirm(`Delete ${selectedArchiveFile.name}?`)) {
+    return;
+  }
+
+  setBusy([archiveRenameButton, archiveDeleteButton], true);
+  archiveActionMessage.textContent = "Deleting selected file…";
+
+  try {
+    const payload = await api(`/api/archive/files/${encodeURIComponent(selectedArchiveFile.name)}`, {
+      method: "DELETE",
+    });
+    selectedArchiveName = null;
+    archiveActionMessage.textContent = payload.message;
+    await refreshStatus();
+  } catch (error) {
+    archiveActionMessage.textContent = error.message;
+  } finally {
+    setBusy([archiveRenameButton, archiveDeleteButton], false);
+  }
+}
+
 async function saveConfig(restart) {
   setBusy([saveConfigButton, applyConfigButton], true);
   configMessage.textContent = restart ? "Saving config and relaunching active role…" : "Saving config…";
@@ -741,6 +822,8 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
+archiveRenameButton.addEventListener("click", renameSelectedArchive);
+archiveDeleteButton.addEventListener("click", deleteSelectedArchive);
 
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {

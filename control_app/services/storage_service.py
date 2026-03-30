@@ -98,15 +98,37 @@ class StorageService:
         }
 
     def get_archive_file(self, filename: str) -> Path | None:
-        candidate = (self._archive_dir / filename).resolve()
-        archive_root = self._archive_dir.resolve()
-        try:
-            candidate.relative_to(archive_root)
-        except ValueError:
+        candidate = self._resolve_archive_candidate(filename)
+        if candidate is None:
             return None
         if not candidate.exists() or not candidate.is_file() or not self._is_archive_media(candidate):
             return None
         return candidate
+
+    def rename_archive_file(self, filename: str, base_name: str) -> dict[str, Any]:
+        source = self.get_archive_file(filename)
+        if source is None:
+            raise FileNotFoundError("Archive file not available.")
+
+        normalized_base_name = self._normalize_base_name(base_name)
+        suffix_bundle = "".join(source.suffixes)
+        target_name = f"{normalized_base_name}{suffix_bundle}"
+        target = self._resolve_archive_candidate(target_name)
+        if target is None or not self._is_archive_media(target):
+            raise ValueError("Invalid archive filename.")
+        if target.exists() and target != source:
+            raise FileExistsError(f"{target.name} already exists.")
+        if target == source:
+            return self._describe_file(source)
+
+        source.rename(target)
+        return self._describe_file(target)
+
+    def delete_archive_file(self, filename: str) -> None:
+        path = self.get_archive_file(filename)
+        if path is None:
+            raise FileNotFoundError("Archive file not available.")
+        path.unlink()
 
     def media_type_for(self, path: Path) -> str:
         if path.suffix.lower() == ".mp4":
@@ -133,6 +155,8 @@ class StorageService:
         age_seconds = max(0, int(dt.datetime.now().timestamp() - modified_at))
         return {
             "name": path.name,
+            "base_name": self._base_name_for(path),
+            "suffix": "".join(path.suffixes),
             "path": str(path),
             "exists": True,
             "size_bytes": stat.st_size,
@@ -144,6 +168,35 @@ class StorageService:
 
     def _is_archive_media(self, path: Path) -> bool:
         return path.suffix.lower() in ARCHIVE_MEDIA_SUFFIXES and not path.name.endswith(".recording.ts")
+
+    def _resolve_archive_candidate(self, filename: str) -> Path | None:
+        candidate_name = (filename or "").strip()
+        if not candidate_name or candidate_name in {".", ".."}:
+            return None
+
+        candidate = (self._archive_dir / candidate_name).resolve()
+        archive_root = self._archive_dir.resolve()
+        try:
+            candidate.relative_to(archive_root)
+        except ValueError:
+            return None
+        return candidate
+
+    def _normalize_base_name(self, base_name: str) -> str:
+        normalized = base_name.strip()
+        if not normalized:
+            raise ValueError("A new file name is required.")
+        if normalized in {".", ".."}:
+            raise ValueError("Invalid archive filename.")
+        if "/" in normalized or "\\" in normalized:
+            raise ValueError("Archive filenames cannot include path separators.")
+        return normalized
+
+    def _base_name_for(self, path: Path) -> str:
+        suffix_bundle = "".join(path.suffixes)
+        if not suffix_bundle:
+            return path.name
+        return path.name[: -len(suffix_bundle)]
 
 
 def _to_iso(timestamp: float) -> str:
