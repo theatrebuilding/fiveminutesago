@@ -361,6 +361,10 @@ button:disabled {
   gap: 4px;
 }
 
+.archive-action-row {
+  align-items: center;
+}
+
 .archive-open-link {
   width: fit-content;
   color: var(--text);

@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import secrets
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -285,9 +286,69 @@ async def archive_file(filename: str, request: Request) -> FileResponse:
         headers={
             "Cache-Control": "no-store, max-age=0",
             "Pragma": "no-cache",
-            "Content-Disposition": f'inline; filename="{path.name}"',
+            "Content-Disposition": _content_disposition("inline", path.name),
         },
     )
+
+
+@app.get("/api/archive/files/{filename}/download")
+async def archive_file_download(filename: str, request: Request) -> FileResponse:
+    services = _services(request)
+    path = services.storage_service.get_archive_file(filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="Archive file not available.")
+
+    return FileResponse(
+        path,
+        media_type=services.storage_service.media_type_for(path),
+        filename=path.name,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+            "Content-Disposition": _content_disposition("attachment", path.name),
+        },
+    )
+
+
+@app.post("/api/archive/files/{filename}/rename")
+async def rename_archive_file(filename: str, request: Request) -> dict[str, Any]:
+    services = _services(request)
+    payload = await request.json()
+    base_name = payload.get("base_name")
+    if not isinstance(base_name, str):
+        raise HTTPException(status_code=400, detail="A new file name is required.")
+
+    try:
+        file_info = services.storage_service.rename_archive_file(filename, base_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    services.runtime_service.record_event(f"Archive file renamed: {filename} -> {file_info['name']}.")
+    return {
+        "message": f"Renamed archive file to {file_info['name']}.",
+        "file": file_info,
+        "storage": services.storage_service.snapshot(),
+    }
+
+
+@app.delete("/api/archive/files/{filename}")
+async def delete_archive_file(filename: str, request: Request) -> dict[str, Any]:
+    services = _services(request)
+
+    try:
+        services.storage_service.delete_archive_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    services.runtime_service.record_event(f"Archive file deleted: {filename}.")
+    return {
+        "message": f"Deleted archive file {filename}.",
+        "storage": services.storage_service.snapshot(),
+    }
 
 
 def _services(request: Request) -> AppServices:
@@ -300,3 +361,8 @@ def _unauthorized() -> JSONResponse:
         content={"detail": "Authentication required."},
         headers={"WWW-Authenticate": 'Basic realm="Five Minutes Ago"'},
     )
+
+
+def _content_disposition(disposition_type: str, filename: str) -> str:
+    ascii_fallback = filename.replace("\\", "_").replace('"', "")
+    return f"{disposition_type}; filename=\"{ascii_fallback}\"; filename*=UTF-8''{quote(filename)}"

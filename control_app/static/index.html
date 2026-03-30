@@ -207,7 +207,13 @@
               <div class="archive-preview-meta">
                 <strong id="archive-selected-name">No file selected</strong>
                 <p id="archive-selected-meta" class="storage-meta">Select a file and open it in a new tab.</p>
-                <a id="archive-open-link" class="archive-open-link hidden" target="_blank" rel="noopener noreferrer">Open selected file</a>
+                <div class="button-row archive-action-row">
+                  <a id="archive-open-link" class="archive-open-link hidden" target="_blank" rel="noopener noreferrer">Open selected file</a>
+                  <a id="archive-download-link" class="archive-open-link hidden">Download selected file</a>
+                  <button id="archive-rename-button" type="button" class="button-muted" disabled>Rename selected file</button>
+                  <button id="archive-delete-button" type="button" class="button-danger" disabled>Delete selected file</button>
+                </div>
+                <p id="archive-action-message" class="action-message"></p>
               </div>
             </div>
             <ul id="archive-files" class="archive-files"></ul>
