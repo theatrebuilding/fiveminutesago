@@ -22,6 +22,7 @@ from .server_runtime import ServerRuntime
 VALID_ROLES = {"server", "sender", "receiver"}
 VALID_COUNTRIES = {"tn", "dk"}
 VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
+VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
 VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac"}
 
 
@@ -30,6 +31,7 @@ class RuntimeLaunchRequest:
     role: str
     country: str | None = None
     audio_source: str = "off"
+    sender_audio_mode: str = "aec"
     audio_device: str | None = None
     video_device: str | None = None
     receiver_audio_transport: str = "config"
@@ -44,6 +46,7 @@ class RuntimeLaunchRequest:
             "country": self.country,
             "audio_enabled": self.audio_enabled,
             "audio_source": self.audio_source,
+            "sender_audio_mode": self.sender_audio_mode,
             "audio_device": self.audio_device,
             "video_device": self.video_device,
             "receiver_audio_transport": self.receiver_audio_transport,
@@ -71,6 +74,10 @@ class RuntimeLaunchRequest:
             audio_source = "device" if bool(payload.get("audio_enabled")) else "off"
         if audio_source not in VALID_SENDER_AUDIO_SOURCES:
             raise ValueError("Sender audio source must be one of: off, device, test.")
+        sender_audio_mode_raw = payload.get("sender_audio_mode")
+        sender_audio_mode = str(sender_audio_mode_raw).strip().lower() if sender_audio_mode_raw is not None else "aec"
+        if sender_audio_mode not in VALID_SENDER_AUDIO_MODES:
+            raise ValueError("Sender audio mode must be one of: aec, capture-only.")
 
         audio_device_raw = payload.get("audio_device")
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
@@ -89,6 +96,7 @@ class RuntimeLaunchRequest:
 
         if role != "sender":
             audio_source = "off"
+            sender_audio_mode = "aec"
             audio_device = None
             video_device = None
         elif audio_source != "device":
@@ -101,6 +109,7 @@ class RuntimeLaunchRequest:
             role=role,
             country=country,
             audio_source=audio_source,
+            sender_audio_mode=sender_audio_mode,
             audio_device=audio_device,
             video_device=video_device,
             receiver_audio_transport=receiver_audio_transport,
@@ -286,7 +295,15 @@ class RuntimeService:
             prune_preview_files(self._preview_dir, preview_pattern, keep=0)
             command = [self._python_executable, "send.py", "--country", request.country or "tn"]
             if request.audio_enabled:
-                command.extend(["--with-audio", "--audio-source", request.audio_source])
+                command.extend(
+                    [
+                        "--with-audio",
+                        "--audio-source",
+                        request.audio_source,
+                        "--sender-audio-mode",
+                        request.sender_audio_mode,
+                    ]
+                )
             else:
                 command.append("--no-audio")
             if request.audio_source == "device" and request.audio_device:

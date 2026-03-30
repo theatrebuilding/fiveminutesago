@@ -33,6 +33,7 @@ class SenderRuntime:
         audio_enabled=False,
         audio_device=None,
         audio_source_mode="device",
+        sender_audio_mode="aec",
     ):
         self.country = country
         self.video_device = video_device
@@ -41,6 +42,7 @@ class SenderRuntime:
         self.audio_enabled = audio_enabled
         self.audio_device = audio_device
         self.audio_source_mode = audio_source_mode
+        self.sender_audio_mode = sender_audio_mode
 
         self.pipeline = None
         self.loop = None
@@ -101,8 +103,11 @@ class SenderRuntime:
 
         audio_branches = ""
         if self.audio_enabled:
-            if not self.audio_send_port or not self.audio_recv_port:
-                print("ERROR: Missing audio ports in config (send/receive).")
+            if not self.audio_send_port:
+                print("ERROR: Missing audio send port in config.")
+                sys.exit(1)
+            if self.sender_audio_mode == "aec" and not self.audio_recv_port:
+                print("ERROR: Missing audio receive port in config for sender playback/DSP mode.")
                 sys.exit(1)
             audio_branches = self.build_audio_branches(cfg)
 
@@ -133,40 +138,62 @@ class SenderRuntime:
         dsp_cfg = cfg.get("webrtcdsp_settings", {})
         streaming_settings_audio = cfg.get("streaming_settings_audio", "")
         audio_format = audio_opts.get("format", "S16BE")
-        audio_rate = audio_opts.get("rate", 32000)
+        audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = audio_opts.get("channels", 2)
         encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = audio_opts.get("playback_device", "default")
+        playback_enabled = self.sender_audio_mode == "aec"
 
-        try:
-            audio_rate = validate_audio_rate(audio_rate)
-            dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
-        except ValueError as exc:
-            print(f"ERROR: {exc}")
-            sys.exit(1)
+        if playback_enabled:
+            try:
+                audio_rate = validate_audio_rate(audio_rate)
+                dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
+            except ValueError as exc:
+                print(f"ERROR: {exc}")
+                sys.exit(1)
+        else:
+            dsp_properties = ""
+            resolved_dsp_cfg = {}
 
         audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, audio_rate)
         aac_encoder = self.resolve_aac_encoder(audio_opts)
-        dsp_segment = f"! webrtcdsp probe=playback_probe {dsp_properties}" if uses_dsp else ""
+        enable_dsp = playback_enabled and uses_dsp
+        playback_branch = ""
+        if playback_enabled:
+            playback_branch = f"""
+                srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false !
+                    queue max-size-time=2000000000 max-size-buffers=500
+                    ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                    ! rtpL16depay
+                    ! audioconvert
+                    ! audioresample
+                    ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                    ! webrtcechoprobe name=playback_probe
+                    ! queue
+                    ! alsasink device="{gst_escape(playback_device)}" async=true
+            """
 
-        print(
-            "[Sender] Audio capture, sender-side PCM return audio, and muxed AAC recording audio all run in one pipeline for sync.",
-            flush=True,
-        )
+        dsp_segment = f"! webrtcdsp probe=playback_probe {dsp_properties}" if enable_dsp else ""
+
+        if playback_enabled:
+            print(
+                "[Sender] Sender playback + DSP mode active: remote audio is returned for local playback and acoustic echo cancellation.",
+                flush=True,
+            )
+        else:
+            print(
+                "[Sender] Capture-only mode active: sender audio is transmitted, but remote playback and WebRTC DSP are disabled.",
+                flush=True,
+            )
+
         print(f"[Sender] Using audio source: {source_label}", flush=True)
-        print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
+        if enable_dsp:
+            print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
+        elif playback_enabled:
+            print("[Sender] WebRTC DSP is bypassed because the sender audio source is a test signal.", flush=True)
 
         return f"""
-            srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false !
-                queue max-size-time=2000000000 max-size-buffers=500
-                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
-                ! rtpL16depay
-                ! audioconvert
-                ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
-                ! webrtcechoprobe name=playback_probe
-                ! queue
-                ! alsasink device="{gst_escape(playback_device)}" async=true
+            {playback_branch}
 
             {audio_source}
                 ! queue
@@ -193,6 +220,13 @@ class SenderRuntime:
                 ! queue
                 ! av_mux.
         """
+
+    def parse_audio_rate(self, value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            print(f"ERROR: audio.rate must be an integer; got {value!r}.")
+            sys.exit(1)
 
     def resolve_video_source(self, video_opts):
         if self.video_device:
@@ -350,6 +384,7 @@ def main():
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio capture device name (for example hw:1,0).")
     parser.add_argument("--audio-source", choices=["device", "test"], default="device", help="Audio source mode. Use 'test' for audiotestsrc instead of a capture device.")
+    parser.add_argument("--sender-audio-mode", choices=["aec", "capture-only"], default="aec", help="Sender audio mode. Use 'capture-only' to disable remote playback and WebRTC DSP on the sender.")
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
     parser.add_argument("--video-source", choices=["config", "test"], default="config", help="Video source mode. Use 'test' to send a test signal instead of a camera.")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/sender-tn-preview-%05d.jpg.")
@@ -362,6 +397,7 @@ def main():
         run_audio = args.with_audio
 
     audio_source_mode = args.audio_source
+    sender_audio_mode = args.sender_audio_mode
     audio_device = args.device
     if run_audio and args.with_audio is None:
         source_input = input("Enter the audio device name, 'test' for an audio test signal, or leave blank for default: ").strip()
@@ -370,6 +406,9 @@ def main():
             audio_device = None
         elif source_input:
             audio_device = source_input
+        playback_input = input("Enable sender playback and DSP? (y/n, default y): ").strip().lower()
+        if playback_input.startswith("n"):
+            sender_audio_mode = "capture-only"
 
     sender = SenderRuntime(
         args.country,
@@ -379,6 +418,7 @@ def main():
         audio_enabled=run_audio,
         audio_device=audio_device,
         audio_source_mode=audio_source_mode,
+        sender_audio_mode=sender_audio_mode,
     )
     shared_clock = Gst.SystemClock.obtain()
     sender.set_clock(shared_clock)

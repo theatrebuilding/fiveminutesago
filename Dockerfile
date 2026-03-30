@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tini \
     gir1.2-gst-plugins-base-1.0 \
     gir1.2-gstreamer-1.0 \
+    gstreamer1.0-alsa \
     gstreamer1.0-libav \
     gstreamer1.0-plugins-bad \
     gstreamer1.0-plugins-base \

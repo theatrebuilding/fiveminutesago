@@ -57,6 +57,15 @@
               <p id="audio-device-message" class="field-help">If nothing is selected, sender audio stays disabled.</p>
             </label>
 
+            <label id="sender-audio-mode-field" class="field">
+              <span class="field-label">Sender Audio Mode</span>
+              <select id="sender-audio-mode-select">
+                <option value="aec">Playback + DSP</option>
+                <option value="capture-only">Capture only</option>
+              </select>
+              <p id="sender-audio-mode-message" class="field-help">Playback + DSP returns the remote audio to the sender Pi for local playback and echo cancellation. Capture only disables sender playback and bypasses WebRTC DSP.</p>
+            </label>
+
             <label id="receiver-audio-field" class="field hidden">
               <span class="field-label">Receiver Audio</span>
               <select id="receiver-audio-select">

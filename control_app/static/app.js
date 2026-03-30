@@ -32,6 +32,8 @@ const videoDeviceMessage = document.getElementById("video-device-message");
 const audioDeviceField = document.getElementById("audio-device-field");
 const audioDeviceSelect = document.getElementById("audio-device-select");
 const audioDeviceMessage = document.getElementById("audio-device-message");
+const senderAudioModeField = document.getElementById("sender-audio-mode-field");
+const senderAudioModeSelect = document.getElementById("sender-audio-mode-select");
 const receiverAudioField = document.getElementById("receiver-audio-field");
 const receiverAudioSelect = document.getElementById("receiver-audio-select");
 const startRoleButton = document.getElementById("start-role");
@@ -134,15 +136,23 @@ function formatSeconds(seconds) {
 
 function describeSenderAudioChoice(launch) {
   const source = launch?.audio_source || (launch?.audio_enabled ? "device" : "off");
+  const senderAudioMode = launch?.sender_audio_mode || "aec";
   if (source === "off") {
     return "audio off";
   }
 
+  let sourceLabel = "";
   if (source === "test") {
-    return "test tone";
+    sourceLabel = "test tone";
+  } else {
+    sourceLabel = launch.audio_device ? `mic (${launch.audio_device})` : "mic (config default)";
   }
 
-  return launch.audio_device ? `mic (${launch.audio_device})` : "mic (config default)";
+  if (senderAudioMode === "capture-only") {
+    return `${sourceLabel} • capture only`;
+  }
+
+  return `${sourceLabel} • playback+dsp`;
 }
 
 function describeReceiverAudioChoice(launch) {
@@ -270,6 +280,7 @@ function applyRoleFormState() {
   countryField.classList.toggle("hidden", !(sender || receiver));
   videoDeviceField.classList.toggle("hidden", !sender);
   audioDeviceField.classList.toggle("hidden", !sender);
+  senderAudioModeField.classList.toggle("hidden", !sender);
   receiverAudioField.classList.toggle("hidden", !receiver);
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
@@ -297,6 +308,7 @@ function syncFormFromRuntime(runtime) {
   }
   if (launch.role === "sender") {
     const audioSource = launch.audio_source || (launch.audio_enabled ? "device" : "off");
+    senderAudioModeSelect.value = launch.sender_audio_mode || "aec";
     if (launch.video_device) {
       ensureVideoDeviceOption(launch.video_device);
       videoDeviceSelect.value = launch.video_device;
@@ -614,6 +626,7 @@ function buildLaunchPayload() {
 
   if (payload.role === "sender") {
     payload.video_device = videoDeviceSelect.value || null;
+    payload.sender_audio_mode = senderAudioModeSelect.value;
     if (audioDeviceSelect.value === AUDIO_TEST_VALUE) {
       payload.audio_source = "test";
       payload.audio_device = null;
@@ -731,6 +744,7 @@ roleSelect.addEventListener("change", async () => {
 countrySelect.addEventListener("change", markLaunchFormDirty);
 videoDeviceSelect.addEventListener("change", markLaunchFormDirty);
 audioDeviceSelect.addEventListener("change", markLaunchFormDirty);
+senderAudioModeSelect.addEventListener("change", markLaunchFormDirty);
 receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
 startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
