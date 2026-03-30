@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     alsa-utils \
     ca-certificates \
+    ffmpeg \
     iproute2 \
     iptables \
     tini \
