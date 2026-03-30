@@ -17,9 +17,11 @@ services:
       TS_ENABLE_HEALTH_CHECK: "true"
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      TBDRIVE_ROOT: ${TBDRIVE_ROOT:-/mnt/tbdrive}
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
+      - ${HOST_TBDRIVE_ROOT:-/mnt/tbdrive}:${TBDRIVE_ROOT:-/mnt/tbdrive}
       - /dev:/host-dev
     devices:
       - /dev/net/tun:/dev/net/tun

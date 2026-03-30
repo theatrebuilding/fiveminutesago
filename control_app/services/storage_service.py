@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,15 +10,67 @@ ARCHIVE_MEDIA_SUFFIXES = {".ts", ".mp4"}
 
 
 class StorageService:
-    def __init__(self, storage_root: Path, archive_dir: Path) -> None:
+    def __init__(
+        self,
+        storage_root: Path,
+        archive_dir: Path,
+        storage_reference_root: Path | None = None,
+    ) -> None:
         self._storage_root = storage_root
         self._archive_dir = archive_dir
+        self._storage_reference_root = storage_reference_root
 
     def snapshot(self) -> dict[str, Any]:
+        root = self._describe_storage_root()
         return {
             "storage_root": str(self._storage_root),
+            "root": root,
+            "warning": root.get("warning"),
             "archive": self._describe_archive_dir(),
         }
+
+    def _describe_storage_root(self) -> dict[str, Any]:
+        exists = self._storage_root.exists()
+        is_directory = self._storage_root.is_dir() if exists else False
+        writable = os.access(self._storage_root, os.W_OK) if exists else False
+        warning = None
+        separate_from_reference_filesystem = None
+
+        if not exists:
+            warning = f"Storage root {self._storage_root} does not exist inside the container."
+        elif not is_directory:
+            warning = f"Storage root {self._storage_root} is not a directory."
+        else:
+            separate_from_reference_filesystem = self._detect_separate_storage_filesystem()
+            if not writable:
+                warning = f"Storage root {self._storage_root} is not writable."
+            elif separate_from_reference_filesystem is False:
+                warning = (
+                    f"Storage root {self._storage_root} looks like ordinary local storage, not the mounted TB drive. "
+                    "Recordings may not persist on the external drive until the host mounts it there."
+                )
+
+        return {
+            "path": str(self._storage_root),
+            "exists": exists,
+            "is_directory": is_directory,
+            "writable": writable,
+            "reference_path": str(self._storage_reference_root) if self._storage_reference_root is not None else None,
+            "separate_from_reference_filesystem": separate_from_reference_filesystem,
+            "warning": warning,
+        }
+
+    def _detect_separate_storage_filesystem(self) -> bool | None:
+        if self._storage_reference_root is None:
+            return None
+        if not self._storage_root.exists() or not self._storage_reference_root.exists():
+            return None
+        try:
+            storage_dev = self._storage_root.stat().st_dev
+            reference_dev = self._storage_reference_root.stat().st_dev
+        except OSError:
+            return None
+        return storage_dev != reference_dev
 
     def _describe_archive_dir(self) -> dict[str, Any]:
         if not self._archive_dir.exists():

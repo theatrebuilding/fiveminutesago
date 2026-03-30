@@ -19,6 +19,7 @@ class AppPaths:
     production_dir: Path
     config_path: Path
     storage_root: Path
+    storage_reference_root: Path
     recording_dir: Path
     archive_dir: Path
     preview_dir: Path
@@ -37,12 +38,14 @@ class AppSettings:
 def build_settings() -> AppSettings:
     project_root = Path(__file__).resolve().parents[1]
     storage_root = Path(os.getenv("TBDRIVE_ROOT", "/mnt/tbdrive"))
+    storage_reference_root = Path(os.getenv("TBDRIVE_REFERENCE_ROOT", "/config"))
     paths = AppPaths(
         project_root=project_root,
         static_dir=project_root / "control_app" / "static",
         production_dir=project_root / "production",
         config_path=project_root / "production" / "config.yaml",
         storage_root=storage_root,
+        storage_reference_root=storage_reference_root,
         recording_dir=storage_root,
         archive_dir=storage_root / "video",
         preview_dir=storage_root / "previews",

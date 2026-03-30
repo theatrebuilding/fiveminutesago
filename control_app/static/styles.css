@@ -199,6 +199,12 @@ h3 {
   margin-bottom: 0;
 }
 
+.storage-warning {
+  margin: 0;
+  color: var(--warn);
+  font-size: 0.88rem;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -347,18 +353,6 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.archive-preview-frame {
-  min-height: 200px;
-}
-
-.archive-preview-frame video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  background: #000;
 }
 
 .archive-preview-meta {

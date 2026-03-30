@@ -12,6 +12,7 @@ const recordingState = document.getElementById("recording-state");
 const recordingMeta = document.getElementById("recording-meta");
 const archivePanel = document.getElementById("archive-panel");
 const archiveSummary = document.getElementById("archive-summary");
+const archiveWarning = document.getElementById("archive-warning");
 const archiveFiles = document.getElementById("archive-files");
 const archiveSelectedName = document.getElementById("archive-selected-name");
 const archiveSelectedMeta = document.getElementById("archive-selected-meta");
@@ -215,10 +216,13 @@ function renderArchiveSelection(file) {
   archiveOpenLink.classList.remove("hidden");
 }
 
-function renderArchive(archive) {
+function renderArchive(storage) {
+  const archive = storage?.archive || {};
   archiveSummary.textContent = archive.exists
     ? `${archive.file_count} files in ${archive.path} • ${formatBytes(archive.total_size_bytes)} total`
     : `Archive directory missing: ${archive.path}`;
+  archiveWarning.textContent = storage?.warning || "";
+  archiveWarning.classList.toggle("hidden", !storage?.warning);
 
   archiveFiles.innerHTML = "";
   const files = archive.latest_files || [];
@@ -554,7 +558,7 @@ function renderStatus(status) {
   renderSenderPreview(sender);
   renderReceiverPreview(receiver);
 
-  renderArchive(storage.archive);
+  renderArchive(storage);
   logOutput.textContent = runtime.log_tail.length ? runtime.log_tail.join("\n") : "No logs yet.";
   logOutput.scrollTop = logOutput.scrollHeight;
 }

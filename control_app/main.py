@@ -48,6 +48,7 @@ async def lifespan(app: FastAPI):
     storage_service = StorageService(
         storage_root=settings.paths.storage_root,
         archive_dir=settings.paths.archive_dir,
+        storage_reference_root=settings.paths.storage_reference_root,
     )
     dashboard_service = DashboardService(
         config_service=config_service,
