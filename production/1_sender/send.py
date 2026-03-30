@@ -123,7 +123,8 @@ class SenderRuntime:
             {preview_branch}
 
             mpegtsmux name=av_mux alignment={alignment} !
-            srtsink uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings_video}"
+            srtsink wait-for-connection=true
+                uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings_video}"
         """
         return pipeline_str.strip()
 
@@ -180,7 +181,8 @@ class SenderRuntime:
                 ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
+                ! srtsink wait-for-connection=true
+                    uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
 
             audio_capture_tee. ! queue
                 ! audioconvert
