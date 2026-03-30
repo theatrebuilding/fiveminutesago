@@ -1,14 +1,14 @@
 services:
-  ldn-sender:
+  teateroen-server:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: ldn-sender
+    hostname: teateroen-server
     userns_mode: "host"
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_AUTH_ONCE: "true"
-      TS_HOSTNAME: ldn-sender
+      TS_HOSTNAME: teateroen-server
       TS_EXTRA_ARGS: --advertise-tags=tag:container
       TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
       TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
