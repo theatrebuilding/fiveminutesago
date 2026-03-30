@@ -16,73 +16,10 @@ if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
 from config_loader import load_config
+from audio_support import build_webrtcdsp_properties, gst_escape, validate_audio_rate
 
 # Initialize GStreamer.
 Gst.init(None)
-
-
-SUPPORTED_WEBRTC_SAMPLE_RATES = {8000, 16000, 32000, 48000}
-WEBRTC_DSP_PROPERTY_ORDER = [
-    "compression-gain-db",
-    "delay-agnostic",
-    "echo-cancel",
-    "echo-suppression-level",
-    "experimental-agc",
-    "extended-filter",
-    "gain-control",
-    "gain-control-mode",
-    "high-pass-filter",
-    "limiter",
-    "noise-suppression",
-    "noise-suppression-level",
-    "startup-min-volume",
-    "target-level-dbfs",
-    "voice-detection",
-    "voice-detection-frame-size-ms",
-    "voice-detection-likelihood",
-]
-WEBRTC_DSP_DEFAULTS = {
-    "compression-gain-db": 9,
-    "delay-agnostic": False,
-    "echo-cancel": True,
-    "echo-suppression-level": "moderate",
-    "experimental-agc": False,
-    "extended-filter": False,
-    "gain-control": True,
-    "gain-control-mode": "adaptive-digital",
-    "high-pass-filter": True,
-    "limiter": True,
-    "noise-suppression": True,
-    "noise-suppression-level": "moderate",
-    "startup-min-volume": 12,
-    "target-level-dbfs": 3,
-    "voice-detection": False,
-    "voice-detection-frame-size-ms": 0,
-    "voice-detection-likelihood": "low",
-}
-WEBRTC_DSP_ENUM_VALUES = {
-    "echo-suppression-level": {"low", "moderate", "high"},
-    "gain-control-mode": {"adaptive-digital", "fixed-digital", "adaptive-analog"},
-    "noise-suppression-level": {"low", "moderate", "high", "very-high"},
-    "voice-detection-likelihood": {"very-low", "low", "moderate", "high"},
-}
-WEBRTC_DSP_BOOL_KEYS = {
-    "delay-agnostic",
-    "echo-cancel",
-    "experimental-agc",
-    "extended-filter",
-    "gain-control",
-    "high-pass-filter",
-    "limiter",
-    "noise-suppression",
-    "voice-detection",
-}
-WEBRTC_DSP_INT_KEYS = {
-    "compression-gain-db",
-    "startup-min-volume",
-    "target-level-dbfs",
-    "voice-detection-frame-size-ms",
-}
 
 #########################################
 # AudioSender Class
@@ -137,8 +74,8 @@ class AudioSender:
         dsp_cfg = config.get("webrtcdsp_settings", {})
 
         try:
-            audio_rate = self.validate_audio_rate(audio_rate)
-            dsp_properties, resolved_dsp_cfg = self.build_dsp_properties(dsp_cfg)
+            audio_rate = validate_audio_rate(audio_rate)
+            dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
         except ValueError as exc:
             print(f"ERROR: {exc}")
             sys.exit(1)
@@ -159,9 +96,9 @@ class AudioSender:
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe name=playback_probe
                 ! queue
-                ! alsasink device="{self.gst_escape(self.playback_device)}" async=true
+                ! alsasink device="{gst_escape(self.playback_device)}" async=true
 
-            alsasrc device="{self.gst_escape(self.capture_device)}"
+            alsasrc device="{gst_escape(self.capture_device)}"
                 ! queue
                 ! audioconvert
                 ! audioresample
@@ -219,96 +156,6 @@ class AudioSender:
     def stop(self):
         if self.loop:
             self.loop.quit()
-
-    def validate_audio_rate(self, audio_rate):
-        try:
-            rate = int(audio_rate)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                f"audio.rate must be an integer supported by webrtcdsp; got {audio_rate!r}."
-            ) from exc
-
-        if rate not in SUPPORTED_WEBRTC_SAMPLE_RATES:
-            supported = ", ".join(str(value) for value in sorted(SUPPORTED_WEBRTC_SAMPLE_RATES))
-            raise ValueError(
-                f"audio.rate={rate} is not supported by webrtcdsp. Use one of: {supported}."
-            )
-
-        return rate
-
-    def build_dsp_properties(self, dsp_cfg):
-        if dsp_cfg is None:
-            dsp_cfg = {}
-        if not isinstance(dsp_cfg, dict):
-            raise ValueError("webrtcdsp_settings must be a YAML mapping.")
-
-        unknown_keys = sorted(set(dsp_cfg) - set(WEBRTC_DSP_PROPERTY_ORDER))
-        if unknown_keys:
-            raise ValueError(
-                "Unsupported webrtcdsp_settings keys: "
-                + ", ".join(unknown_keys)
-                + ". Remove them or map them to real webrtcdsp properties."
-            )
-
-        resolved = {}
-        properties = []
-        for key in WEBRTC_DSP_PROPERTY_ORDER:
-            raw_value = dsp_cfg.get(key, WEBRTC_DSP_DEFAULTS[key])
-            resolved_value = self.normalize_dsp_value(key, raw_value)
-            resolved[key] = resolved_value
-            properties.append(f"{key}={self.format_gst_value(resolved_value)}")
-
-        return " ".join(properties), resolved
-
-    def normalize_dsp_value(self, key, value):
-        if key in WEBRTC_DSP_BOOL_KEYS:
-            return self.normalize_bool(key, value)
-        if key in WEBRTC_DSP_INT_KEYS:
-            return self.normalize_int(key, value)
-        if key in WEBRTC_DSP_ENUM_VALUES:
-            return self.normalize_enum(key, value, WEBRTC_DSP_ENUM_VALUES[key])
-        raise ValueError(f"Unsupported webrtcdsp property mapping for {key}.")
-
-    def normalize_bool(self, key, value):
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, str):
-            normalized = value.strip().lower()
-            if normalized in {"true", "yes", "on", "1"}:
-                return True
-            if normalized in {"false", "no", "off", "0"}:
-                return False
-        raise ValueError(f"webrtcdsp_settings.{key} must be a boolean; got {value!r}.")
-
-    def normalize_int(self, key, value):
-        if isinstance(value, bool):
-            raise ValueError(f"webrtcdsp_settings.{key} must be an integer; got {value!r}.")
-        try:
-            return int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"webrtcdsp_settings.{key} must be an integer; got {value!r}.") from exc
-
-    def normalize_enum(self, key, value, allowed_values):
-        if not isinstance(value, str):
-            raise ValueError(
-                f"webrtcdsp_settings.{key} must be one of {sorted(allowed_values)}; got {value!r}."
-            )
-        normalized = value.strip().lower()
-        if normalized not in allowed_values:
-            raise ValueError(
-                f"webrtcdsp_settings.{key} must be one of {sorted(allowed_values)}; got {value!r}."
-            )
-        return normalized
-
-    def format_gst_value(self, value):
-        if isinstance(value, bool):
-            return str(value).lower()
-        if isinstance(value, int):
-            return str(value)
-        return value
-
-    def gst_escape(self, value):
-        return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 #########################################
 # Signal Handler and Main

@@ -7,6 +7,8 @@ ports:
   audio_send_dk: 8806
   audio_receive_dk: 8807
   audio_receive_tn: 8808
+  audio_monitor_receive_dk: 8809
+  audio_monitor_receive_tn: 8810
   video_send_tn: 7701
   video_send_dk: 7702
   video_receive_dk: 7703
@@ -14,13 +16,21 @@ ports:
 
 
 audio:
-  source: "alsasrc"
-  device: "default"             # Sender Pi microphone capture device for send_audio.py
-  playback_device: "default"    # Sender Pi speaker output used as the WebRTC AEC reference
-  format: "S16BE"
-  rate: 32000
+  source: "alsasrc"              # Legacy standalone sender audio source element
+  device: "default"              # Sender Pi microphone capture device when audio_source=device
+  playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
+  format: "S16BE"                # Separate uncompressed PCM transport format
+  rate: 48000                    # Shared audio sample rate. 48000 is recommended for the integrated A/V sender pipeline.
   channels: 2
   encoding_name: "L16"
+  aac_bitrate: 128000            # AAC bitrate for the muxed audio+video transport and server MP4 recording
+  test_source_wave: "sine"       # Sender test audio options include: sine, square, saw, triangle, silence, white-noise, pink-noise, ticks, gaussian-noise, red-noise, blue-noise, violet-noise
+  test_source_freq: 440          # Sender test tone frequency in Hz
+  test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
+
+receiver_audio:
+  transport: "aac"               # Receiver playback options: aac, pcm, off
+  playback_device: "default"     # Receiver Pi speaker output device
 
 video:
   source: "v4l2src device=/dev/video0"
@@ -44,7 +54,8 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
-  # These settings are applied by production/1_sender/send_audio.py on the sender Pi.
+  # These settings are applied by the sender-side audio capture pipeline in production/1_sender/send.py
+  # and by the standalone production/1_sender/send_audio.py pipeline.
   # For AEC to work, the same sender Pi must both play the remote audio and capture the local microphone.
   compression-gain-db: 5               # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
@@ -63,5 +74,4 @@ webrtcdsp_settings:
   voice-detection: false                # Enable or disable the voice activity detector.
   voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
-
 

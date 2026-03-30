@@ -504,6 +504,8 @@ class ServerRuntime:
     def _build_recording_finalize_pipeline(self, paths: RecordingPaths) -> Gst.Pipeline:
         if Gst.ElementFactory.find("mp4mux") is None:
             raise RuntimeError("mp4mux is not available in this environment.")
+        if Gst.ElementFactory.find("aacparse") is None:
+            raise RuntimeError("aacparse is not available in this environment.")
 
         timestamper = ""
         if Gst.ElementFactory.find("h264timestamper") is not None:
@@ -516,10 +518,17 @@ class ServerRuntime:
             filesrc location="{_gst_escape(paths.temp_path)}" !
             tsparse set-timestamps=true !
             tsdemux name=demux
+
             demux. ! queue !
             h264parse config-interval=1 !
             {timestamper}
-            mp4mux !
+            mux.
+
+            demux. ! queue !
+            aacparse !
+            mux.
+
+            mp4mux name=mux !
             filesink location="{_gst_escape(paths.final_path)}" sync=false async=false
         """
         return Gst.parse_launch(pipeline_str.strip())
@@ -551,6 +560,28 @@ class ServerRuntime:
     def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
         ports = config.get("ports", {})
         audio = config.get("audio", {})
+        monitor_receive_dk = ports.get("audio_monitor_receive_dk")
+        monitor_receive_tn = ports.get("audio_monitor_receive_tn")
+
+        monitor_dk_branch = ""
+        if monitor_receive_dk:
+            monitor_dk_branch = f"""
+            tee_tn. ! queue !
+              audioconvert ! audioresample !
+              audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
+              rtpL16pay !
+              srtsink name=a_monitor_dk uri=srt://:{monitor_receive_dk}?mode=listener wait-for-connection=false
+            """
+
+        monitor_tn_branch = ""
+        if monitor_receive_tn:
+            monitor_tn_branch = f"""
+            tee_dk. ! queue !
+              audioconvert ! audioresample !
+              audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
+              rtpL16pay !
+              srtsink name=a_monitor_tn uri=srt://:{monitor_receive_tn}?mode=listener wait-for-connection=false
+            """
 
         pipeline_str = f"""
             srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener wait-for-connection=false !
@@ -570,12 +601,14 @@ class ServerRuntime:
               audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
               rtpL16pay !
               srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener wait-for-connection=false
+            {monitor_dk_branch}
 
             tee_dk. ! queue !
               audioconvert ! audioresample !
               audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
               rtpL16pay !
               srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener wait-for-connection=false
+            {monitor_tn_branch}
         """
         return Gst.parse_launch(pipeline_str.strip())
 

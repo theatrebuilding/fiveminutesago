@@ -21,23 +21,32 @@ from .server_runtime import ServerRuntime
 
 VALID_ROLES = {"server", "sender", "receiver"}
 VALID_COUNTRIES = {"tn", "dk"}
+VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
+VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac", "pcm"}
 
 
 @dataclass(frozen=True)
 class RuntimeLaunchRequest:
     role: str
     country: str | None = None
-    audio_enabled: bool = False
+    audio_source: str = "off"
     audio_device: str | None = None
     video_device: str | None = None
+    receiver_audio_transport: str = "config"
+
+    @property
+    def audio_enabled(self) -> bool:
+        return self.role == "sender" and self.audio_source != "off"
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "role": self.role,
             "country": self.country,
             "audio_enabled": self.audio_enabled,
+            "audio_source": self.audio_source,
             "audio_device": self.audio_device,
             "video_device": self.video_device,
+            "receiver_audio_transport": self.receiver_audio_transport,
         }
 
     @classmethod
@@ -56,22 +65,43 @@ class RuntimeLaunchRequest:
         if role == "server":
             country = None
 
-        audio_enabled = bool(payload.get("audio_enabled"))
+        audio_source_raw = payload.get("audio_source")
+        audio_source = str(audio_source_raw).strip().lower() if audio_source_raw is not None else ""
+        if not audio_source:
+            audio_source = "device" if bool(payload.get("audio_enabled")) else "off"
+        if audio_source not in VALID_SENDER_AUDIO_SOURCES:
+            raise ValueError("Sender audio source must be one of: off, device, test.")
+
         audio_device_raw = payload.get("audio_device")
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
         video_device_raw = payload.get("video_device")
         video_device = str(video_device_raw).strip() or None if video_device_raw is not None else None
+        receiver_audio_transport_raw = payload.get("receiver_audio_transport")
+        receiver_audio_transport = (
+            str(receiver_audio_transport_raw).strip().lower()
+            if receiver_audio_transport_raw is not None
+            else "config"
+        )
+        if receiver_audio_transport not in VALID_RECEIVER_AUDIO_TRANSPORTS:
+            raise ValueError("Receiver audio transport must be one of: config, off, aac, pcm.")
+
         if role != "sender":
-            audio_enabled = False
+            audio_source = "off"
             audio_device = None
             video_device = None
+        elif audio_source != "device":
+            audio_device = None
+
+        if role != "receiver":
+            receiver_audio_transport = "config"
 
         return cls(
             role=role,
             country=country,
-            audio_enabled=audio_enabled,
+            audio_source=audio_source,
             audio_device=audio_device,
             video_device=video_device,
+            receiver_audio_transport=receiver_audio_transport,
         )
 
 
@@ -253,8 +283,11 @@ class RuntimeService:
             preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country or "tn")
             prune_preview_files(self._preview_dir, preview_pattern, keep=0)
             command = [self._python_executable, "send.py", "--country", request.country or "tn"]
-            command.append("--with-audio" if request.audio_enabled else "--no-audio")
-            if request.audio_device:
+            if request.audio_enabled:
+                command.extend(["--with-audio", "--audio-source", request.audio_source])
+            else:
+                command.append("--no-audio")
+            if request.audio_source == "device" and request.audio_device:
                 command.extend(["--device", request.audio_device])
             if request.video_device:
                 command.extend(["--video-device", request.video_device])
@@ -273,6 +306,8 @@ class RuntimeService:
                 "receive.py",
                 "--country",
                 request.country or "tn",
+                "--audio-transport",
+                request.receiver_audio_transport,
                 "--preview-pattern",
                 preview_pattern,
             ]

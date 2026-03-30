@@ -56,6 +56,17 @@
               </select>
               <p id="audio-device-message" class="field-help">If nothing is selected, sender audio stays disabled.</p>
             </label>
+
+            <label id="receiver-audio-field" class="field hidden">
+              <span class="field-label">Receiver Audio</span>
+              <select id="receiver-audio-select">
+                <option value="config">Use config default</option>
+                <option value="aac">AAC from muxed stream</option>
+                <option value="pcm">PCM monitor stream</option>
+                <option value="off">Off</option>
+              </select>
+              <p id="receiver-audio-message" class="field-help">Choose whether receiver playback follows the muxed AAC stream or the separate PCM monitor feed.</p>
+            </label>
           </div>
           <div class="button-row">
             <button id="start-role" class="button-accent">Start Selected Role</button>

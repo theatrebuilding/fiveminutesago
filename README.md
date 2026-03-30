@@ -6,7 +6,7 @@ In practical terms, it connects two fixed locations, identified in the code as `
 
 - captures local video and audio at each site
 - relays those streams through a central server
-- plays back the remote site on the opposite end while recording the incoming video feeds on the server
+- plays back the remote site on the opposite end while recording synced site feeds on the server
 
 The media pipeline remains Linux-specific and operational, but the repo now also includes a lightweight FastAPI dashboard that can supervise the relay process, show logs and recording activity, and update `production/config.yaml` from a browser.
 
@@ -15,15 +15,13 @@ The media pipeline remains Linux-specific and operational, but the repo now also
 The system is split into three runtime roles:
 
 1. `production/1_sender`
-   Captures a local camera feed and sends it to the relay server. It can also run a companion audio process that captures microphone input, sends it to the server, receives the remote site's audio back from the server, and plays it locally.
+   Captures a local camera feed and can also capture local audio in the same sender pipeline. The integrated sender can send H.264 video plus AAC audio together for sync-sensitive recording, while still maintaining the separate PCM audio path used for sender-side playback and AEC. The older standalone `send_audio.py` pipeline remains in the repo.
 
 2. `production/2_server`
    Acts as the relay hub. It listens for incoming audio and video from both sites, forwards each site's media to the opposite site, records the raw incoming video streams to disk, and restarts failed pipelines automatically.
 
 3. `production/3_receiver`
-   Receives the relayed video feed for a site and displays it fullscreen via `kmssink`. If the live feed stalls, it switches to a fallback snow pattern until the primary feed recovers.
-
-One important architectural detail: the receiver is video-only. Audio playback happens on the sender machine via `send_audio.py`, not in `production/3_receiver/receive.py`.
+   Receives the relayed site feed and displays video fullscreen via `kmssink`. It can optionally play audio either from the muxed AAC stream carried with the video feed or from a separate uncompressed PCM monitor feed. If the live video stalls, it switches to a fallback snow pattern until the primary feed recovers.
 
 The repository also includes a separate control-plane role:
 
@@ -48,23 +46,27 @@ Denmark sender (dk)  -> \
 Tunisia sender (tn)  -> /
 ```
 
-Each sender transmits an MPEG-TS/H.264 video stream over SRT to the server. The server forwards each incoming stream to the opposite site's receiver port and also writes the incoming stream to a local `.ts` file.
+Each sender transmits an MPEG-TS/H.264 stream over SRT to the server. When sender audio is enabled, that same transport stream also carries AAC audio so the server can preserve sender-side A/V sync in recordings. The server forwards each incoming stream to the opposite site's receiver port and also writes the incoming transport stream to a local `.ts` file.
 
 ### Audio
 
 ```text
-Tunisia audio sender  -> Relay server -> Denmark audio sender
-Denmark audio sender  -> Relay server -> Tunisia audio sender
+Tunisia sender mic/test source -> Relay server -> Denmark sender PCM playback
+Denmark sender mic/test source -> Relay server -> Tunisia sender PCM playback
+
+Tunisia sender AAC-in-TS ------> Relay server ------> Denmark receiver AAC playback (optional)
+Denmark sender AAC-in-TS ------> Relay server ------> Tunisia receiver AAC playback (optional)
+
+Tunisia sender PCM monitor ----> Relay server ------> Denmark receiver PCM playback (optional)
+Denmark sender PCM monitor ----> Relay server ------> Tunisia receiver PCM playback (optional)
 ```
 
-The audio path is bidirectional between the two sender machines. Each sender:
+The system now keeps two audio paths:
 
-- captures local audio from ALSA
-- sends it to the server as RTP L16 over SRT
-- simultaneously receives the remote site's audio from the server
-- plays the remote audio locally
+- a separate bidirectional PCM path between the two sender machines for low-level sender-side playback and WebRTC AEC reference handling
+- a muxed AAC path inside the main MPEG-TS sender stream so the server can archive audio and video with shared sender-side timing
 
-The sender-side audio pipeline includes WebRTC echo-control elements so local playback can be used as an echo reference.
+The sender-side capture pipeline includes WebRTC echo-control elements so local playback can be used as an echo reference when the sender Pi is also the playback device.
 
 ## Repository Layout
 
@@ -87,8 +89,9 @@ production/
   config.yaml                 Shared runtime configuration
   config_loader.py            Loads config.yaml relative to production/
   1_sender/
-    send.py                   Video sender entry point; can launch audio subprocess
-    send_audio.py             Full-duplex audio sender/playback process
+    send.py                   Integrated sender entry point for video plus optional synced AAC + separate PCM audio
+    send_audio.py             Standalone full-duplex audio sender/playback process
+    audio_support.py          Shared sender-side audio/DSP helpers
   2_server/
     server.py                 Main relay/recording supervisor
     audio_pipeline.py         Builds cross-routed audio relay pipeline
@@ -112,11 +115,13 @@ The active production entry points are the top-level scripts under `1_sender`, `
 ### `production/1_sender/send.py`
 
 - Requires `--country tn` or `--country dk`.
-- Builds a video capture pipeline from `production/config.yaml`.
-- Uses the configured video source, which currently defaults to `v4l2src device=/dev/video0`.
-- Encodes video with `x264enc`, wraps it in MPEG-TS, and sends it to the configured SRT port on the relay server.
-- Prompts interactively to decide whether to launch `send_audio.py` as a subprocess.
-- If the video pipeline exits or errors, it restarts after 5 seconds.
+- Builds a sender pipeline from `production/config.yaml`.
+- Captures video, encodes it with `x264enc`, and sends it in MPEG-TS over SRT to the relay server.
+- When audio is enabled, captures either a microphone device or an `audiotestsrc` signal on the sender machine.
+- Sends uncompressed PCM to the server for the separate audio return path and also encodes AAC into the main MPEG-TS stream for synced recording.
+- Receives the remote site's separate PCM audio back from the server and plays it locally on the sender machine.
+- Uses `webrtcechoprobe` plus `webrtcdsp` when the sender audio source is a real capture device.
+- If the pipeline exits or errors, it restarts after 5 seconds.
 
 ### `production/1_sender/send_audio.py`
 
@@ -164,6 +169,7 @@ The copy operation is now handled inside Python with `shutil.copy2`, so the serv
 - Requires `--country tn` or `--country dk`.
 - Connects to the server's site-specific receive port over SRT.
 - Demuxes MPEG-TS, decodes H.264, scales to `1920x1080`, and displays via `kmssink`.
+- Can optionally play audio from the muxed AAC stream or from a separate PCM monitor feed, based on `receiver_audio.transport` or `--audio-transport`.
 - Uses an `input-selector` with two branches:
   - primary live video
   - fallback `videotestsrc pattern=snow`
@@ -193,6 +199,8 @@ All shared runtime settings live in `production/config.yaml`.
 | `audio_send_dk` | Denmark sender -> server audio ingest |
 | `audio_receive_tn` | server -> Tunisia sender audio playback feed |
 | `audio_receive_dk` | server -> Denmark sender audio playback feed |
+| `audio_monitor_receive_tn` | server -> Tunisia receiver PCM monitor feed |
+| `audio_monitor_receive_dk` | server -> Denmark receiver PCM monitor feed |
 | `video_send_tn` | Tunisia sender -> server video ingest |
 | `video_send_dk` | Denmark sender -> server video ingest |
 | `video_receive_tn` | server -> Tunisia receiver video feed |
@@ -200,14 +208,19 @@ All shared runtime settings live in `production/config.yaml`.
 
 ### Audio Settings
 
-The `audio` section defines the RTP L16 payload format and ALSA-related defaults used by the sender-side audio pipeline:
+The `audio` section defines sender-side audio defaults, including:
 
-- `device`
+- sender capture device and playback device
+- PCM transport format/rate/channel settings
+- AAC bitrate for the muxed A/V stream
+- `audiotestsrc` settings for sender-side test audio
+
+### Receiver Audio Settings
+
+The `receiver_audio` section controls receiver-side playback:
+
+- `transport`
 - `playback_device`
-- `format`
-- `rate`
-- `channels`
-- `encoding_name`
 
 ### Video Settings
 
@@ -222,7 +235,7 @@ The `video` section controls the sender-side capture and encoding pipeline, incl
 
 ### WebRTC DSP Settings
 
-`webrtcdsp_settings` configures the echo/noise processing behavior used by `send_audio.py`. These settings are applied on the sender machine only, where the microphone capture and remote-audio playback must live in the same pipeline for AEC to work.
+`webrtcdsp_settings` configures the echo/noise processing behavior used by the sender-side capture pipelines in `send.py` and `send_audio.py`. These settings are applied on the sender machine only, where the microphone capture and remote-audio playback must live in the same pipeline for AEC to work.
 
 ## Dependencies And Environment Assumptions
 
