@@ -145,6 +145,10 @@ h3 {
 
 .storage-panel,
 .server-panel {
+  grid-column: span 12;
+}
+
+#sender-panel {
   grid-column: span 6;
 }
 
