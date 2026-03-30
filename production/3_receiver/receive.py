@@ -35,7 +35,6 @@ class VideoReceiver:
         self.loop = None
         self.server_address = None
         self.receive_port = None
-        self.audio_monitor_port = None
         # True if fallback is active; false if primary is active.
         self.fallback_active = False
         # Last time (seconds) a buffer was seen on the primary monitor branch.
@@ -52,10 +51,8 @@ class VideoReceiver:
         self.server_address = config.get("server_ip", "127.0.0.1")
         if self.country.lower() == "tn":
             self.receive_port = config.get("ports", {}).get("video_receive_tn")
-            self.audio_monitor_port = config.get("ports", {}).get("audio_monitor_receive_tn")
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
-            self.audio_monitor_port = config.get("ports", {}).get("audio_monitor_receive_dk")
 
         sink_name, sink_pipeline, sink_reason = self.resolve_video_sink()
         print(f"VideoReceiver: Using video sink '{sink_name}' ({sink_reason}).")
@@ -140,8 +137,11 @@ class VideoReceiver:
         requested_transport = (self.audio_transport or DEFAULT_AUDIO_TRANSPORT).strip().lower()
         if requested_transport == "config":
             requested_transport = str(config.get("receiver_audio", {}).get("transport", "off")).strip().lower()
-        if requested_transport not in {"off", "aac", "pcm"}:
-            raise ValueError("Unsupported audio transport. Use one of: off, aac, pcm, config.")
+        if requested_transport == "pcm":
+            print("VideoReceiver: Receiver PCM playback is no longer supported; falling back to AAC.")
+            requested_transport = "aac"
+        if requested_transport not in {"off", "aac"}:
+            raise ValueError("Unsupported audio transport. Use one of: off, aac, config.")
         return requested_transport
 
     def build_audio_branch(self, config, audio_transport):
@@ -152,28 +152,11 @@ class VideoReceiver:
         audio_cfg = config.get("audio", {})
         audio_rate = audio_cfg.get("rate", 32000)
         channels = audio_cfg.get("channels", 2)
-        encoding_name = audio_cfg.get("encoding_name", "L16")
         escaped_device = playback_device.replace("\\", "\\\\").replace('"', '\\"')
 
-        if audio_transport == "aac":
-            return f"""
-                demux. ! queue !
-                decodebin !
-                audioconvert !
-                audioresample !
-                audio/x-raw,channels={channels},rate={audio_rate} !
-                queue !
-                alsasink device="{escaped_device}" async=true
-            """.strip()
-
-        if not self.audio_monitor_port:
-            raise RuntimeError("Receiver PCM audio transport requested, but audio_monitor_receive_* is not configured.")
-
         return f"""
-            srtsrc uri="srt://{self.server_address}:{self.audio_monitor_port}?mode=caller" wait-for-connection=false !
-                queue max-size-time=2000000000 max-size-buffers=500
-                ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
-                ! rtpL16depay
+            demux. ! queue !
+                decodebin !
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,channels={channels},rate={audio_rate}
@@ -334,7 +317,7 @@ def main():
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
     parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
-    parser.add_argument("--audio-transport", choices=["config", "off", "aac", "pcm"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'aac' for the muxed AV stream or 'pcm' for the separate monitor feed.")
+    parser.add_argument("--audio-transport", choices=["config", "off", "aac"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'aac' for the muxed AV stream.")
     args = parser.parse_args()
 
     manager = ReceiverManager(

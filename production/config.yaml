@@ -7,8 +7,6 @@ ports:
   audio_send_dk: 8806
   audio_receive_dk: 8807
   audio_receive_tn: 8808
-  audio_monitor_receive_dk: 8809
-  audio_monitor_receive_tn: 8810
   video_send_tn: 7701
   video_send_dk: 7702
   video_receive_dk: 7703
@@ -29,7 +27,7 @@ audio:
   test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
 
 receiver_audio:
-  transport: "aac"               # Receiver playback options: aac, pcm, off
+  transport: "aac"               # Receiver playback options: aac, off
   playback_device: "default"     # Receiver Pi speaker output device
 
 video:
@@ -74,4 +72,3 @@ webrtcdsp_settings:
   voice-detection: false                # Enable or disable the voice activity detector.
   voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
-

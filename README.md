@@ -21,7 +21,7 @@ The system is split into three runtime roles:
    Acts as the relay hub. It listens for incoming audio and video from both sites, forwards each site's media to the opposite site, records the raw incoming video streams to disk, and restarts failed pipelines automatically.
 
 3. `production/3_receiver`
-   Receives the relayed site feed and displays video fullscreen via `kmssink`. It can optionally play audio either from the muxed AAC stream carried with the video feed or from a separate uncompressed PCM monitor feed. If the live video stalls, it switches to a fallback snow pattern until the primary feed recovers.
+   Receives the relayed site feed and displays video fullscreen via `kmssink`. It can optionally play audio from the muxed AAC stream carried with the video feed. If the live video stalls, it switches to a fallback snow pattern until the primary feed recovers.
 
 The repository also includes a separate control-plane role:
 
@@ -56,9 +56,6 @@ Denmark sender mic/test source -> Relay server -> Tunisia sender PCM playback
 
 Tunisia sender AAC-in-TS ------> Relay server ------> Denmark receiver AAC playback (optional)
 Denmark sender AAC-in-TS ------> Relay server ------> Tunisia receiver AAC playback (optional)
-
-Tunisia sender PCM monitor ----> Relay server ------> Denmark receiver PCM playback (optional)
-Denmark sender PCM monitor ----> Relay server ------> Tunisia receiver PCM playback (optional)
 ```
 
 The system now keeps two audio paths:
@@ -169,7 +166,7 @@ The copy operation is now handled inside Python with `shutil.copy2`, so the serv
 - Requires `--country tn` or `--country dk`.
 - Connects to the server's site-specific receive port over SRT.
 - Demuxes MPEG-TS, decodes H.264, scales to `1920x1080`, and displays via `kmssink`.
-- Can optionally play audio from the muxed AAC stream or from a separate PCM monitor feed, based on `receiver_audio.transport` or `--audio-transport`.
+- Can optionally play audio from the muxed AAC stream, based on `receiver_audio.transport` or `--audio-transport`.
 - Uses an `input-selector` with two branches:
   - primary live video
   - fallback `videotestsrc pattern=snow`
@@ -199,8 +196,6 @@ All shared runtime settings live in `production/config.yaml`.
 | `audio_send_dk` | Denmark sender -> server audio ingest |
 | `audio_receive_tn` | server -> Tunisia sender audio playback feed |
 | `audio_receive_dk` | server -> Denmark sender audio playback feed |
-| `audio_monitor_receive_tn` | server -> Tunisia receiver PCM monitor feed |
-| `audio_monitor_receive_dk` | server -> Denmark receiver PCM monitor feed |
 | `video_send_tn` | Tunisia sender -> server video ingest |
 | `video_send_dk` | Denmark sender -> server video ingest |
 | `video_receive_tn` | server -> Tunisia receiver video feed |
