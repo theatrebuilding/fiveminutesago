@@ -13,8 +13,6 @@ const recordingMeta = document.getElementById("recording-meta");
 const archivePanel = document.getElementById("archive-panel");
 const archiveSummary = document.getElementById("archive-summary");
 const archiveFiles = document.getElementById("archive-files");
-const archivePlayer = document.getElementById("archive-player");
-const archivePreviewEmpty = document.getElementById("archive-preview-empty");
 const archiveSelectedName = document.getElementById("archive-selected-name");
 const archiveSelectedMeta = document.getElementById("archive-selected-meta");
 const archiveOpenLink = document.getElementById("archive-open-link");
@@ -193,35 +191,24 @@ function archiveFileUrl(file) {
   return `/api/archive/files/${encodeURIComponent(file.name)}`;
 }
 
-function clearArchivePreview(message = "Select an archive file to preview it here.") {
-  archivePlayer.pause();
-  archivePlayer.removeAttribute("src");
-  archivePlayer.load();
-  archivePlayer.classList.add("hidden");
-  archivePreviewEmpty.classList.remove("hidden");
-  archivePreviewEmpty.textContent = message;
+function clearArchiveSelection(message = "Select a file and open it in a new tab.") {
   archiveSelectedName.textContent = "No file selected";
-  archiveSelectedMeta.textContent = "Browser playback depends on the file format.";
+  archiveSelectedMeta.textContent = message;
   archiveOpenLink.removeAttribute("href");
   archiveOpenLink.classList.add("hidden");
   selectedArchiveRevision = null;
 }
 
-function renderArchivePreview(file) {
+function renderArchiveSelection(file) {
   const nextRevision = String(file.modified_at_ts || file.size_bytes || file.name);
   if (selectedArchiveName !== file.name) {
     selectedArchiveName = file.name;
   }
 
-  if (selectedArchiveRevision !== nextRevision || archivePlayer.dataset.fileName !== file.name) {
-    archivePlayer.src = `${archiveFileUrl(file)}?t=${nextRevision}`;
-    archivePlayer.dataset.fileName = file.name;
-    archivePlayer.load();
+  if (selectedArchiveRevision !== nextRevision) {
     selectedArchiveRevision = nextRevision;
   }
 
-  archivePlayer.classList.remove("hidden");
-  archivePreviewEmpty.classList.add("hidden");
   archiveSelectedName.textContent = file.name;
   archiveSelectedMeta.textContent = `${formatBytes(file.size_bytes)} • ${file.modified_at || "Unknown timestamp"}`;
   archiveOpenLink.href = archiveFileUrl(file);
@@ -257,17 +244,17 @@ function renderArchive(archive) {
 
   if (!files.length) {
     selectedArchiveName = null;
-    clearArchivePreview("No archived TS or MP4 files are available yet.");
+    clearArchiveSelection("No archived TS or MP4 files are available yet.");
     return;
   }
 
   const selectedFile = files.find((file) => file.name === selectedArchiveName) || null;
   if (selectedFile) {
-    renderArchivePreview(selectedFile);
+    renderArchiveSelection(selectedFile);
     return;
   }
 
-  clearArchivePreview("Select an archive file to preview it here.");
+  clearArchiveSelection("Select a file and open it in a new tab.");
 }
 
 function applyRoleFormState() {
