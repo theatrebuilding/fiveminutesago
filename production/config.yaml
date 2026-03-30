@@ -15,6 +15,8 @@ ports:
 
 audio:
   source: "alsasrc"
+  device: "default"             # Sender Pi microphone capture device for send_audio.py
+  playback_device: "default"    # Sender Pi speaker output used as the WebRTC AEC reference
   format: "S16BE"
   rate: 32000
   channels: 2
@@ -22,6 +24,7 @@ audio:
 
 video:
   source: "v4l2src device=/dev/video0"
+  test_source_pattern: "ball"
   width: 1920
   height: 1080
   encoder: "x264enc"
@@ -33,7 +36,7 @@ video:
   aud: true
   byte_stream: true
   profile: "high"
-  speed_preset: "medium"
+  speed_preset: "ultrafast"
   pass: ""
   quantizer:
   option_string: ""
@@ -41,6 +44,8 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
+  # These settings are applied by production/1_sender/send_audio.py on the sender Pi.
+  # For AEC to work, the same sender Pi must both play the remote audio and capture the local microphone.
   compression-gain-db: 5               # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
   echo-cancel: true                     # Enable or disable the echo cancellation algorithm. 
@@ -52,12 +57,11 @@ webrtcdsp_settings:
   high-pass-filter: true                # Enable or disable high pass filtering.
   limiter: true                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
   noise-suppression: true               # Enable or disable noise suppression.  
-  noise-suppression-level: high         # Options: low, moderate, high. (Controls the aggressiveness of noise suppression.)
+  noise-suppression-level: high         # Options: low, moderate, high, very-high. (Controls the aggressiveness of noise suppression.)
   startup-min-volume: 12                # At startup, the experimental AGC will boost the microphone volume up to this level if too low.
   target-level-dbfs: 3                  # Sets the target peak |level| (or envelope) of the gain control in dBFS (decibels from digital full-scale).
   voice-detection: false                # Enable or disable the voice activity detector.
   voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
   voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).
-
 
 

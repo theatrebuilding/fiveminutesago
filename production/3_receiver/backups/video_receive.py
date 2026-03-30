@@ -49,7 +49,7 @@ class VideoReceiver:
                 ! tee name=primary_tee
                 primary_tee. ! queue name=primary_selector ! selector.
                 primary_tee. ! queue name=primary_monitor ! fakesink sync=false async=false
-            videotestsrc pattern=ball
+                videotestsrc pattern=ball
                 ! videoconvert
                 ! videoscale
                 ! video/x-raw,width=1920,height=1080

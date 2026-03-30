@@ -114,7 +114,7 @@ class VideoSender:
             return f"v4l2src device={self.video_device} do-timestamp=true", f"camera {self.video_device}"
 
         if (self.video_source or "config").strip().lower() == "test":
-            return "videotestsrc pattern=snow is-live=true do-timestamp=true", "test signal fallback"
+            return f"videotestsrc pattern={video_opts.get('test_source_pattern', 'ball')}", "test source"
 
         config_source = video_opts.get("source", "v4l2src device=/dev/video0")
         return config_source, f"config source ({config_source})"

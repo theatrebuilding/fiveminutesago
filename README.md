@@ -122,9 +122,10 @@ The active production entry points are the top-level scripts under `1_sender`, `
 
 - Requires `--country tn` or `--country dk`.
 - Optionally accepts `--device` to override the ALSA device.
-- Captures local audio from ALSA and sends it to the server.
-- Receives the opposite site's audio from the server and plays it locally.
-- Uses `webrtcechoprobe` on playback and `webrtcdsp` on capture to support echo cancellation.
+- Captures local audio from ALSA on the sender machine and sends it to the server.
+- Receives the opposite site's audio from the server and plays it locally on that same sender machine.
+- Uses `webrtcechoprobe` on sender-side playback and `webrtcdsp` on sender-side capture to support acoustic echo cancellation.
+- Validates that `production/config.yaml` only contains supported `webrtcdsp` settings and sample rates.
 - If the pipeline exits or errors, it restarts after 5 seconds.
 
 ### `production/2_server/server.py`
@@ -201,6 +202,8 @@ All shared runtime settings live in `production/config.yaml`.
 
 The `audio` section defines the RTP L16 payload format and ALSA-related defaults used by the sender-side audio pipeline:
 
+- `device`
+- `playback_device`
 - `format`
 - `rate`
 - `channels`
@@ -219,7 +222,7 @@ The `video` section controls the sender-side capture and encoding pipeline, incl
 
 ### WebRTC DSP Settings
 
-`webrtcdsp_settings` configures the echo/noise processing behavior used by `send_audio.py`. Not every field is currently consumed everywhere, but the config clearly reflects an intent to tune live duplex audio behavior from a single file.
+`webrtcdsp_settings` configures the echo/noise processing behavior used by `send_audio.py`. These settings are applied on the sender machine only, where the microphone capture and remote-audio playback must live in the same pipeline for AEC to work.
 
 ## Dependencies And Environment Assumptions
 
