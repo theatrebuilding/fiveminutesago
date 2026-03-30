@@ -530,10 +530,16 @@ function renderStatus(status) {
     recordingState.textContent = "Idle";
     recordingMeta.textContent = `${storage.archive.file_count} archived files`;
   } else {
-    recordingState.textContent = recording?.active ? "Recording" : "Ready";
-    recordingMeta.textContent = recording?.active
-      ? `Started ${new Date(recording.started_at).toLocaleTimeString()}`
-      : `${storage.archive.file_count} archived files`;
+    if (recording?.active) {
+      recordingState.textContent = "Recording";
+      recordingMeta.textContent = `Started ${new Date(recording.started_at).toLocaleTimeString()}`;
+    } else if (recording?.finalizing) {
+      recordingState.textContent = "Finalizing";
+      recordingMeta.textContent = "Archiving the last recording in the background.";
+    } else {
+      recordingState.textContent = "Ready";
+      recordingMeta.textContent = `${storage.archive.file_count} archived files`;
+    }
   }
 
   recordToggleButton.textContent = recording?.active ? "Stop Recording" : "Start Recording";

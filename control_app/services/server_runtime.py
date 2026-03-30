@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime as dt
+import json
 from pathlib import Path
+import subprocess
 import threading
 import time
 from typing import Any, Callable
@@ -68,6 +70,7 @@ class ServerRuntime:
         self._recording_active = False
         self._recording_started_at: float | None = None
         self._recording_files: dict[str, RecordingPaths] = {}
+        self._finalization_active_count = 0
         self._started_at: float | None = None
         self._stopped_at: float | None = None
         self._last_exit_code: int | None = None
@@ -75,6 +78,7 @@ class ServerRuntime:
         self._last_preview_log_at: dict[str, float] = {}
         self._last_continuity_warning_at: dict[str, float] = {}
         self._logged_missing_h264_timestamper = False
+        self._logged_missing_ffprobe = False
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -135,6 +139,7 @@ class ServerRuntime:
                 "last_exit_code": self._last_exit_code,
                 "recording": {
                     "active": self._recording_active,
+                    "finalizing": self._finalization_active_count > 0,
                     "started_at": _to_iso(self._recording_started_at),
                     "started_at_ts": self._recording_started_at,
                     "files": {
@@ -386,11 +391,8 @@ class ServerRuntime:
             self._recording_started_at = None
             self._recording_files = {}
 
-        self._log("Recording stopped. Finalizing archive files...")
-        for feed, paths in recording_files.items():
-            self._finalize_recording_file(feed, paths)
-
-        self._log("Recording finalization complete.")
+        self._log("Recording stopped. Finalizing archive files in background...")
+        self._start_recording_finalization_worker(recording_files)
 
     def _attach_recording_branch(self, feed_state: VideoFeedState, path: Path, append: bool) -> None:
         if feed_state.pipeline is None or feed_state.tee is None:
@@ -460,34 +462,39 @@ class ServerRuntime:
         pipeline: Gst.Pipeline | None = None
         self._safe_unlink(paths.final_path)
         self._log(f"[{feed}] Finalizing {paths.temp_path.name} -> {paths.final_path.name}")
+        include_audio = self._detect_recording_has_aac_audio(paths.temp_path)
+        if include_audio is True:
+            self._log(f"[{feed}] AAC stream detected in recording; finalizing MP4 with audio.")
+        elif include_audio is False:
+            self._log(f"[{feed}] No AAC stream detected in recording; finalizing video-only MP4.")
+        else:
+            self._log(f"[{feed}] Could not confirm AAC presence; trying A/V finalization first.")
 
         try:
-            pipeline = self._build_recording_finalize_pipeline(paths)
-            bus = pipeline.get_bus()
+            pipeline = self._build_recording_finalize_pipeline(paths, include_audio=include_audio is not False)
             pipeline.set_state(Gst.State.PLAYING)
-
-            deadline = time.monotonic() + 300
-            while True:
-                message = bus.timed_pop_filtered(
-                    5 * Gst.SECOND,
-                    Gst.MessageType.ERROR | Gst.MessageType.EOS,
-                )
-                if message is None:
-                    if time.monotonic() > deadline:
-                        raise RuntimeError("Archive finalization timed out.")
-                    continue
-
-                if message.type == Gst.MessageType.ERROR:
-                    err, debug = message.parse_error()
-                    raise RuntimeError(f"{err}. {debug or ''}".strip())
-
-                if message.type == Gst.MessageType.EOS:
-                    break
+            self._wait_for_finalize_pipeline(pipeline, timeout_message="Archive finalization timed out.")
         except Exception as exc:
-            self._safe_unlink(paths.final_path)
-            self._preserve_failed_recording(paths)
-            self._log(f"[{feed}] ERROR: Recording finalization failed. {exc}")
-            return
+            if include_audio is not False:
+                self._safe_unlink(paths.final_path)
+                self._log(f"[{feed}] WARNING: A/V finalization failed; retrying video-only MP4. {exc}")
+                try:
+                    if pipeline is not None:
+                        pipeline.set_state(Gst.State.NULL)
+                        pipeline = None
+                    pipeline = self._build_recording_finalize_pipeline(paths, include_audio=False)
+                    pipeline.set_state(Gst.State.PLAYING)
+                    self._wait_for_finalize_pipeline(pipeline, timeout_message="Video-only archive finalization timed out.")
+                except Exception as fallback_exc:
+                    self._safe_unlink(paths.final_path)
+                    self._preserve_failed_recording(paths)
+                    self._log(f"[{feed}] ERROR: Recording finalization failed. {fallback_exc}")
+                    return
+            else:
+                self._safe_unlink(paths.final_path)
+                self._preserve_failed_recording(paths)
+                self._log(f"[{feed}] ERROR: Recording finalization failed. {exc}")
+                return
         finally:
             if pipeline is not None:
                 pipeline.set_state(Gst.State.NULL)
@@ -501,10 +508,10 @@ class ServerRuntime:
         self._safe_unlink(paths.temp_path)
         self._log(f"[{feed}] Final archive ready: {paths.final_path}")
 
-    def _build_recording_finalize_pipeline(self, paths: RecordingPaths) -> Gst.Pipeline:
+    def _build_recording_finalize_pipeline(self, paths: RecordingPaths, include_audio: bool) -> Gst.Pipeline:
         if Gst.ElementFactory.find("mp4mux") is None:
             raise RuntimeError("mp4mux is not available in this environment.")
-        if Gst.ElementFactory.find("aacparse") is None:
+        if include_audio and Gst.ElementFactory.find("aacparse") is None:
             raise RuntimeError("aacparse is not available in this environment.")
 
         timestamper = ""
@@ -513,6 +520,14 @@ class ServerRuntime:
         elif not self._logged_missing_h264_timestamper:
             self._logged_missing_h264_timestamper = True
             self._log("[recording] h264timestamper is not available; finalizing MP4 without it.")
+
+        audio_branch = ""
+        if include_audio:
+            audio_branch = """
+            demux. ! queue !
+            aacparse !
+            mux.
+            """
 
         pipeline_str = f"""
             filesrc location="{_gst_escape(paths.temp_path)}" !
@@ -523,15 +538,105 @@ class ServerRuntime:
             h264parse config-interval=1 !
             {timestamper}
             mux.
-
-            demux. ! queue !
-            aacparse !
-            mux.
+            {audio_branch}
 
             mp4mux name=mux !
             filesink location="{_gst_escape(paths.final_path)}" sync=false async=false
         """
         return Gst.parse_launch(pipeline_str.strip())
+
+    def _wait_for_finalize_pipeline(self, pipeline: Gst.Pipeline, timeout_message: str) -> None:
+        bus = pipeline.get_bus()
+        deadline = time.monotonic() + 300
+        while True:
+            message = bus.timed_pop_filtered(
+                5 * Gst.SECOND,
+                Gst.MessageType.ERROR | Gst.MessageType.EOS,
+            )
+            if message is None:
+                if time.monotonic() > deadline:
+                    raise RuntimeError(timeout_message)
+                continue
+
+            if message.type == Gst.MessageType.ERROR:
+                err, debug = message.parse_error()
+                raise RuntimeError(f"{err}. {debug or ''}".strip())
+
+            if message.type == Gst.MessageType.EOS:
+                return
+
+    def _start_recording_finalization_worker(self, recording_files: dict[str, RecordingPaths]) -> None:
+        with self._lock:
+            self._finalization_active_count += 1
+
+        thread = threading.Thread(
+            target=self._finalize_recordings_worker,
+            args=(recording_files,),
+            name="recording-finalizer",
+            daemon=True,
+        )
+        thread.start()
+
+    def _finalize_recordings_worker(self, recording_files: dict[str, RecordingPaths]) -> None:
+        try:
+            for feed, paths in recording_files.items():
+                self._finalize_recording_file(feed, paths)
+            self._log("Recording finalization complete.")
+        finally:
+            with self._lock:
+                self._finalization_active_count = max(0, self._finalization_active_count - 1)
+
+    def _detect_recording_has_aac_audio(self, path: Path) -> bool | None:
+        command = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "json",
+            str(path),
+        ]
+
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+        except FileNotFoundError:
+            if not self._logged_missing_ffprobe:
+                self._logged_missing_ffprobe = True
+                self._log("[recording] ffprobe is not available; cannot preflight-check recorded audio streams.")
+            return None
+        except subprocess.TimeoutExpired:
+            self._log(f"[recording] ffprobe timed out while inspecting {path.name}; trying A/V finalization first.")
+            return None
+
+        if result.returncode != 0:
+            self._log(f"[recording] ffprobe could not inspect {path.name}; trying A/V finalization first.")
+            return None
+
+        try:
+            payload = json.loads(result.stdout or "{}")
+        except json.JSONDecodeError:
+            self._log(f"[recording] ffprobe returned invalid JSON for {path.name}; trying A/V finalization first.")
+            return None
+
+        streams = payload.get("streams")
+        if not isinstance(streams, list) or not streams:
+            return False
+
+        codec_names = {str(stream.get("codec_name") or "").strip().lower() for stream in streams}
+        if "aac" in codec_names:
+            return True
+
+        self._log(f"[recording] Audio stream in {path.name} is not AAC ({sorted(codec_names)}); finalizing video-only MP4.")
+        return False
 
     def _preserve_failed_recording(self, paths: RecordingPaths) -> None:
         if not paths.temp_path.exists():
