@@ -104,7 +104,13 @@ async def basic_auth_guard(request: Request, call_next):
 
 @app.get("/")
 async def index() -> FileResponse:
-    return FileResponse(settings.paths.static_dir / "index.html")
+    return FileResponse(
+        settings.paths.static_dir / "index.html",
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
+    )
 
 
 @app.get("/api/status")
