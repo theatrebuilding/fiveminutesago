@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     hostname: ldn-sender
     userns_mode: "host"
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+    dns_search:
+      - tail84ebbf.ts.net
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_AUTH_ONCE: "true"
