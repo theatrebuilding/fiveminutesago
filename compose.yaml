@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile
     hostname: teateroen-server
     userns_mode: "host"
+    dns:
+      - 100.100.100.100
+      - 1.1.1.1
+    dns_search:
+      - tail84ebbf.ts.net
     environment:
       TS_AUTHKEY: ${TS_AUTHKEY}
       TS_AUTH_ONCE: "true"
@@ -17,11 +22,9 @@ services:
       TS_ENABLE_HEALTH_CHECK: "true"
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-      TBDRIVE_ROOT: ${TBDRIVE_ROOT:-/mnt/tbdrive}
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
-      - ${HOST_TBDRIVE_ROOT:-/mnt/tbdrive}:${TBDRIVE_ROOT:-/mnt/tbdrive}
       - /dev:/host-dev
     devices:
       - /dev/net/tun:/dev/net/tun

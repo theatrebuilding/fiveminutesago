@@ -74,6 +74,8 @@ let selectedArchiveFile = null;
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
 const AUDIO_DEFAULT_DEVICE_VALUE = "__audio_default__";
+const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
+const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -159,6 +161,21 @@ function describeSenderAudioChoice(launch) {
   return `${sourceLabel} • playback+dsp`;
 }
 
+function getLaunchVideoSource(launch) {
+  if (launch?.video_device) {
+    return "device";
+  }
+  return launch?.video_source || "test";
+}
+
+function describeSenderVideoChoice(launch) {
+  if (launch?.video_device) {
+    return launch.video_device.split("/").pop() || launch.video_device;
+  }
+
+  return getLaunchVideoSource(launch) === "config" ? "config video source" : "test signal";
+}
+
 function describeReceiverAudioChoice(launch) {
   const transport = (launch?.receiver_audio_transport || "config").toUpperCase();
   return transport === "CONFIG" ? "audio from config" : `audio ${transport}`;
@@ -175,7 +192,7 @@ function describeLaunch(launch) {
 
   const site = launch.country ? launch.country.toUpperCase() : "Unknown site";
   if (launch.role === "sender") {
-    const videoLabel = launch.video_device ? launch.video_device.split("/").pop() : "test signal";
+    const videoLabel = describeSenderVideoChoice(launch);
     const audioLabel = describeSenderAudioChoice(launch);
     return `Sender ${site} • ${videoLabel} • ${audioLabel}`;
   }
@@ -322,8 +339,10 @@ function syncFormFromRuntime(runtime) {
     if (launch.video_device) {
       ensureVideoDeviceOption(launch.video_device);
       videoDeviceSelect.value = launch.video_device;
+    } else if (getLaunchVideoSource(launch) === "config") {
+      videoDeviceSelect.value = VIDEO_CONFIG_SOURCE_VALUE;
     } else {
-      videoDeviceSelect.value = "";
+      videoDeviceSelect.value = VIDEO_TEST_SOURCE_VALUE;
     }
     ensureAudioDeviceOption(launch.audio_device);
     if (audioSource === "test") {
@@ -342,6 +361,10 @@ function syncFormFromRuntime(runtime) {
 }
 
 function ensureVideoDeviceOption(path) {
+  if (!path) {
+    return;
+  }
+
   const existing = Array.from(videoDeviceSelect.options).find((option) => option.value === path);
   if (existing) {
     return;
@@ -349,7 +372,7 @@ function ensureVideoDeviceOption(path) {
 
   const option = document.createElement("option");
   option.value = path;
-  option.textContent = path.split("/").pop() || path;
+  option.textContent = `Unavailable camera override (${path})`;
   videoDeviceSelect.appendChild(option);
 }
 
@@ -372,22 +395,20 @@ function ensureAudioDeviceOption(path) {
 function renderVideoDevices(devices) {
   const currentValue = videoDeviceSelect.value;
   const runtimeLaunch = latestStatus?.runtime?.launch;
+  const runtimeVideoSource = runtimeLaunch?.role === "sender" ? getLaunchVideoSource(runtimeLaunch) : undefined;
   const runtimeSenderVideoDevice = runtimeLaunch?.role === "sender" ? runtimeLaunch.video_device : undefined;
   videoDeviceSelect.innerHTML = "";
 
+  const defaultOption = document.createElement("option");
+  defaultOption.value = VIDEO_CONFIG_SOURCE_VALUE;
+  defaultOption.textContent = "Use config video source";
+  videoDeviceSelect.appendChild(defaultOption);
+
   const testOption = document.createElement("option");
-  testOption.value = "";
+  testOption.value = VIDEO_TEST_SOURCE_VALUE;
   testOption.textContent = "Test signal";
   videoDeviceSelect.appendChild(testOption);
 
-  if (!devices.length) {
-    videoDeviceSelect.disabled = false;
-    videoDeviceSelect.value = "";
-    videoDeviceMessage.textContent = "No camera devices are currently visible inside the container. Sender will use the test signal.";
-    return;
-  }
-
-  videoDeviceSelect.disabled = false;
   devices.forEach((device) => {
     const option = document.createElement("option");
     option.value = device.path;
@@ -396,19 +417,38 @@ function renderVideoDevices(devices) {
       : `${device.label} (${device.path.split("/").pop()})`;
     videoDeviceSelect.appendChild(option);
   });
+  ensureVideoDeviceOption(runtimeSenderVideoDevice);
+  videoDeviceSelect.disabled = false;
 
-  let selected = devices[0].path;
-  if (runtimeSenderVideoDevice === null) {
-    selected = "";
-  } else if (devices.some((device) => device.path === currentValue)) {
+  if (!devices.length) {
+    if (launchFormDirty && currentValue === VIDEO_TEST_SOURCE_VALUE) {
+      videoDeviceSelect.value = VIDEO_TEST_SOURCE_VALUE;
+    } else {
+      videoDeviceSelect.value = runtimeVideoSource === "test" ? VIDEO_TEST_SOURCE_VALUE : VIDEO_CONFIG_SOURCE_VALUE;
+    }
+    videoDeviceMessage.textContent = "No camera devices are currently visible inside the container. Sender can still use the config video source or the test signal.";
+    return;
+  }
+
+  let selected = VIDEO_CONFIG_SOURCE_VALUE;
+  if (
+    launchFormDirty &&
+    (
+      currentValue === VIDEO_CONFIG_SOURCE_VALUE ||
+      currentValue === VIDEO_TEST_SOURCE_VALUE ||
+      devices.some((device) => device.path === currentValue)
+    )
+  ) {
     selected = currentValue;
-  } else if (currentValue === "" && launchFormDirty) {
-    selected = "";
-  } else if (runtimeSenderVideoDevice && devices.some((device) => device.path === runtimeSenderVideoDevice)) {
+  } else if (runtimeVideoSource === "test") {
+    selected = VIDEO_TEST_SOURCE_VALUE;
+  } else if (runtimeVideoSource === "device" && runtimeSenderVideoDevice) {
     selected = runtimeSenderVideoDevice;
+  } else if (runtimeVideoSource === "config") {
+    selected = VIDEO_CONFIG_SOURCE_VALUE;
   }
   videoDeviceSelect.value = selected;
-  videoDeviceMessage.textContent = `${devices.length} camera device${devices.length === 1 ? "" : "s"} discovered inside the container. Leave Test signal selected to send the fallback pattern.`;
+  videoDeviceMessage.textContent = `${devices.length} camera device${devices.length === 1 ? "" : "s"} discovered inside the container. Choose a device, the config video source, or the test signal.`;
 }
 
 function renderAudioDevices(devices) {
@@ -607,9 +647,8 @@ async function loadVideoDevices() {
     renderVideoDevices(videoDevices);
   } catch (error) {
     videoDevices = [];
-    videoDeviceSelect.innerHTML = '<option value="">Camera scan failed</option>';
-    videoDeviceSelect.disabled = true;
-    videoDeviceMessage.textContent = error.message;
+    renderVideoDevices(videoDevices);
+    videoDeviceMessage.textContent = `${error.message} Sender can still use the config video source or the test signal.`;
   }
 }
 
@@ -635,7 +674,16 @@ function buildLaunchPayload() {
   }
 
   if (payload.role === "sender") {
-    payload.video_device = videoDeviceSelect.value || null;
+    if (!videoDeviceSelect.value || videoDeviceSelect.value === VIDEO_CONFIG_SOURCE_VALUE) {
+      payload.video_source = "config";
+      payload.video_device = null;
+    } else if (videoDeviceSelect.value === VIDEO_TEST_SOURCE_VALUE) {
+      payload.video_source = "test";
+      payload.video_device = null;
+    } else {
+      payload.video_source = "device";
+      payload.video_device = videoDeviceSelect.value || null;
+    }
     payload.sender_audio_mode = senderAudioModeSelect.value;
     if (audioDeviceSelect.value === AUDIO_TEST_VALUE) {
       payload.audio_source = "test";

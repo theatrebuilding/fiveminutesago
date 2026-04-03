@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crying By the Sea Control</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260401-2" />
   </head>
   <body>
     <div class="page-shell">
@@ -44,7 +44,8 @@
             <label id="video-device-field" class="field">
               <span class="field-label">Camera</span>
               <select id="video-device-select">
-                <option value="">Loading cameras…</option>
+                <option value="__video_config__">Use config video source</option>
+                <option value="__video_test__">Test signal</option>
               </select>
               <p id="video-device-message" class="field-help">Scanning container-visible cameras…</p>
             </label>
@@ -222,6 +223,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js" defer></script>
+    <script src="/static/app.js?v=20260401-2" defer></script>
   </body>
 </html>

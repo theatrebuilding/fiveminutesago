@@ -23,6 +23,7 @@ VALID_ROLES = {"server", "sender", "receiver"}
 VALID_COUNTRIES = {"tn", "dk"}
 VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
 VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
+VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
 VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac"}
 
 
@@ -33,6 +34,7 @@ class RuntimeLaunchRequest:
     audio_source: str = "off"
     sender_audio_mode: str = "aec"
     audio_device: str | None = None
+    video_source: str = "test"
     video_device: str | None = None
     receiver_audio_transport: str = "config"
 
@@ -48,6 +50,7 @@ class RuntimeLaunchRequest:
             "audio_source": self.audio_source,
             "sender_audio_mode": self.sender_audio_mode,
             "audio_device": self.audio_device,
+            "video_source": self.video_source,
             "video_device": self.video_device,
             "receiver_audio_transport": self.receiver_audio_transport,
         }
@@ -83,6 +86,12 @@ class RuntimeLaunchRequest:
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
         video_device_raw = payload.get("video_device")
         video_device = str(video_device_raw).strip() or None if video_device_raw is not None else None
+        video_source_raw = payload.get("video_source")
+        video_source = str(video_source_raw).strip().lower() if video_source_raw is not None else ""
+        if not video_source:
+            video_source = "device" if video_device else "test"
+        if video_source not in VALID_SENDER_VIDEO_SOURCES:
+            raise ValueError("Sender video source must be one of: config, device, test.")
         receiver_audio_transport_raw = payload.get("receiver_audio_transport")
         receiver_audio_transport = (
             str(receiver_audio_transport_raw).strip().lower()
@@ -98,9 +107,15 @@ class RuntimeLaunchRequest:
             audio_source = "off"
             sender_audio_mode = "aec"
             audio_device = None
+            video_source = "config"
             video_device = None
-        elif audio_source != "device":
-            audio_device = None
+        else:
+            if audio_source != "device":
+                audio_device = None
+            if video_source != "device":
+                video_device = None
+            elif video_device is None:
+                raise ValueError("Sender video source 'device' requires a video device path.")
 
         if role != "receiver":
             receiver_audio_transport = "config"
@@ -111,6 +126,7 @@ class RuntimeLaunchRequest:
             audio_source=audio_source,
             sender_audio_mode=sender_audio_mode,
             audio_device=audio_device,
+            video_source=video_source,
             video_device=video_device,
             receiver_audio_transport=receiver_audio_transport,
         )
@@ -308,10 +324,10 @@ class RuntimeService:
                 command.append("--no-audio")
             if request.audio_source == "device" and request.audio_device:
                 command.extend(["--device", request.audio_device])
-            if request.video_device:
+            if request.video_source == "device" and request.video_device:
                 command.extend(["--video-device", request.video_device])
             else:
-                command.extend(["--video-source", "test"])
+                command.extend(["--video-source", request.video_source])
             command.extend(["--preview-pattern", preview_pattern])
             working_dir = self._project_root / "production" / "1_sender"
             return command, working_dir
