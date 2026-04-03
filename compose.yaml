@@ -22,10 +22,12 @@ services:
       TS_ENABLE_HEALTH_CHECK: "true"
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      TBDRIVE_ROOT: /mnt/tbdrive
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
       - /dev:/host-dev
+      - ${TBDRIVE_HOST_PATH:-/mnt/tbdrive}:/mnt/tbdrive
     devices:
       - /dev/net/tun:/dev/net/tun
     device_cgroup_rules:

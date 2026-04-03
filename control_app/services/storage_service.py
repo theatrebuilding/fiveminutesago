@@ -37,7 +37,10 @@ class StorageService:
         separate_from_reference_filesystem = None
 
         if not exists:
-            warning = f"Storage root {self._storage_root} does not exist inside the container."
+            warning = (
+                f"Storage root {self._storage_root} does not exist inside the container. "
+                "The container is probably missing the TB drive bind mount, or TBDRIVE_ROOT points to the wrong path."
+            )
         elif not is_directory:
             warning = f"Storage root {self._storage_root} is not a directory."
         else:
