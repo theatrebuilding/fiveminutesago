@@ -298,10 +298,14 @@ class LiveMp4Recorder:
         if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
             raise RuntimeError(f"Could not link video demux pad for {self._feed} recording.")
 
+        gate_pad = queue.get_static_pad("sink")
+        if gate_pad is None:
+            raise RuntimeError(f"Could not access video recorder gate pad for {self._feed}.")
+        gate_pad.add_probe(Gst.PadProbeType.BUFFER, self._video_gate_probe)
+
         src_pad = tail.get_static_pad("src")
         if src_pad is None:
             raise RuntimeError(f"Could not access video recorder src pad for {self._feed}.")
-        src_pad.add_probe(Gst.PadProbeType.BUFFER, self._video_gate_probe)
 
         mux_pad = _request_mux_pad(mux, "video")
         if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
@@ -552,12 +556,48 @@ def _buffer_timestamp_ns(buffer: Gst.Buffer) -> int | None:
 
 
 def _is_idr_candidate(buffer: Gst.Buffer) -> bool:
+    if _buffer_contains_h264_idr(buffer):
+        return True
+
     flags = buffer.get_flags()
     if flags & Gst.BufferFlags.DELTA_UNIT:
         return False
-    if flags & Gst.BufferFlags.HEADER:
-        return False
     return True
+
+
+def _buffer_contains_h264_idr(buffer: Gst.Buffer) -> bool:
+    success, map_info = buffer.map(Gst.MapFlags.READ)
+    if not success:
+        return False
+
+    try:
+        data = map_info.data
+        size = len(data)
+        index = 0
+        while index + 4 <= size:
+            start_code_length = 0
+            if data[index:index + 3] == b"\x00\x00\x01":
+                start_code_length = 3
+            elif index + 4 <= size and data[index:index + 4] == b"\x00\x00\x00\x01":
+                start_code_length = 4
+
+            if start_code_length == 0:
+                index += 1
+                continue
+
+            nal_header_index = index + start_code_length
+            if nal_header_index >= size:
+                break
+
+            nal_unit_type = data[nal_header_index] & 0x1F
+            if nal_unit_type == 5:
+                return True
+
+            index = nal_header_index + 1
+
+        return False
+    finally:
+        buffer.unmap(map_info)
 
 
 def _safe_unlink(path: Path) -> None:
