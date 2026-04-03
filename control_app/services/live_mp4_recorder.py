@@ -254,8 +254,11 @@ class LiveMp4Recorder:
             if media_type.startswith("video/"):
                 self._attach_video_branch(pad)
                 return
-            if media_type.startswith("audio/"):
-                self._attach_audio_branch(pad)
+            if media_type in {"audio/x-lpcm", "audio/x-private-ts-lpcm"}:
+                self._attach_lpcm_audio_branch(pad)
+                return
+            if media_type == "audio/mpeg":
+                self._attach_aac_audio_branch(pad)
         except Exception as exc:  # pragma: no cover - runtime only
             with self._lock:
                 if self._error_message is None:
@@ -303,7 +306,7 @@ class LiveMp4Recorder:
 
         _sync_elements_with_parent(elements)
 
-    def _attach_audio_branch(self, pad: Gst.Pad) -> None:
+    def _attach_aac_audio_branch(self, pad: Gst.Pad) -> None:
         with self._lock:
             if self._audio_branch_linked or self._pipeline is None or self._mux is None:
                 return
@@ -311,8 +314,42 @@ class LiveMp4Recorder:
             mux = self._mux
             self._audio_branch_linked = True
 
+        queue = _make_element("queue", f"{self._feed}_record_audio_queue")
+        parser = _make_element("aacparse", f"{self._feed}_record_aacparse")
+        elements = [queue, parser]
+
+        _add_and_link_elements(pipeline, elements)
+
+        sink_pad = queue.get_static_pad("sink")
+        if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Could not link audio demux pad for {self._feed} recording.")
+
+        src_pad = parser.get_static_pad("src")
+        if src_pad is None:
+            raise RuntimeError(f"Could not access audio recorder src pad for {self._feed}.")
+        src_pad.add_probe(Gst.PadProbeType.BUFFER, self._audio_gate_probe)
+
+        mux_pad = _request_mux_pad(mux, "audio")
+        if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Could not link audio branch to MP4 mux for {self._feed}.")
+
+        _sync_elements_with_parent(elements)
+
+    def _attach_lpcm_audio_branch(self, pad: Gst.Pad) -> None:
+        with self._lock:
+            if self._audio_branch_linked or self._pipeline is None or self._mux is None:
+                return
+            pipeline = self._pipeline
+            mux = self._mux
+            self._audio_branch_linked = True
+
+        if Gst.ElementFactory.find("dvdlpcmdec") is None:
+            raise RuntimeError(
+                "dvdlpcmdec is required for MP4 recording from LPCM transport audio, but it is not available."
+            )
+
         input_queue = _make_element("queue", f"{self._feed}_record_audio_input_queue")
-        decodebin = _make_element("decodebin", f"{self._feed}_record_audio_decodebin")
+        decoder = _make_element("dvdlpcmdec", f"{self._feed}_record_audio_dvdlpcmdec")
         convert = _make_element("audioconvert", f"{self._feed}_record_audio_convert")
         resample = _make_element("audioresample", f"{self._feed}_record_audio_resample")
         capsfilter = _make_element("capsfilter", f"{self._feed}_record_audio_caps")
@@ -320,35 +357,19 @@ class LiveMp4Recorder:
             "caps",
             Gst.Caps.from_string(
                 "audio/x-raw,"
-                f"format=S16LE,channels={self._audio_channels},rate={self._audio_rate}"
+                f"format=S16LE,layout=interleaved,channels={self._audio_channels},rate={self._audio_rate}"
             ),
         )
         encoder = _make_aac_encoder(self._feed, self._audio_bitrate)
         parser = _make_element("aacparse", f"{self._feed}_record_aacparse")
         output_queue = _make_element("queue", f"{self._feed}_record_audio_output_queue")
-        elements = [input_queue, decodebin, convert, resample, capsfilter, encoder, parser, output_queue]
+        elements = [input_queue, decoder, convert, resample, capsfilter, encoder, parser, output_queue]
 
-        for element in elements:
-            pipeline.add(element)
-
-        if not input_queue.link(decodebin):
-            raise RuntimeError(f"Could not link audio input queue to decodebin for {self._feed} recording.")
-        if not convert.link(resample):
-            raise RuntimeError(f"Could not link audio convert -> resample for {self._feed} recording.")
-        if not resample.link(capsfilter):
-            raise RuntimeError(f"Could not link audio resample -> capsfilter for {self._feed} recording.")
-        if not capsfilter.link(encoder):
-            raise RuntimeError(f"Could not link raw audio -> AAC encoder for {self._feed} recording.")
-        if not encoder.link(parser):
-            raise RuntimeError(f"Could not link AAC encoder -> parser for {self._feed} recording.")
-        if not parser.link(output_queue):
-            raise RuntimeError(f"Could not link AAC parser -> output queue for {self._feed} recording.")
+        _add_and_link_elements(pipeline, elements)
 
         sink_pad = input_queue.get_static_pad("sink")
         if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
-            raise RuntimeError(f"Could not link audio demux pad for {self._feed} recording.")
-
-        decodebin.connect("pad-added", self._on_audio_decode_pad_added, convert)
+            raise RuntimeError(f"Could not link LPCM demux pad for {self._feed} recording.")
 
         gate_pad = capsfilter.get_static_pad("src")
         if gate_pad is None:
@@ -361,28 +382,9 @@ class LiveMp4Recorder:
 
         mux_pad = _request_mux_pad(mux, "audio")
         if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
-            raise RuntimeError(f"Could not link audio branch to MP4 mux for {self._feed}.")
+            raise RuntimeError(f"Could not link LPCM audio branch to MP4 mux for {self._feed}.")
 
         _sync_elements_with_parent(elements)
-
-    def _on_audio_decode_pad_added(
-        self,
-        decodebin: Gst.Element,
-        pad: Gst.Pad,
-        convert: Gst.Element,
-    ) -> None:
-        caps = pad.get_current_caps() or pad.query_caps(None)
-        if caps is None or caps.get_size() == 0:
-            return
-        structure = caps.get_structure(0)
-        if structure.get_name() != "audio/x-raw":
-            return
-
-        sink_pad = convert.get_static_pad("sink")
-        if sink_pad is None or sink_pad.is_linked():
-            return
-        if pad.link(sink_pad) != Gst.PadLinkReturn.OK:
-            raise RuntimeError(f"Could not link decoded audio pad for {self._feed} recording.")
 
     def _video_gate_probe(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
         buffer = info.get_buffer()

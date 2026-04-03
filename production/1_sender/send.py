@@ -170,7 +170,7 @@ class SenderRuntime:
                     ! decodebin
                     ! audioconvert
                     ! audioresample
-                    ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                     ! webrtcechoprobe name=playback_probe
                     ! queue
                     ! alsasink device="{gst_escape(playback_device)}" async=true
@@ -202,7 +202,7 @@ class SenderRuntime:
                 ! queue
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                 {dsp_segment}
                 ! tee name=audio_capture_tee
 
