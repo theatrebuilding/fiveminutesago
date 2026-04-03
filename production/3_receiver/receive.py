@@ -137,10 +137,10 @@ class VideoReceiver:
         requested_transport = (self.audio_transport or DEFAULT_AUDIO_TRANSPORT).strip().lower()
         if requested_transport == "config":
             requested_transport = str(config.get("receiver_audio", {}).get("transport", "off")).strip().lower()
-        if requested_transport in {"pcm", "aac"}:
-            requested_transport = "muxed"
-        if requested_transport not in {"off", "muxed"}:
-            raise ValueError("Unsupported audio transport. Use one of: off, muxed, config.")
+        if requested_transport in {"pcm", "muxed"}:
+            requested_transport = "aac"
+        if requested_transport not in {"off", "aac"}:
+            raise ValueError("Unsupported audio transport. Use one of: off, aac, config.")
         return requested_transport
 
     def build_audio_branch(self, config, audio_transport):
@@ -319,7 +319,7 @@ def main():
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
     parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
-    parser.add_argument("--audio-transport", choices=["config", "off", "muxed"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'muxed' for audio from the live AV stream.")
+    parser.add_argument("--audio-transport", choices=["config", "off", "aac"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'aac' for audio from the live MPEG-TS stream.")
     args = parser.parse_args()
 
     manager = ReceiverManager(

@@ -181,16 +181,16 @@ function describeReceiverAudioChoice(launch) {
   if (transport === "CONFIG") {
     return "audio from config";
   }
-  if (transport === "MUXED") {
-    return "muxed live audio";
+  if (transport === "AAC") {
+    return "AAC from muxed stream";
   }
   return `audio ${transport}`;
 }
 
 function normalizeReceiverAudioTransport(value) {
   const normalized = String(value || "config").trim().toLowerCase();
-  if (normalized === "aac" || normalized === "pcm") {
-    return "muxed";
+  if (normalized === "muxed" || normalized === "pcm") {
+    return "aac";
   }
   return normalized || "config";
 }

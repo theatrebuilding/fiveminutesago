@@ -23,7 +23,6 @@ from audio_support import (
     build_webrtcdsp_properties,
     gst_escape,
     validate_audio_rate,
-    validate_mpegts_lpcm_config,
 )
 from config_loader import load_config
 
@@ -54,7 +53,8 @@ class SenderRuntime:
         self.clock = None
         self.server_ip = None
         self.video_send_port = None
-        self.return_av_port = None
+        self.audio_send_port = None
+        self.audio_recv_port = None
 
     def set_clock(self, clock):
         self.clock = clock
@@ -69,10 +69,12 @@ class SenderRuntime:
         ports = cfg.get("ports", {})
         if self.country.lower() == "tn":
             self.video_send_port = ports.get("video_send_tn")
-            self.return_av_port = ports.get("video_receive_tn")
+            self.audio_send_port = ports.get("audio_send_tn")
+            self.audio_recv_port = ports.get("audio_receive_tn")
         else:
             self.video_send_port = ports.get("video_send_dk")
-            self.return_av_port = ports.get("video_receive_dk")
+            self.audio_send_port = ports.get("audio_send_dk")
+            self.audio_recv_port = ports.get("audio_receive_dk")
 
         if not self.video_send_port:
             print("ERROR: video send port not defined in config.")
@@ -105,8 +107,11 @@ class SenderRuntime:
 
         audio_branches = ""
         if self.audio_enabled:
-            if self.sender_audio_mode == "aec" and not self.return_av_port:
-                print("ERROR: Missing video receive port in config for sender playback/DSP mode.")
+            if not self.audio_send_port:
+                print("ERROR: Missing audio send port in config.")
+                sys.exit(1)
+            if self.sender_audio_mode == "aec" and not self.audio_recv_port:
+                print("ERROR: Missing audio receive port in config for sender playback/DSP mode.")
                 sys.exit(1)
             audio_branches = self.build_audio_branches(cfg)
 
@@ -135,19 +140,16 @@ class SenderRuntime:
     def build_audio_branches(self, cfg):
         audio_opts = cfg.get("audio", {})
         dsp_cfg = cfg.get("webrtcdsp_settings", {})
+        streaming_settings_audio = cfg.get("streaming_settings_audio", "")
         audio_format = audio_opts.get("format", "S16BE")
         audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = int(audio_opts.get("channels", 2))
+        encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = audio_opts.get("playback_device", "default")
         playback_enabled = self.sender_audio_mode == "aec"
-        try:
-            transport_branch, transport_label = self.build_transport_audio_branch(
-                audio_format=audio_format,
-                audio_rate=audio_rate,
-                channels=channels,
-            )
-        except ValueError as exc:
-            print(f"ERROR: {exc}")
+        normalized_transport_format = str(audio_format or "S16BE").strip().upper()
+        if normalized_transport_format != "S16BE":
+            print("ERROR: audio.format must be S16BE for the separate RTP L16 transport.")
             sys.exit(1)
 
         if playback_enabled:
@@ -162,16 +164,15 @@ class SenderRuntime:
             resolved_dsp_cfg = {}
 
         audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, audio_rate)
+        aac_encoder = self.resolve_aac_encoder(audio_opts)
         enable_dsp = playback_enabled and uses_dsp
         playback_branch = ""
         if playback_enabled:
             playback_branch = f"""
-                srtsrc uri="srt://{self.server_ip}:{self.return_av_port}?mode=caller" wait-for-connection=false !
+                srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false !
                     queue max-size-time=2000000000 max-size-buffers=500
-                    ! tsparse set-timestamps=true
-                    ! tsdemux name=sender_return_demux
-                    sender_return_demux. ! queue
-                    ! decodebin
+                    ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                    ! rtpL16depay
                     ! audioconvert
                     ! audioresample
                     ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
@@ -184,17 +185,18 @@ class SenderRuntime:
 
         if playback_enabled:
             print(
-                "[Sender] Sender playback + DSP mode active: remote audio is decoded from the returned muxed AV stream for local playback and acoustic echo cancellation.",
+                "[Sender] Sender playback + DSP mode active: remote audio is returned on the separate PCM path for local playback and acoustic echo cancellation.",
                 flush=True,
             )
         else:
             print(
-                "[Sender] Capture-only mode active: sender audio is muxed with video, but remote playback and WebRTC DSP are disabled.",
+                "[Sender] Capture-only mode active: sender audio is transmitted, but remote playback and WebRTC DSP are disabled.",
                 flush=True,
             )
 
         print(f"[Sender] Using audio source: {source_label}", flush=True)
-        print(f"[Sender] Live muxed audio transport: {transport_label}", flush=True)
+        print("[Sender] Live muxed audio transport: AAC in MPEG-TS.", flush=True)
+        print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
         elif playback_enabled:
@@ -214,41 +216,20 @@ class SenderRuntime:
             audio_capture_tee. ! queue
                 ! audioconvert
                 ! audioresample
-                {transport_branch}
+                ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate}
+                ! rtpL16pay
+                ! srtsink wait-for-connection=true
+                    uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
+
+            audio_capture_tee. ! queue
+                ! audioconvert
+                ! audioresample
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
+                ! {aac_encoder}
+                ! aacparse
+                ! queue
+                ! av_mux.
         """
-
-    def build_transport_audio_branch(self, audio_format, audio_rate, channels):
-        if Gst.ElementFactory.find("avenc_pcm_dvd") is not None:
-            transport_format, lpcm_width, lpcm_rate = validate_mpegts_lpcm_config(audio_format, audio_rate)
-            return (
-                f"""! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={lpcm_rate}
-                ! avenc_pcm_dvd
-                ! audio/x-lpcm,width=(int){lpcm_width},rate=(int){lpcm_rate},channels=(int){channels},dynamic_range=(int)0,emphasis=(boolean)false,mute=(boolean)false
-                ! queue
-                ! av_mux.""",
-                f"LPCM ({transport_format} at {lpcm_rate} Hz)",
-            )
-
-        if Gst.ElementFactory.find("avenc_s302m") is not None:
-            if audio_rate != 48000:
-                raise ValueError(
-                    "audio.rate must be 48000 when falling back to SMPTE 302M transport because no LPCM encoder is available."
-                )
-            if channels not in {1, 2}:
-                raise ValueError(
-                    "audio.channels must be 1 or 2 when falling back to SMPTE 302M transport because no LPCM encoder is available."
-                )
-            return (
-                f"""! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate=48000
-                ! avenc_s302m
-                ! queue
-                ! av_mux.""",
-                "SMPTE 302M (fallback because no LPCM encoder is available)",
-            )
-
-        raise ValueError(
-            "No TS-compatible uncompressed audio encoder is available. Install avenc_pcm_dvd for LPCM or avenc_s302m for SMPTE 302M."
-        )
 
     def parse_audio_rate(self, value):
         try:
@@ -285,6 +266,24 @@ class SenderRuntime:
             f"capture device {device} at {audio_rate} Hz",
             True,
         )
+
+    def resolve_aac_encoder(self, audio_opts):
+        aac_encoder = audio_opts.get("aac_encoder")
+        if aac_encoder:
+            return aac_encoder
+
+        for factory in ("fdkaacenc", "voaacenc", "avenc_aac"):
+            if Gst.ElementFactory.find(factory) is not None:
+                bitrate = int(audio_opts.get("aac_bitrate", 128000))
+                if factory == "fdkaacenc":
+                    return f"{factory} bitrate={bitrate}"
+                if factory == "voaacenc":
+                    return f"{factory} bitrate={bitrate}"
+                if factory == "avenc_aac":
+                    return f"{factory} bitrate={bitrate}"
+
+        print("ERROR: No AAC encoder is available. Install fdkaacenc, voaacenc, or avenc_aac.")
+        sys.exit(1)
 
     def build_encoder_properties(self, video_opts, video_encoder):
         bitrate = video_opts.get("bitrate", 1000)
@@ -398,7 +397,7 @@ class SenderRuntime:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sender runtime with live H.264 + LPCM MPEG-TS transport and server-side AAC MP4 recording."
+        description="Sender runtime with live H.264 + AAC MPEG-TS transport plus separate RTP L16 audio relay."
     )
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     audio_group = parser.add_mutually_exclusive_group()

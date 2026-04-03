@@ -56,6 +56,7 @@ class ServerRuntime:
         self._lock = threading.Lock()
         self._main_loop: GLib.MainLoop | None = None
         self._loop_thread: threading.Thread | None = None
+        self._audio_pipeline: Gst.Pipeline | None = None
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
         self._recording_started_at: float | None = None
@@ -210,6 +211,10 @@ class ServerRuntime:
         for feed_state in self._video_feeds.values():
             prune_preview_files(self._preview_dir, feed_state.preview_pattern, keep=0)
 
+        self._audio_pipeline = self._build_audio_pipeline(config)
+        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
+        self._audio_pipeline.set_state(Gst.State.PLAYING)
+
         self._last_preview_log_at = {}
         self._last_continuity_warning_at = {}
 
@@ -239,6 +244,10 @@ class ServerRuntime:
                 feed_state.pipeline = None
                 feed_state.tee = None
                 feed_state.recording_session = None
+
+        if self._audio_pipeline is not None:
+            self._audio_pipeline.set_state(Gst.State.NULL)
+            self._audio_pipeline = None
 
         self._log("Server runtime stopped.")
 
@@ -274,6 +283,30 @@ class ServerRuntime:
 
         self._start_video_feed(feed_state)
         return False
+
+    def _restart_audio_pipeline(self) -> bool:
+        if not self._running:
+            return False
+        config = _load_config(self._config_path)
+        self._log("[audio] Restarting audio pipeline.")
+
+        if self._audio_pipeline is not None:
+            self._audio_pipeline.set_state(Gst.State.NULL)
+
+        self._audio_pipeline = self._build_audio_pipeline(config)
+        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
+        self._audio_pipeline.set_state(Gst.State.PLAYING)
+        return False
+
+    def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message) -> bool:
+        if message.type == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            self._log(f"[audio] ERROR: {err}. {debug or ''}".strip())
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
+        elif message.type == Gst.MessageType.EOS:
+            self._log("[audio] End of stream detected.")
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
+        return True
 
     def _on_video_message(self, bus: Gst.Bus, message: Gst.Message, feed: str) -> bool:
         if message.type == Gst.MessageType.ERROR:
@@ -450,6 +483,43 @@ class ServerRuntime:
         bus.add_signal_watch()
         bus.connect("message", handler)
         self._log(f"[{label}] Pipeline configured.")
+
+    def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
+        ports = config.get("ports", {})
+        audio = config.get("audio", {})
+        audio_rate = int(audio.get("rate", 48000))
+        channels = int(audio.get("channels", 2))
+        encoding_name = str(audio.get("encoding_name", "L16")).strip() or "L16"
+        audio_format = str(audio.get("format", "S16BE")).strip().upper() or "S16BE"
+        if audio_format != "S16BE":
+            raise RuntimeError("audio.format must be S16BE for the separate RTP L16 relay pipeline.")
+
+        pipeline_str = f"""
+            srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener wait-for-connection=false !
+              queue !
+              application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+              rtpL16depay !
+              tee name=tee_tn
+
+            srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener wait-for-connection=false !
+              queue !
+              application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+              rtpL16depay !
+              tee name=tee_dk
+
+            tee_tn. ! queue !
+              audioconvert ! audioresample !
+              audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
+              rtpL16pay !
+              srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener wait-for-connection=false
+
+            tee_dk. ! queue !
+              audioconvert ! audioresample !
+              audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
+              rtpL16pay !
+              srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener wait-for-connection=false
+        """
+        return Gst.parse_launch(pipeline_str.strip())
 
     def _build_video_pipeline(self, feed_state: VideoFeedState) -> Gst.Pipeline:
         pipeline_str = f"""

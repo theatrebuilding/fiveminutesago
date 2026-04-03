@@ -1,12 +1,12 @@
 server_ip: 100.119.85.108
-streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"  # Legacy separate-audio transport setting; unused by the muxed live pipeline.
+streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"  # Separate RTP L16 audio transport settings.
 streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
 
 ports:
-  audio_send_tn: 8805      # Legacy separate-audio port; unused by the muxed live pipeline.
-  audio_send_dk: 8806      # Legacy separate-audio port; unused by the muxed live pipeline.
-  audio_receive_dk: 8807   # Legacy separate-audio port; unused by the muxed live pipeline.
-  audio_receive_tn: 8808   # Legacy separate-audio port; unused by the muxed live pipeline.
+  audio_send_tn: 8805      # Sender TN -> server RTP L16 audio
+  audio_send_dk: 8806      # Sender DK -> server RTP L16 audio
+  audio_receive_dk: 8807   # Server -> DK sender RTP L16 return audio
+  audio_receive_tn: 8808   # Server -> TN sender RTP L16 return audio
   video_send_tn: 7701
   video_send_dk: 7702
   video_receive_dk: 7703
@@ -14,20 +14,20 @@ ports:
 
 
 audio:
-  source: "alsasrc"              # Legacy standalone sender audio source element
+  source: "alsasrc"              # Sender audio source element
   device: "default"              # Sender Pi microphone capture device when audio_source=device
   playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
-  format: "S16BE"                # Live MPEG-TS LPCM transport sample format. Supported: S16BE, S20BE, S24BE.
-  rate: 48000                    # Live MPEG-TS LPCM transport sample rate. Supported: 48000 or 96000.
+  format: "S16BE"                # Separate RTP L16 transport sample format. The current path requires S16BE.
+  rate: 48000                    # Shared sender/receiver audio sample rate. 48000 is recommended for DSP and AAC playback.
   channels: 2
-  encoding_name: "L16"           # Legacy separate-audio transport name; unused by the muxed live pipeline.
-  aac_bitrate: 128000            # Fallback MP4 recording AAC bitrate when recording.audio.bitrate is not set.
+  encoding_name: "L16"           # Separate RTP L16 transport encoding name.
+  aac_bitrate: 128000            # AAC bitrate for the sender's muxed MPEG-TS audio stream.
   test_source_wave: "sine"       # Sender test audio options include: sine, square, saw, triangle, silence, white-noise, pink-noise, ticks, gaussian-noise, red-noise, blue-noise, violet-noise
   test_source_freq: 440          # Sender test tone frequency in Hz
   test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
 
 receiver_audio:
-  transport: "muxed"             # Receiver playback options: muxed, off
+  transport: "aac"               # Receiver playback options: aac, off
   playback_device: "default"     # Receiver Pi speaker output device
 
 recording:
@@ -35,7 +35,7 @@ recording:
     mode: "copy"                 # MP4 video recording mode. Only "copy" is currently supported.
   audio:
     codec: "aac"                 # MP4 audio recording codec. Only "aac" is currently supported.
-    bitrate: 128000              # MP4 AAC bitrate in bits per second.
+    bitrate: 128000              # Used when the recorder must encode AAC itself; AAC transport is otherwise copied through.
 
 video:
   source: "v4l2src device=/dev/video0"
