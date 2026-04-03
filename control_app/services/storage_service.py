@@ -167,7 +167,11 @@ class StorageService:
         }
 
     def _is_archive_media(self, path: Path) -> bool:
-        return path.suffix.lower() in ARCHIVE_MEDIA_SUFFIXES and not path.name.endswith(".recording.ts")
+        return (
+            path.suffix.lower() in ARCHIVE_MEDIA_SUFFIXES
+            and not path.name.endswith(".recording.ts")
+            and not path.name.endswith(".recording.mp4")
+        )
 
     def _resolve_archive_candidate(self, filename: str) -> Path | None:
         candidate_name = (filename or "").strip()

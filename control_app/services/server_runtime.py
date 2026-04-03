@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime as dt
-import json
 from pathlib import Path
-import subprocess
 import threading
 import time
 from typing import Any, Callable
@@ -15,6 +13,7 @@ import yaml
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from .live_mp4_recorder import LiveMp4Recorder, RecordingPaths
 from .preview_catalog import build_server_preview_pattern, describe_latest_preview, prune_preview_files
 
 
@@ -22,18 +21,10 @@ Gst.init(None)
 
 
 @dataclass
-class RecordingBranch:
-    tee_pad: Gst.Pad
-    queue: Gst.Element
-    sink: Gst.Element
-    temp_path: Path
-
-
-@dataclass(frozen=True)
-class RecordingPaths:
-    temp_path: Path
-    final_path: Path
-    failed_path: Path
+class RecordingSession:
+    recorder: LiveMp4Recorder
+    tee_sink_pad: Gst.Pad | None = None
+    probe_id: int | None = None
 
 
 @dataclass
@@ -44,7 +35,7 @@ class VideoFeedState:
     preview_pattern: str
     pipeline: Gst.Pipeline | None = None
     tee: Gst.Element | None = None
-    recording_branch: RecordingBranch | None = None
+    recording_session: RecordingSession | None = None
 
 
 class ServerRuntime:
@@ -77,8 +68,6 @@ class ServerRuntime:
         self._running = False
         self._last_preview_log_at: dict[str, float] = {}
         self._last_continuity_warning_at: dict[str, float] = {}
-        self._logged_missing_h264_timestamper = False
-        self._logged_missing_ffprobe = False
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -250,10 +239,11 @@ class ServerRuntime:
 
         for feed_state in self._video_feeds.values():
             if feed_state.pipeline is not None:
+                self._detach_recording_probe(feed_state)
                 feed_state.pipeline.set_state(Gst.State.NULL)
                 feed_state.pipeline = None
                 feed_state.tee = None
-                feed_state.recording_branch = None
+                feed_state.recording_session = None
 
         if self._audio_pipeline is not None:
             self._audio_pipeline.set_state(Gst.State.NULL)
@@ -274,7 +264,9 @@ class ServerRuntime:
         if self._recording_active:
             record_paths = self._recording_files.get(feed_state.feed)
             if record_paths is not None:
-                self._attach_recording_branch(feed_state, record_paths.temp_path, append=True)
+                if feed_state.recording_session is None:
+                    self._arm_recording_session(feed_state, record_paths)
+                self._attach_recording_probe(feed_state)
 
     def _restart_video_feed(self, feed: str) -> bool:
         if not self._running:
@@ -283,10 +275,10 @@ class ServerRuntime:
         self._log(f"[{feed}] Restarting video pipeline.")
 
         if feed_state.pipeline is not None:
+            self._detach_recording_probe(feed_state)
             feed_state.pipeline.set_state(Gst.State.NULL)
             feed_state.pipeline = None
             feed_state.tee = None
-            feed_state.recording_branch = None
 
         self._start_video_feed(feed_state)
         return False
@@ -353,28 +345,40 @@ class ServerRuntime:
         timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
         files = {
             "tn": RecordingPaths(
-                temp_path=self._recording_dir / f"video_tn_{timestamp}.recording.ts",
+                temp_path=self._recording_dir / f"video_tn_{timestamp}.recording.mp4",
                 final_path=self._archive_dir / f"video_tn_{timestamp}.mp4",
-                failed_path=self._archive_dir / f"video_tn_{timestamp}.failed.ts",
+                failed_path=self._archive_dir / f"video_tn_{timestamp}.failed.mp4",
             ),
             "dk": RecordingPaths(
-                temp_path=self._recording_dir / f"video_dk_{timestamp}.recording.ts",
+                temp_path=self._recording_dir / f"video_dk_{timestamp}.recording.mp4",
                 final_path=self._archive_dir / f"video_dk_{timestamp}.mp4",
-                failed_path=self._archive_dir / f"video_dk_{timestamp}.failed.ts",
+                failed_path=self._archive_dir / f"video_dk_{timestamp}.failed.mp4",
             ),
         }
 
-        for feed, paths in files.items():
-            feed_state = self._video_feeds.get(feed)
-            if feed_state is not None:
-                self._attach_recording_branch(feed_state, paths.temp_path, append=False)
+        armed_feed_states: list[VideoFeedState] = []
+        try:
+            for feed, paths in files.items():
+                feed_state = self._video_feeds.get(feed)
+                if feed_state is None:
+                    continue
+                self._arm_recording_session(feed_state, paths)
+                self._attach_recording_probe(feed_state)
+                armed_feed_states.append(feed_state)
+        except Exception:
+            for feed_state in armed_feed_states:
+                self._detach_recording_probe(feed_state)
+                if feed_state.recording_session is not None:
+                    feed_state.recording_session.recorder.stop(timeout=5)
+                    feed_state.recording_session = None
+            raise
 
         with self._lock:
             self._recording_active = True
             self._recording_started_at = time.time()
             self._recording_files = files
 
-        self._log("Recording started for both feeds.")
+        self._log("Recording armed for both feeds. Each MP4 will begin on the next IDR frame.")
 
     def _stop_recording_on_loop(self) -> None:
         if not self._running and not self._recording_active:
@@ -382,9 +386,12 @@ class ServerRuntime:
         if not self._recording_active:
             return
 
-        recording_files = dict(self._recording_files)
+        recording_sessions: dict[str, RecordingSession] = {}
         for feed_state in self._video_feeds.values():
-            self._detach_recording_branch(feed_state)
+            self._detach_recording_probe(feed_state)
+            if feed_state.recording_session is not None:
+                recording_sessions[feed_state.feed] = feed_state.recording_session
+                feed_state.recording_session = None
 
         with self._lock:
             self._recording_active = False
@@ -392,264 +399,67 @@ class ServerRuntime:
             self._recording_files = {}
 
         self._log("Recording stopped. Finalizing archive files in background...")
-        self._start_recording_finalization_worker(recording_files)
+        self._start_recording_finalization_worker(recording_sessions)
 
-    def _attach_recording_branch(self, feed_state: VideoFeedState, path: Path, append: bool) -> None:
-        if feed_state.pipeline is None or feed_state.tee is None:
+    def _attach_recording_probe(self, feed_state: VideoFeedState) -> None:
+        if feed_state.tee is None or feed_state.recording_session is None:
             return
-        if feed_state.recording_branch is not None:
+        if feed_state.recording_session.probe_id is not None:
             return
 
-        queue = Gst.ElementFactory.make("queue", f"{feed_state.feed}_record_queue")
-        sink = Gst.ElementFactory.make("filesink", f"{feed_state.feed}_record_sink")
-        if queue is None or sink is None:
-            raise RuntimeError(f"Could not create recording branch for {feed_state.feed}.")
+        tee_sink_pad = feed_state.tee.get_static_pad("sink")
+        if tee_sink_pad is None:
+            raise RuntimeError(f"Could not access tee sink pad for {feed_state.feed}.")
 
-        sink.set_property("location", str(path))
-        sink.set_property("append", append)
-
-        feed_state.pipeline.add(queue)
-        feed_state.pipeline.add(sink)
-
-        if not queue.link(sink):
-            raise RuntimeError(f"Could not link recording sink for {feed_state.feed}.")
-
-        tee_pad = feed_state.tee.get_request_pad("src_%u")
-        if tee_pad is None:
-            raise RuntimeError(f"Could not allocate tee pad for {feed_state.feed}.")
-
-        queue_pad = queue.get_static_pad("sink")
-        if queue_pad is None or tee_pad.link(queue_pad) != Gst.PadLinkReturn.OK:
-            raise RuntimeError(f"Could not link recording branch for {feed_state.feed}.")
-
-        queue.sync_state_with_parent()
-        sink.sync_state_with_parent()
-
-        feed_state.recording_branch = RecordingBranch(
-            tee_pad=tee_pad,
-            queue=queue,
-            sink=sink,
-            temp_path=path,
+        probe_id = tee_sink_pad.add_probe(
+            Gst.PadProbeType.BUFFER,
+            self._push_recording_buffer,
+            feed_state.feed,
         )
+        feed_state.recording_session.tee_sink_pad = tee_sink_pad
+        feed_state.recording_session.probe_id = probe_id
 
-    def _detach_recording_branch(self, feed_state: VideoFeedState) -> None:
-        branch = feed_state.recording_branch
-        if feed_state.pipeline is None or branch is None:
+    def _arm_recording_session(self, feed_state: VideoFeedState, paths: RecordingPaths) -> None:
+        recorder = LiveMp4Recorder(
+            feed=feed_state.feed,
+            paths=paths,
+            log_callback=self._log,
+        )
+        recorder.start()
+        feed_state.recording_session = RecordingSession(recorder=recorder)
+
+    def _detach_recording_probe(self, feed_state: VideoFeedState) -> None:
+        session = feed_state.recording_session
+        if session is None or session.tee_sink_pad is None or session.probe_id is None:
             return
 
-        queue_pad = branch.queue.get_static_pad("sink")
-        if queue_pad is not None:
-            branch.tee_pad.unlink(queue_pad)
-        if feed_state.tee is not None:
-            feed_state.tee.release_request_pad(branch.tee_pad)
+        session.tee_sink_pad.remove_probe(session.probe_id)
+        session.tee_sink_pad = None
+        session.probe_id = None
 
-        branch.sink.set_state(Gst.State.NULL)
-        branch.queue.set_state(Gst.State.NULL)
-        feed_state.pipeline.remove(branch.sink)
-        feed_state.pipeline.remove(branch.queue)
-        feed_state.recording_branch = None
-
-    def _finalize_recording_file(self, feed: str, paths: RecordingPaths) -> None:
-        if not paths.temp_path.exists():
-            self._log(f"[{feed}] Recording temp file was missing; nothing to finalize.")
-            return
-
-        if paths.temp_path.stat().st_size == 0:
-            self._safe_unlink(paths.temp_path)
-            self._log(f"[{feed}] Recording captured no video data; removed empty temp file.")
-            return
-
-        pipeline: Gst.Pipeline | None = None
-        self._safe_unlink(paths.final_path)
-        self._log(f"[{feed}] Finalizing {paths.temp_path.name} -> {paths.final_path.name}")
-        include_audio = self._detect_recording_has_aac_audio(paths.temp_path)
-        if include_audio is True:
-            self._log(f"[{feed}] AAC stream detected in recording; finalizing MP4 with audio.")
-        elif include_audio is False:
-            self._log(f"[{feed}] No AAC stream detected in recording; finalizing video-only MP4.")
-        else:
-            self._log(f"[{feed}] Could not confirm AAC presence; trying A/V finalization first.")
-
-        try:
-            pipeline = self._build_recording_finalize_pipeline(paths, include_audio=include_audio is not False)
-            pipeline.set_state(Gst.State.PLAYING)
-            self._wait_for_finalize_pipeline(pipeline, timeout_message="Archive finalization timed out.")
-        except Exception as exc:
-            if include_audio is not False:
-                self._safe_unlink(paths.final_path)
-                self._log(f"[{feed}] WARNING: A/V finalization failed; retrying video-only MP4. {exc}")
-                try:
-                    if pipeline is not None:
-                        pipeline.set_state(Gst.State.NULL)
-                        pipeline = None
-                    pipeline = self._build_recording_finalize_pipeline(paths, include_audio=False)
-                    pipeline.set_state(Gst.State.PLAYING)
-                    self._wait_for_finalize_pipeline(pipeline, timeout_message="Video-only archive finalization timed out.")
-                except Exception as fallback_exc:
-                    self._safe_unlink(paths.final_path)
-                    self._preserve_failed_recording(paths)
-                    self._log(f"[{feed}] ERROR: Recording finalization failed. {fallback_exc}")
-                    return
-            else:
-                self._safe_unlink(paths.final_path)
-                self._preserve_failed_recording(paths)
-                self._log(f"[{feed}] ERROR: Recording finalization failed. {exc}")
-                return
-        finally:
-            if pipeline is not None:
-                pipeline.set_state(Gst.State.NULL)
-
-        if not paths.final_path.exists() or paths.final_path.stat().st_size == 0:
-            self._safe_unlink(paths.final_path)
-            self._preserve_failed_recording(paths)
-            self._log(f"[{feed}] ERROR: Recording finalization produced no MP4 output.")
-            return
-
-        self._safe_unlink(paths.temp_path)
-        self._log(f"[{feed}] Final archive ready: {paths.final_path}")
-
-    def _build_recording_finalize_pipeline(self, paths: RecordingPaths, include_audio: bool) -> Gst.Pipeline:
-        if Gst.ElementFactory.find("mp4mux") is None:
-            raise RuntimeError("mp4mux is not available in this environment.")
-        if include_audio and Gst.ElementFactory.find("aacparse") is None:
-            raise RuntimeError("aacparse is not available in this environment.")
-
-        timestamper = ""
-        if Gst.ElementFactory.find("h264timestamper") is not None:
-            timestamper = "h264timestamper !"
-        elif not self._logged_missing_h264_timestamper:
-            self._logged_missing_h264_timestamper = True
-            self._log("[recording] h264timestamper is not available; finalizing MP4 without it.")
-
-        audio_branch = ""
-        if include_audio:
-            audio_branch = """
-            demux. ! queue !
-            aacparse !
-            mux.
-            """
-
-        pipeline_str = f"""
-            filesrc location="{_gst_escape(paths.temp_path)}" !
-            tsparse set-timestamps=true !
-            tsdemux name=demux
-
-            demux. ! queue !
-            h264parse config-interval=1 !
-            {timestamper}
-            mux.
-            {audio_branch}
-
-            mp4mux name=mux !
-            filesink location="{_gst_escape(paths.final_path)}" sync=false async=false
-        """
-        return Gst.parse_launch(pipeline_str.strip())
-
-    def _wait_for_finalize_pipeline(self, pipeline: Gst.Pipeline, timeout_message: str) -> None:
-        bus = pipeline.get_bus()
-        deadline = time.monotonic() + 300
-        while True:
-            message = bus.timed_pop_filtered(
-                5 * Gst.SECOND,
-                Gst.MessageType.ERROR | Gst.MessageType.EOS,
-            )
-            if message is None:
-                if time.monotonic() > deadline:
-                    raise RuntimeError(timeout_message)
-                continue
-
-            if message.type == Gst.MessageType.ERROR:
-                err, debug = message.parse_error()
-                raise RuntimeError(f"{err}. {debug or ''}".strip())
-
-            if message.type == Gst.MessageType.EOS:
-                return
-
-    def _start_recording_finalization_worker(self, recording_files: dict[str, RecordingPaths]) -> None:
+    def _start_recording_finalization_worker(self, recording_sessions: dict[str, RecordingSession]) -> None:
         with self._lock:
             self._finalization_active_count += 1
 
         thread = threading.Thread(
             target=self._finalize_recordings_worker,
-            args=(recording_files,),
+            args=(recording_sessions,),
             name="recording-finalizer",
             daemon=True,
         )
         thread.start()
 
-    def _finalize_recordings_worker(self, recording_files: dict[str, RecordingPaths]) -> None:
+    def _finalize_recordings_worker(self, recording_sessions: dict[str, RecordingSession]) -> None:
         try:
-            for feed, paths in recording_files.items():
-                self._finalize_recording_file(feed, paths)
+            for feed, session in recording_sessions.items():
+                try:
+                    session.recorder.stop()
+                except Exception as exc:  # pragma: no cover - runtime only
+                    self._log(f"[{feed}] ERROR: Recording finalization failed unexpectedly. {exc}")
             self._log("Recording finalization complete.")
         finally:
             with self._lock:
                 self._finalization_active_count = max(0, self._finalization_active_count - 1)
-
-    def _detect_recording_has_aac_audio(self, path: Path) -> bool | None:
-        command = [
-            "ffprobe",
-            "-v",
-            "error",
-            "-select_streams",
-            "a",
-            "-show_entries",
-            "stream=codec_name",
-            "-of",
-            "json",
-            str(path),
-        ]
-
-        try:
-            result = subprocess.run(
-                command,
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=15,
-            )
-        except FileNotFoundError:
-            if not self._logged_missing_ffprobe:
-                self._logged_missing_ffprobe = True
-                self._log("[recording] ffprobe is not available; cannot preflight-check recorded audio streams.")
-            return None
-        except subprocess.TimeoutExpired:
-            self._log(f"[recording] ffprobe timed out while inspecting {path.name}; trying A/V finalization first.")
-            return None
-
-        if result.returncode != 0:
-            self._log(f"[recording] ffprobe could not inspect {path.name}; trying A/V finalization first.")
-            return None
-
-        try:
-            payload = json.loads(result.stdout or "{}")
-        except json.JSONDecodeError:
-            self._log(f"[recording] ffprobe returned invalid JSON for {path.name}; trying A/V finalization first.")
-            return None
-
-        streams = payload.get("streams")
-        if not isinstance(streams, list) or not streams:
-            return False
-
-        codec_names = {str(stream.get("codec_name") or "").strip().lower() for stream in streams}
-        if "aac" in codec_names:
-            return True
-
-        self._log(f"[recording] Audio stream in {path.name} is not AAC ({sorted(codec_names)}); finalizing video-only MP4.")
-        return False
-
-    def _preserve_failed_recording(self, paths: RecordingPaths) -> None:
-        if not paths.temp_path.exists():
-            return
-        self._safe_unlink(paths.failed_path)
-        paths.temp_path.replace(paths.failed_path)
-        self._log(f"[recording] Preserved failed TS artifact: {paths.failed_path}")
-
-    def _safe_unlink(self, path: Path) -> None:
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            return
 
     def _configure_bus(
         self,
@@ -727,6 +537,23 @@ class ServerRuntime:
         self._last_preview_log_at[feed] = now
         return True
 
+    def _push_recording_buffer(
+        self,
+        pad: Gst.Pad,
+        info: Gst.PadProbeInfo,
+        feed: str,
+    ) -> Gst.PadProbeReturn:
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+
+        feed_state = self._video_feeds.get(feed)
+        if feed_state is None or feed_state.recording_session is None:
+            return Gst.PadProbeReturn.OK
+
+        feed_state.recording_session.recorder.push_ts_buffer(buffer)
+        return Gst.PadProbeReturn.OK
+
 
 def _load_config(config_path: Path) -> dict[str, Any]:
     with config_path.open("r", encoding="utf-8") as file:
@@ -734,10 +561,6 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("Config must be a top-level YAML mapping.")
     return data
-
-
-def _gst_escape(path: Path) -> str:
-    return str(path).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _to_iso(timestamp: float | None) -> str | None:
