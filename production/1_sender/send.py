@@ -142,8 +142,8 @@ class SenderRuntime:
         playback_enabled = self.sender_audio_mode == "aec"
         transport_format, lpcm_width, lpcm_rate = validate_mpegts_lpcm_config(audio_format, audio_rate)
 
-        if Gst.ElementFactory.find("capssetter") is None:
-            print("ERROR: capssetter is required to label the live audio branch as audio/x-lpcm for MPEG-TS.")
+        if Gst.ElementFactory.find("avenc_pcm_dvd") is None:
+            print("ERROR: avenc_pcm_dvd is required to encode live DVD-LPCM for MPEG-TS.")
             sys.exit(1)
 
         if playback_enabled:
@@ -209,8 +209,9 @@ class SenderRuntime:
             audio_capture_tee. ! queue
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format={transport_format},channels={channels},rate={lpcm_rate}
-                ! capssetter join=false replace=true caps="audio/x-lpcm,width=(int){lpcm_width},rate=(int){lpcm_rate},channels=(int){channels},dynamic_range=(int)0,emphasis=(boolean)false,mute=(boolean)false"
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={lpcm_rate}
+                ! avenc_pcm_dvd
+                ! audio/x-lpcm,width=(int){lpcm_width},rate=(int){lpcm_rate},channels=(int){channels},dynamic_range=(int)0,emphasis=(boolean)false,mute=(boolean)false
                 ! queue
                 ! av_mux.
         """
