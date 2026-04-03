@@ -24,7 +24,7 @@ VALID_COUNTRIES = {"tn", "dk"}
 VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
 VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
 VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
-VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac"}
+VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "muxed"}
 
 
 @dataclass(frozen=True)
@@ -98,10 +98,10 @@ class RuntimeLaunchRequest:
             if receiver_audio_transport_raw is not None
             else "config"
         )
-        if receiver_audio_transport == "pcm":
-            receiver_audio_transport = "aac"
+        if receiver_audio_transport in {"pcm", "aac"}:
+            receiver_audio_transport = "muxed"
         if receiver_audio_transport not in VALID_RECEIVER_AUDIO_TRANSPORTS:
-            raise ValueError("Receiver audio transport must be one of: config, off, aac.")
+            raise ValueError("Receiver audio transport must be one of: config, off, muxed.")
 
         if role != "sender":
             audio_source = "off"

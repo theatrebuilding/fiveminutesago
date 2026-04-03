@@ -56,7 +56,6 @@ class ServerRuntime:
         self._lock = threading.Lock()
         self._main_loop: GLib.MainLoop | None = None
         self._loop_thread: threading.Thread | None = None
-        self._audio_pipeline: Gst.Pipeline | None = None
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
         self._recording_started_at: float | None = None
@@ -211,10 +210,6 @@ class ServerRuntime:
         for feed_state in self._video_feeds.values():
             prune_preview_files(self._preview_dir, feed_state.preview_pattern, keep=0)
 
-        self._audio_pipeline = self._build_audio_pipeline(config)
-        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._audio_pipeline.set_state(Gst.State.PLAYING)
-
         self._last_preview_log_at = {}
         self._last_continuity_warning_at = {}
 
@@ -245,10 +240,6 @@ class ServerRuntime:
                 feed_state.tee = None
                 feed_state.recording_session = None
 
-        if self._audio_pipeline is not None:
-            self._audio_pipeline.set_state(Gst.State.NULL)
-            self._audio_pipeline = None
-
         self._log("Server runtime stopped.")
 
     def _start_video_feed(self, feed_state: VideoFeedState) -> None:
@@ -265,7 +256,8 @@ class ServerRuntime:
             record_paths = self._recording_files.get(feed_state.feed)
             if record_paths is not None:
                 if feed_state.recording_session is None:
-                    self._arm_recording_session(feed_state, record_paths)
+                    recording_config = _resolve_recording_config(_load_config(self._config_path))
+                    self._arm_recording_session(feed_state, record_paths, recording_config)
                 self._attach_recording_probe(feed_state)
 
     def _restart_video_feed(self, feed: str) -> bool:
@@ -282,30 +274,6 @@ class ServerRuntime:
 
         self._start_video_feed(feed_state)
         return False
-
-    def _restart_audio_pipeline(self) -> bool:
-        if not self._running:
-            return False
-        config = _load_config(self._config_path)
-        self._log("[audio] Restarting audio pipeline.")
-
-        if self._audio_pipeline is not None:
-            self._audio_pipeline.set_state(Gst.State.NULL)
-
-        self._audio_pipeline = self._build_audio_pipeline(config)
-        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._audio_pipeline.set_state(Gst.State.PLAYING)
-        return False
-
-    def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message) -> bool:
-        if message.type == Gst.MessageType.ERROR:
-            err, debug = message.parse_error()
-            self._log(f"[audio] ERROR: {err}. {debug or ''}".strip())
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
-        elif message.type == Gst.MessageType.EOS:
-            self._log("[audio] End of stream detected.")
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
-        return True
 
     def _on_video_message(self, bus: Gst.Bus, message: Gst.Message, feed: str) -> bool:
         if message.type == Gst.MessageType.ERROR:
@@ -342,6 +310,8 @@ class ServerRuntime:
         if self._recording_active:
             return
 
+        recording_config = _resolve_recording_config(_load_config(self._config_path))
+
         timestamp = dt.datetime.now().strftime("%Y%m%d%H%M%S")
         files = {
             "tn": RecordingPaths(
@@ -362,7 +332,7 @@ class ServerRuntime:
                 feed_state = self._video_feeds.get(feed)
                 if feed_state is None:
                     continue
-                self._arm_recording_session(feed_state, paths)
+                self._arm_recording_session(feed_state, paths, recording_config)
                 self._attach_recording_probe(feed_state)
                 armed_feed_states.append(feed_state)
         except Exception:
@@ -419,10 +389,19 @@ class ServerRuntime:
         feed_state.recording_session.tee_sink_pad = tee_sink_pad
         feed_state.recording_session.probe_id = probe_id
 
-    def _arm_recording_session(self, feed_state: VideoFeedState, paths: RecordingPaths) -> None:
+    def _arm_recording_session(
+        self,
+        feed_state: VideoFeedState,
+        paths: RecordingPaths,
+        recording_config: dict[str, Any],
+    ) -> None:
         recorder = LiveMp4Recorder(
             feed=feed_state.feed,
             paths=paths,
+            audio_bitrate=recording_config["audio_bitrate"],
+            audio_rate=recording_config["audio_rate"],
+            audio_channels=recording_config["audio_channels"],
+            video_mode=recording_config["video_mode"],
             log_callback=self._log,
         )
         recorder.start()
@@ -471,37 +450,6 @@ class ServerRuntime:
         bus.add_signal_watch()
         bus.connect("message", handler)
         self._log(f"[{label}] Pipeline configured.")
-
-    def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
-        ports = config.get("ports", {})
-        audio = config.get("audio", {})
-
-        pipeline_str = f"""
-            srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener wait-for-connection=false !
-              queue !
-              application/x-rtp,media=audio,clock-rate={audio.get("rate", 32000)},encoding-name={audio.get("encoding_name", "L16")},channels={audio.get("channels", 2)} !
-              rtpL16depay !
-              tee name=tee_tn
-
-            srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener wait-for-connection=false !
-              queue !
-              application/x-rtp,media=audio,clock-rate={audio.get("rate", 32000)},encoding-name={audio.get("encoding_name", "L16")},channels={audio.get("channels", 2)} !
-              rtpL16depay !
-              tee name=tee_dk
-
-            tee_tn. ! queue !
-              audioconvert ! audioresample !
-              audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
-              rtpL16pay !
-              srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener wait-for-connection=false
-
-            tee_dk. ! queue !
-              audioconvert ! audioresample !
-              audio/x-raw,format={audio.get("format", "S16BE")},channels={audio.get("channels", 2)},rate={audio.get("rate", 32000)} !
-              rtpL16pay !
-              srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener wait-for-connection=false
-        """
-        return Gst.parse_launch(pipeline_str.strip())
 
     def _build_video_pipeline(self, feed_state: VideoFeedState) -> Gst.Pipeline:
         pipeline_str = f"""
@@ -561,6 +509,31 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("Config must be a top-level YAML mapping.")
     return data
+
+
+def _resolve_recording_config(config: dict[str, Any]) -> dict[str, Any]:
+    audio = config.get("audio", {})
+    recording = config.get("recording", {})
+    recording_audio = recording.get("audio", {}) if isinstance(recording.get("audio", {}), dict) else {}
+    recording_video = recording.get("video", {}) if isinstance(recording.get("video", {}), dict) else {}
+
+    audio_rate = int(audio.get("rate", 48000))
+    audio_channels = int(audio.get("channels", 2))
+    audio_bitrate = int(recording_audio.get("bitrate", audio.get("aac_bitrate", 128000)))
+    video_mode = str(recording_video.get("mode", "copy")).strip().lower() or "copy"
+    if video_mode != "copy":
+        raise RuntimeError("recording.video.mode currently supports only 'copy'.")
+
+    audio_codec = str(recording_audio.get("codec", "aac")).strip().lower() or "aac"
+    if audio_codec != "aac":
+        raise RuntimeError("recording.audio.codec currently supports only 'aac'.")
+
+    return {
+        "audio_bitrate": audio_bitrate,
+        "audio_rate": audio_rate,
+        "audio_channels": audio_channels,
+        "video_mode": video_mode,
+    }
 
 
 def _to_iso(timestamp: float | None) -> str | None:

@@ -25,10 +25,18 @@ class LiveMp4Recorder:
         self,
         feed: str,
         paths: RecordingPaths,
+        audio_bitrate: int = 128000,
+        audio_rate: int = 48000,
+        audio_channels: int = 2,
+        video_mode: str = "copy",
         log_callback: Callable[[str], None] | None = None,
     ) -> None:
         self._feed = feed
         self._paths = paths
+        self._audio_bitrate = int(audio_bitrate)
+        self._audio_rate = int(audio_rate)
+        self._audio_channels = int(audio_channels)
+        self._video_mode = str(video_mode).strip().lower() or "copy"
         self._log_callback = log_callback
 
         self._lock = threading.Lock()
@@ -51,6 +59,9 @@ class LiveMp4Recorder:
         return self._paths.temp_path
 
     def start(self) -> None:
+        if self._video_mode != "copy":
+            raise RuntimeError("Live MP4 recording currently supports only recording.video.mode=copy.")
+
         self._paths.temp_path.parent.mkdir(parents=True, exist_ok=True)
         self._paths.final_path.parent.mkdir(parents=True, exist_ok=True)
         _safe_unlink(self._paths.temp_path)
@@ -243,7 +254,7 @@ class LiveMp4Recorder:
             if media_type.startswith("video/"):
                 self._attach_video_branch(pad)
                 return
-            if media_type == "audio/mpeg":
+            if media_type.startswith("audio/"):
                 self._attach_audio_branch(pad)
         except Exception as exc:  # pragma: no cover - runtime only
             with self._lock:
@@ -300,26 +311,78 @@ class LiveMp4Recorder:
             mux = self._mux
             self._audio_branch_linked = True
 
-        queue = _make_element("queue", f"{self._feed}_record_audio_queue")
+        input_queue = _make_element("queue", f"{self._feed}_record_audio_input_queue")
+        decodebin = _make_element("decodebin", f"{self._feed}_record_audio_decodebin")
+        convert = _make_element("audioconvert", f"{self._feed}_record_audio_convert")
+        resample = _make_element("audioresample", f"{self._feed}_record_audio_resample")
+        capsfilter = _make_element("capsfilter", f"{self._feed}_record_audio_caps")
+        capsfilter.set_property(
+            "caps",
+            Gst.Caps.from_string(
+                "audio/x-raw,"
+                f"format=S16LE,channels={self._audio_channels},rate={self._audio_rate}"
+            ),
+        )
+        encoder = _make_aac_encoder(self._feed, self._audio_bitrate)
         parser = _make_element("aacparse", f"{self._feed}_record_aacparse")
-        elements = [queue, parser]
+        output_queue = _make_element("queue", f"{self._feed}_record_audio_output_queue")
+        elements = [input_queue, decodebin, convert, resample, capsfilter, encoder, parser, output_queue]
 
-        _add_and_link_elements(pipeline, elements)
+        for element in elements:
+            pipeline.add(element)
 
-        sink_pad = queue.get_static_pad("sink")
+        if not input_queue.link(decodebin):
+            raise RuntimeError(f"Could not link audio input queue to decodebin for {self._feed} recording.")
+        if not convert.link(resample):
+            raise RuntimeError(f"Could not link audio convert -> resample for {self._feed} recording.")
+        if not resample.link(capsfilter):
+            raise RuntimeError(f"Could not link audio resample -> capsfilter for {self._feed} recording.")
+        if not capsfilter.link(encoder):
+            raise RuntimeError(f"Could not link raw audio -> AAC encoder for {self._feed} recording.")
+        if not encoder.link(parser):
+            raise RuntimeError(f"Could not link AAC encoder -> parser for {self._feed} recording.")
+        if not parser.link(output_queue):
+            raise RuntimeError(f"Could not link AAC parser -> output queue for {self._feed} recording.")
+
+        sink_pad = input_queue.get_static_pad("sink")
         if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
             raise RuntimeError(f"Could not link audio demux pad for {self._feed} recording.")
 
-        src_pad = parser.get_static_pad("src")
+        decodebin.connect("pad-added", self._on_audio_decode_pad_added, convert)
+
+        gate_pad = capsfilter.get_static_pad("src")
+        if gate_pad is None:
+            raise RuntimeError(f"Could not access raw audio gate pad for {self._feed}.")
+        gate_pad.add_probe(Gst.PadProbeType.BUFFER, self._audio_gate_probe)
+
+        src_pad = output_queue.get_static_pad("src")
         if src_pad is None:
             raise RuntimeError(f"Could not access audio recorder src pad for {self._feed}.")
-        src_pad.add_probe(Gst.PadProbeType.BUFFER, self._audio_gate_probe)
 
         mux_pad = _request_mux_pad(mux, "audio")
         if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
             raise RuntimeError(f"Could not link audio branch to MP4 mux for {self._feed}.")
 
         _sync_elements_with_parent(elements)
+
+    def _on_audio_decode_pad_added(
+        self,
+        decodebin: Gst.Element,
+        pad: Gst.Pad,
+        convert: Gst.Element,
+    ) -> None:
+        caps = pad.get_current_caps() or pad.query_caps(None)
+        if caps is None or caps.get_size() == 0:
+            return
+        structure = caps.get_structure(0)
+        if structure.get_name() != "audio/x-raw":
+            return
+
+        sink_pad = convert.get_static_pad("sink")
+        if sink_pad is None or sink_pad.is_linked():
+            return
+        if pad.link(sink_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Could not link decoded audio pad for {self._feed} recording.")
 
     def _video_gate_probe(self, pad: Gst.Pad, info: Gst.PadProbeInfo) -> Gst.PadProbeReturn:
         buffer = info.get_buffer()
@@ -384,6 +447,16 @@ def _make_element(factory: str, name: str) -> Gst.Element:
     return element
 
 
+def _make_aac_encoder(feed: str, bitrate: int) -> Gst.Element:
+    for factory in ("fdkaacenc", "voaacenc", "avenc_aac"):
+        if Gst.ElementFactory.find(factory) is None:
+            continue
+        encoder = _make_element(factory, f"{feed}_{factory}_encoder")
+        _set_optional_property(encoder, bitrate, "bitrate", "bit-rate", "bit_rate")
+        return encoder
+    raise RuntimeError("No AAC encoder is available for MP4 recording. Install fdkaacenc, voaacenc, or avenc_aac.")
+
+
 def _add_and_link_elements(pipeline: Gst.Pipeline, elements: list[Gst.Element]) -> None:
     for element in elements:
         pipeline.add(element)
@@ -395,6 +468,14 @@ def _add_and_link_elements(pipeline: Gst.Pipeline, elements: list[Gst.Element]) 
 def _sync_elements_with_parent(elements: list[Gst.Element]) -> None:
     for element in elements:
         element.sync_state_with_parent()
+
+
+def _set_optional_property(element: Gst.Element, value: int, *property_names: str) -> None:
+    for property_name in property_names:
+        if element.find_property(property_name) is None:
+            continue
+        element.set_property(property_name, value)
+        return
 
 
 def _request_mux_pad(mux: Gst.Element, media_type: str) -> Gst.Pad:

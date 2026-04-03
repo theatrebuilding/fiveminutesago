@@ -1,12 +1,12 @@
 server_ip: 100.119.85.108
-streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"
+streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"  # Legacy separate-audio transport setting; unused by the muxed live pipeline.
 streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
 
 ports:
-  audio_send_tn: 8805
-  audio_send_dk: 8806
-  audio_receive_dk: 8807
-  audio_receive_tn: 8808
+  audio_send_tn: 8805      # Legacy separate-audio port; unused by the muxed live pipeline.
+  audio_send_dk: 8806      # Legacy separate-audio port; unused by the muxed live pipeline.
+  audio_receive_dk: 8807   # Legacy separate-audio port; unused by the muxed live pipeline.
+  audio_receive_tn: 8808   # Legacy separate-audio port; unused by the muxed live pipeline.
   video_send_tn: 7701
   video_send_dk: 7702
   video_receive_dk: 7703
@@ -17,18 +17,25 @@ audio:
   source: "alsasrc"              # Legacy standalone sender audio source element
   device: "default"              # Sender Pi microphone capture device when audio_source=device
   playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
-  format: "S16BE"                # Separate uncompressed PCM transport format
-  rate: 48000                    # Shared audio sample rate. 48000 is recommended for the integrated A/V sender pipeline.
+  format: "S16BE"                # Live MPEG-TS LPCM transport sample format. Supported: S16BE, S20BE, S24BE.
+  rate: 48000                    # Live MPEG-TS LPCM transport sample rate. Supported: 48000 or 96000.
   channels: 2
-  encoding_name: "L16"
-  aac_bitrate: 128000            # AAC bitrate for the muxed audio+video transport and server MP4 recording
+  encoding_name: "L16"           # Legacy separate-audio transport name; unused by the muxed live pipeline.
+  aac_bitrate: 128000            # Fallback MP4 recording AAC bitrate when recording.audio.bitrate is not set.
   test_source_wave: "sine"       # Sender test audio options include: sine, square, saw, triangle, silence, white-noise, pink-noise, ticks, gaussian-noise, red-noise, blue-noise, violet-noise
   test_source_freq: 440          # Sender test tone frequency in Hz
   test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
 
 receiver_audio:
-  transport: "aac"               # Receiver playback options: aac, off
+  transport: "muxed"             # Receiver playback options: muxed, off
   playback_device: "default"     # Receiver Pi speaker output device
+
+recording:
+  video:
+    mode: "copy"                 # MP4 video recording mode. Only "copy" is currently supported.
+  audio:
+    codec: "aac"                 # MP4 audio recording codec. Only "aac" is currently supported.
+    bitrate: 128000              # MP4 AAC bitrate in bits per second.
 
 video:
   source: "v4l2src device=/dev/video0"

@@ -4,6 +4,12 @@ from typing import Any
 
 
 SUPPORTED_WEBRTC_SAMPLE_RATES = {8000, 16000, 32000, 48000}
+SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES = {48000, 96000}
+SUPPORTED_MPEGTS_LPCM_FORMATS = {
+    "S16BE": 16,
+    "S20BE": 20,
+    "S24BE": 24,
+}
 WEBRTC_DSP_PROPERTY_ORDER = [
     "compression-gain-db",
     "delay-agnostic",
@@ -86,6 +92,32 @@ def validate_audio_rate(audio_rate: Any) -> int:
         )
 
     return rate
+
+
+def validate_mpegts_lpcm_config(audio_format: Any, audio_rate: Any) -> tuple[str, int, int]:
+    normalized_format = str(audio_format or "S16BE").strip().upper()
+    width = SUPPORTED_MPEGTS_LPCM_FORMATS.get(normalized_format)
+    if width is None:
+        supported_formats = ", ".join(sorted(SUPPORTED_MPEGTS_LPCM_FORMATS))
+        raise ValueError(
+            f"audio.format={normalized_format!r} is not supported for MPEG-TS LPCM. "
+            f"Use one of: {supported_formats}."
+        )
+
+    try:
+        rate = int(audio_rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"audio.rate must be an integer supported by MPEG-TS LPCM; got {audio_rate!r}."
+        ) from exc
+
+    if rate not in SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES:
+        supported_rates = ", ".join(str(value) for value in sorted(SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES))
+        raise ValueError(
+            f"audio.rate={rate} is not supported for MPEG-TS LPCM. Use one of: {supported_rates}."
+        )
+
+    return normalized_format, width, rate
 
 
 def build_webrtcdsp_properties(dsp_cfg: Any) -> tuple[str, dict[str, Any]]:

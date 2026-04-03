@@ -21,7 +21,7 @@ from config_loader import load_config
 
 
 DEFAULT_VIDEO_SINK = "auto"
-KMS_VIDEO_SINK = "kmssink sync=false"
+KMS_VIDEO_SINK = "kmssink"
 HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
 DEFAULT_AUDIO_TRANSPORT = "config"
 
@@ -137,11 +137,10 @@ class VideoReceiver:
         requested_transport = (self.audio_transport or DEFAULT_AUDIO_TRANSPORT).strip().lower()
         if requested_transport == "config":
             requested_transport = str(config.get("receiver_audio", {}).get("transport", "off")).strip().lower()
-        if requested_transport == "pcm":
-            print("VideoReceiver: Receiver PCM playback is no longer supported; falling back to AAC.")
-            requested_transport = "aac"
-        if requested_transport not in {"off", "aac"}:
-            raise ValueError("Unsupported audio transport. Use one of: off, aac, config.")
+        if requested_transport in {"pcm", "aac"}:
+            requested_transport = "muxed"
+        if requested_transport not in {"off", "muxed"}:
+            raise ValueError("Unsupported audio transport. Use one of: off, muxed, config.")
         return requested_transport
 
     def build_audio_branch(self, config, audio_transport):
@@ -219,6 +218,9 @@ class VideoReceiver:
         if self.preview_pattern:
             os.makedirs(os.path.dirname(os.path.abspath(self.preview_pattern)), exist_ok=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
+
+        if self.clock is not None:
+            self.pipeline.use_clock(self.clock)
         
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
@@ -317,7 +319,7 @@ def main():
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
     parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
-    parser.add_argument("--audio-transport", choices=["config", "off", "aac"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'aac' for the muxed AV stream.")
+    parser.add_argument("--audio-transport", choices=["config", "off", "muxed"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'muxed' for audio from the live AV stream.")
     args = parser.parse_args()
 
     manager = ReceiverManager(

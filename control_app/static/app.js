@@ -177,8 +177,22 @@ function describeSenderVideoChoice(launch) {
 }
 
 function describeReceiverAudioChoice(launch) {
-  const transport = (launch?.receiver_audio_transport || "config").toUpperCase();
-  return transport === "CONFIG" ? "audio from config" : `audio ${transport}`;
+  const transport = normalizeReceiverAudioTransport(launch?.receiver_audio_transport).toUpperCase();
+  if (transport === "CONFIG") {
+    return "audio from config";
+  }
+  if (transport === "MUXED") {
+    return "muxed live audio";
+  }
+  return `audio ${transport}`;
+}
+
+function normalizeReceiverAudioTransport(value) {
+  const normalized = String(value || "config").trim().toLowerCase();
+  if (normalized === "aac" || normalized === "pcm") {
+    return "muxed";
+  }
+  return normalized || "config";
 }
 
 function describeLaunch(launch) {
@@ -355,7 +369,7 @@ function syncFormFromRuntime(runtime) {
   }
 
   if (launch.role === "receiver") {
-    receiverAudioSelect.value = launch.receiver_audio_transport || "config";
+    receiverAudioSelect.value = normalizeReceiverAudioTransport(launch.receiver_audio_transport);
   }
   applyRoleFormState();
 }
