@@ -257,6 +257,9 @@ class LiveMp4Recorder:
             if media_type in {"audio/x-lpcm", "audio/x-private-ts-lpcm"}:
                 self._attach_lpcm_audio_branch(pad)
                 return
+            if media_type == "audio/x-smpte-302m":
+                self._attach_s302m_audio_branch(pad)
+                return
             if media_type == "audio/mpeg":
                 self._attach_aac_audio_branch(pad)
         except Exception as exc:  # pragma: no cover - runtime only
@@ -383,6 +386,57 @@ class LiveMp4Recorder:
         mux_pad = _request_mux_pad(mux, "audio")
         if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
             raise RuntimeError(f"Could not link LPCM audio branch to MP4 mux for {self._feed}.")
+
+        _sync_elements_with_parent(elements)
+
+    def _attach_s302m_audio_branch(self, pad: Gst.Pad) -> None:
+        with self._lock:
+            if self._audio_branch_linked or self._pipeline is None or self._mux is None:
+                return
+            pipeline = self._pipeline
+            mux = self._mux
+            self._audio_branch_linked = True
+
+        if Gst.ElementFactory.find("avdec_s302m") is None:
+            raise RuntimeError(
+                "avdec_s302m is required for MP4 recording from SMPTE 302M transport audio, but it is not available."
+            )
+
+        input_queue = _make_element("queue", f"{self._feed}_record_audio_input_queue")
+        decoder = _make_element("avdec_s302m", f"{self._feed}_record_audio_avdec_s302m")
+        convert = _make_element("audioconvert", f"{self._feed}_record_audio_convert")
+        resample = _make_element("audioresample", f"{self._feed}_record_audio_resample")
+        capsfilter = _make_element("capsfilter", f"{self._feed}_record_audio_caps")
+        capsfilter.set_property(
+            "caps",
+            Gst.Caps.from_string(
+                "audio/x-raw,"
+                f"format=S16LE,layout=interleaved,channels={self._audio_channels},rate={self._audio_rate}"
+            ),
+        )
+        encoder = _make_aac_encoder(self._feed, self._audio_bitrate)
+        parser = _make_element("aacparse", f"{self._feed}_record_aacparse")
+        output_queue = _make_element("queue", f"{self._feed}_record_audio_output_queue")
+        elements = [input_queue, decoder, convert, resample, capsfilter, encoder, parser, output_queue]
+
+        _add_and_link_elements(pipeline, elements)
+
+        sink_pad = input_queue.get_static_pad("sink")
+        if sink_pad is None or pad.link(sink_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Could not link SMPTE 302M demux pad for {self._feed} recording.")
+
+        gate_pad = capsfilter.get_static_pad("src")
+        if gate_pad is None:
+            raise RuntimeError(f"Could not access raw audio gate pad for {self._feed}.")
+        gate_pad.add_probe(Gst.PadProbeType.BUFFER, self._audio_gate_probe)
+
+        src_pad = output_queue.get_static_pad("src")
+        if src_pad is None:
+            raise RuntimeError(f"Could not access audio recorder src pad for {self._feed}.")
+
+        mux_pad = _request_mux_pad(mux, "audio")
+        if src_pad.link(mux_pad) != Gst.PadLinkReturn.OK:
+            raise RuntimeError(f"Could not link SMPTE 302M audio branch to MP4 mux for {self._feed}.")
 
         _sync_elements_with_parent(elements)
 

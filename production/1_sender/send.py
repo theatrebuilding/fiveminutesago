@@ -140,10 +140,14 @@ class SenderRuntime:
         channels = int(audio_opts.get("channels", 2))
         playback_device = audio_opts.get("playback_device", "default")
         playback_enabled = self.sender_audio_mode == "aec"
-        transport_format, lpcm_width, lpcm_rate = validate_mpegts_lpcm_config(audio_format, audio_rate)
-
-        if Gst.ElementFactory.find("avenc_pcm_dvd") is None:
-            print("ERROR: avenc_pcm_dvd is required to encode live DVD-LPCM for MPEG-TS.")
+        try:
+            transport_branch, transport_label = self.build_transport_audio_branch(
+                audio_format=audio_format,
+                audio_rate=audio_rate,
+                channels=channels,
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}")
             sys.exit(1)
 
         if playback_enabled:
@@ -190,6 +194,7 @@ class SenderRuntime:
             )
 
         print(f"[Sender] Using audio source: {source_label}", flush=True)
+        print(f"[Sender] Live muxed audio transport: {transport_label}", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
         elif playback_enabled:
@@ -209,12 +214,41 @@ class SenderRuntime:
             audio_capture_tee. ! queue
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={lpcm_rate}
+                {transport_branch}
+        """
+
+    def build_transport_audio_branch(self, audio_format, audio_rate, channels):
+        if Gst.ElementFactory.find("avenc_pcm_dvd") is not None:
+            transport_format, lpcm_width, lpcm_rate = validate_mpegts_lpcm_config(audio_format, audio_rate)
+            return (
+                f"""! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={lpcm_rate}
                 ! avenc_pcm_dvd
                 ! audio/x-lpcm,width=(int){lpcm_width},rate=(int){lpcm_rate},channels=(int){channels},dynamic_range=(int)0,emphasis=(boolean)false,mute=(boolean)false
                 ! queue
-                ! av_mux.
-        """
+                ! av_mux.""",
+                f"LPCM ({transport_format} at {lpcm_rate} Hz)",
+            )
+
+        if Gst.ElementFactory.find("avenc_s302m") is not None:
+            if audio_rate != 48000:
+                raise ValueError(
+                    "audio.rate must be 48000 when falling back to SMPTE 302M transport because no LPCM encoder is available."
+                )
+            if channels not in {1, 2}:
+                raise ValueError(
+                    "audio.channels must be 1 or 2 when falling back to SMPTE 302M transport because no LPCM encoder is available."
+                )
+            return (
+                f"""! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate=48000
+                ! avenc_s302m
+                ! queue
+                ! av_mux.""",
+                "SMPTE 302M (fallback because no LPCM encoder is available)",
+            )
+
+        raise ValueError(
+            "No TS-compatible uncompressed audio encoder is available. Install avenc_pcm_dvd for LPCM or avenc_s302m for SMPTE 302M."
+        )
 
     def parse_audio_rate(self, value):
         try:
