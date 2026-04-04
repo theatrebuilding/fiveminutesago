@@ -1,15 +1,23 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 
 class DisplayOutputService:
-    def __init__(self, sys_class_drm_root: Path = Path("/sys/class/drm")) -> None:
+    def __init__(
+        self,
+        sys_class_drm_root: Path = Path("/sys/class/drm"),
+        drm_device_root: Path = Path("/dev/dri"),
+    ) -> None:
         self._sys_class_drm_root = sys_class_drm_root
+        self._drm_device_root = drm_device_root
 
     def list_outputs(self) -> list[dict[str, Any]]:
         if not self._sys_class_drm_root.exists():
+            return []
+        if not self._has_accessible_drm_device():
             return []
 
         outputs: list[dict[str, Any]] = []
@@ -45,6 +53,12 @@ class DisplayOutputService:
 
         outputs.sort(key=self._sort_key)
         return outputs
+
+    def _has_accessible_drm_device(self) -> bool:
+        if not self._drm_device_root.exists():
+            return False
+        cards = sorted(self._drm_device_root.glob("card*"))
+        return any(path.is_char_device() and os.access(path, os.R_OK | os.W_OK) for path in cards)
 
     def _read_connector_id(self, path: Path) -> int | None:
         for candidate in (path / "connector_id", path / "connector-id"):

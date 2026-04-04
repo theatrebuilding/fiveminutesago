@@ -17,6 +17,22 @@ expose_optional_host_sound() {
   ln -s "$host_sound_dir" /dev/snd
 }
 
+expose_optional_host_drm() {
+  local host_drm_dir="/host-dev/dri"
+
+  [[ -e "$host_drm_dir" ]] || return 0
+
+  if [[ -L /dev/dri ]]; then
+    return 0
+  fi
+
+  if [[ -e /dev/dri && ! -L /dev/dri ]]; then
+    return 0
+  fi
+
+  ln -s "$host_drm_dir" /dev/dri
+}
+
 render_serve_config() {
   local template_path="${TS_SERVE_TEMPLATE:-/config/control-app-funnel.template.json}"
   local output_path="${TS_SERVE_CONFIG:-}"
@@ -70,6 +86,7 @@ for _ in $(seq 1 15); do
 done
 
 expose_optional_host_sound
+expose_optional_host_drm
 render_serve_config &
 
 exec "$@"

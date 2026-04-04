@@ -32,6 +32,7 @@ services:
     device_cgroup_rules:
       - "c 81:* rmw"
       - "c 116:* rmw"
+      - "c 226:* rmw"
     cap_add:
       - NET_ADMIN
       - NET_RAW
