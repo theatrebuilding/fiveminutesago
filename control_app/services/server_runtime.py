@@ -120,8 +120,9 @@ class ServerRuntime:
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
+            packet_activity = self._packet_monitor.snapshot() if self._packet_monitor is not None else {}
             previews = {
-                feed: describe_latest_preview(self._preview_dir, feed_state.preview_pattern)
+                feed: self._preview_snapshot(feed, feed_state.preview_pattern, packet_activity.get(feed))
                 for feed, feed_state in self._video_feeds.items()
             }
             return {
@@ -140,7 +141,7 @@ class ServerRuntime:
                         feed: str(paths.temp_path) for feed, paths in self._recording_files.items()
                     },
                 },
-                "packet_activity": self._packet_monitor.snapshot() if self._packet_monitor is not None else {},
+                "packet_activity": packet_activity,
                 "previews": previews,
             }
 
@@ -226,7 +227,7 @@ class ServerRuntime:
 
             self._audio_pipeline = self._build_audio_pipeline(config)
             self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-            self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio")
+            self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio", allow_pending=True)
 
             self._last_preview_log_at = {}
             self._last_continuity_warning_at = {}
@@ -316,7 +317,12 @@ class ServerRuntime:
             self._throttle_preview_h264,
             feed_state.feed,
         )
-        self._set_pipeline_state(pipeline, Gst.State.PLAYING, f"video-{feed_state.feed}")
+        self._set_pipeline_state(
+            pipeline,
+            Gst.State.PLAYING,
+            f"video-{feed_state.feed}",
+            allow_pending=True,
+        )
         if self._recording_active:
             record_paths = self._recording_files.get(feed_state.feed)
             if record_paths is not None:
@@ -352,7 +358,7 @@ class ServerRuntime:
 
         self._audio_pipeline = self._build_audio_pipeline(config)
         self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio")
+        self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio", allow_pending=True)
         return False
 
     def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message) -> bool:
@@ -548,6 +554,7 @@ class ServerRuntime:
         label: str,
         timeout_seconds: float = 5.0,
         suppress_errors: bool = False,
+        allow_pending: bool = False,
     ) -> None:
         state_change = pipeline.set_state(target_state)
         if state_change == Gst.StateChangeReturn.FAILURE:
@@ -565,6 +572,13 @@ class ServerRuntime:
                 self._log(message)
                 return
             raise RuntimeError(message)
+        if allow_pending and target_state == Gst.State.PLAYING:
+            if result in {Gst.StateChangeReturn.ASYNC, Gst.StateChangeReturn.NO_PREROLL}:
+                self._log(f"[{label}] Pipeline armed and waiting for incoming stream data.")
+                return
+            if pending_state == target_state:
+                self._log(f"[{label}] Pipeline armed and waiting to complete PLAYING on first packets.")
+                return
         if result == Gst.StateChangeReturn.ASYNC:
             message = (
                 f"[{label}] Timed out while waiting for pipeline state {_state_label(target_state)}; "
@@ -583,6 +597,22 @@ class ServerRuntime:
                 self._log(message)
                 return
             raise RuntimeError(message)
+
+    def _preview_snapshot(
+        self,
+        feed: str,
+        pattern: str,
+        packet_state: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if packet_state is not None and not bool(packet_state.get("receiving")):
+            return {
+                "available": False,
+                "path": None,
+                "updated_at": None,
+                "updated_at_ts": None,
+                "age_seconds": None,
+            }
+        return describe_latest_preview(self._preview_dir, pattern)
 
     def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
         ports = config.get("ports", {})
