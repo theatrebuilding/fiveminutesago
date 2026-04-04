@@ -25,16 +25,32 @@ KMS_VIDEO_SINK = "kmssink"
 HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
 DEFAULT_AUDIO_TRANSPORT = "config"
 
+
+def gst_escape(value):
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
 class VideoReceiver:
-    def __init__(self, country, preview_pattern=None, video_sink=DEFAULT_VIDEO_SINK, audio_transport=DEFAULT_AUDIO_TRANSPORT):
+    def __init__(
+        self,
+        country,
+        preview_pattern=None,
+        video_sink=DEFAULT_VIDEO_SINK,
+        audio_transport=DEFAULT_AUDIO_TRANSPORT,
+        playback_device=None,
+        video_output=None,
+    ):
         self.country = country
         self.preview_pattern = preview_pattern
         self.video_sink = video_sink
         self.audio_transport = audio_transport
+        self.playback_device = playback_device
+        self.video_output = video_output
         self.pipeline = None
         self.loop = None
         self.server_address = None
         self.receive_port = None
+        self.audio_receive_port = None
         # True if fallback is active; false if primary is active.
         self.fallback_active = False
         # Last time (seconds) a buffer was seen on the primary monitor branch.
@@ -51,8 +67,10 @@ class VideoReceiver:
         self.server_address = config.get("server_ip", "127.0.0.1")
         if self.country.lower() == "tn":
             self.receive_port = config.get("ports", {}).get("video_receive_tn")
+            self.audio_receive_port = config.get("ports", {}).get("audio_receive_tn")
         else:
             self.receive_port = config.get("ports", {}).get("video_receive_dk")
+            self.audio_receive_port = config.get("ports", {}).get("audio_receive_dk")
 
         sink_name, sink_pipeline, sink_reason = self.resolve_video_sink()
         print(f"VideoReceiver: Using video sink '{sink_name}' ({sink_reason}).")
@@ -99,6 +117,16 @@ class VideoReceiver:
 
     def resolve_video_sink(self):
         requested_sink = (self.video_sink or DEFAULT_VIDEO_SINK).strip().lower()
+        if self.video_output:
+            if requested_sink in {"fake", "fakesink", "headless"}:
+                raise ValueError("Cannot select a receiver HDMI output while using the fake video sink.")
+            self.require_kms_sink()
+            connector_id = self.parse_connector_id(self.video_output)
+            return (
+                "kmssink",
+                f"kmssink connector-id={connector_id}",
+                f"using explicit DRM connector id {connector_id}",
+            )
         if requested_sink in {"", DEFAULT_VIDEO_SINK}:
             return self.auto_select_video_sink()
         if requested_sink == "kms":
@@ -133,34 +161,61 @@ class VideoReceiver:
         if not any(os.access(path, os.R_OK | os.W_OK) for path in drm_cards):
             raise RuntimeError("DRM devices are present but not readable and writable. Use --video-sink fake to run the receiver headless.")
 
+    def parse_connector_id(self, value):
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Receiver video output must be a numeric DRM connector id.") from exc
+
     def resolve_audio_transport(self, config):
         requested_transport = (self.audio_transport or DEFAULT_AUDIO_TRANSPORT).strip().lower()
         if requested_transport == "config":
             requested_transport = str(config.get("receiver_audio", {}).get("transport", "off")).strip().lower()
-        if requested_transport in {"pcm", "muxed"}:
+        if requested_transport in {"pcm", "uncompressed"}:
+            requested_transport = "l16"
+        if requested_transport == "muxed":
             requested_transport = "aac"
-        if requested_transport not in {"off", "aac"}:
-            raise ValueError("Unsupported audio transport. Use one of: off, aac, config.")
+        if requested_transport not in {"off", "aac", "l16"}:
+            raise ValueError("Unsupported audio transport. Use one of: off, aac, l16, config.")
         return requested_transport
 
     def build_audio_branch(self, config, audio_transport):
         if audio_transport == "off":
             return ""
 
-        playback_device = config.get("receiver_audio", {}).get("playback_device", "default")
+        playback_device = self.playback_device or config.get("receiver_audio", {}).get("playback_device", "default")
         audio_cfg = config.get("audio", {})
-        audio_rate = audio_cfg.get("rate", 32000)
-        channels = audio_cfg.get("channels", 2)
-        escaped_device = playback_device.replace("\\", "\\\\").replace('"', '\\"')
+        audio_rate = int(audio_cfg.get("rate", 32000))
+        channels = int(audio_cfg.get("channels", 2))
+        encoding_name = str(audio_cfg.get("encoding_name", "L16")).strip() or "L16"
+        escaped_device = gst_escape(playback_device)
+
+        print(f"VideoReceiver: Using playback device '{playback_device}'.")
+
+        if audio_transport == "aac":
+            return f"""
+                demux. ! queue !
+                    decodebin !
+                    audioconvert !
+                    audioresample !
+                    audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
+                    queue !
+                    alsasink device="{escaped_device}" async=true
+            """.strip()
+
+        if not self.audio_receive_port:
+            raise RuntimeError("Receiver uncompressed audio transport requires an audio_receive_* port in the config.")
 
         return f"""
-            demux. ! queue !
-                decodebin !
-                ! audioconvert
-                ! audioresample
-                ! audio/x-raw,channels={channels},rate={audio_rate}
-                ! queue
-                ! alsasink device="{escaped_device}" async=true
+            srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller" wait-for-connection=false !
+                queue max-size-time=2000000000 max-size-buffers=500 !
+                application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+                rtpL16depay !
+                audioconvert !
+                audioresample !
+                audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
+                queue !
+                alsasink device="{escaped_device}" async=true
         """.strip()
 
     def primary_buffer_probe(self, pad, info):
@@ -265,11 +320,21 @@ class VideoReceiver:
             self.loop.quit()
 
 class ReceiverManager:
-    def __init__(self, country, preview_pattern=None, video_sink=DEFAULT_VIDEO_SINK, audio_transport=DEFAULT_AUDIO_TRANSPORT):
+    def __init__(
+        self,
+        country,
+        preview_pattern=None,
+        video_sink=DEFAULT_VIDEO_SINK,
+        audio_transport=DEFAULT_AUDIO_TRANSPORT,
+        playback_device=None,
+        video_output=None,
+    ):
         self.country = country
         self.preview_pattern = preview_pattern
         self.video_sink = video_sink
         self.audio_transport = audio_transport
+        self.playback_device = playback_device
+        self.video_output = video_output
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -283,6 +348,8 @@ class ReceiverManager:
                 preview_pattern=self.preview_pattern,
                 video_sink=self.video_sink,
                 audio_transport=self.audio_transport,
+                playback_device=self.playback_device,
+                video_output=self.video_output,
             )
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
@@ -319,7 +386,9 @@ def main():
     parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
     parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
-    parser.add_argument("--audio-transport", choices=["config", "off", "aac"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'aac' for audio from the live MPEG-TS stream.")
+    parser.add_argument("--video-output", help="Optional DRM connector id override for kmssink, for example 32.")
+    parser.add_argument("--playback-device", help="Optional ALSA playback device override, for example hw:0,0.")
+    parser.add_argument("--audio-transport", choices=["config", "off", "aac", "l16"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'l16' for the separate uncompressed return audio or 'aac' for audio from the live MPEG-TS stream.")
     args = parser.parse_args()
 
     manager = ReceiverManager(
@@ -327,6 +396,8 @@ def main():
         preview_pattern=args.preview_pattern,
         video_sink=args.video_sink,
         audio_transport=args.audio_transport,
+        playback_device=args.playback_device,
+        video_output=args.video_output,
     )
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))

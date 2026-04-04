@@ -43,6 +43,13 @@ const senderPlaybackDeviceSelect = document.getElementById("sender-playback-devi
 const senderPlaybackDeviceMessage = document.getElementById("sender-playback-device-message");
 const receiverAudioField = document.getElementById("receiver-audio-field");
 const receiverAudioSelect = document.getElementById("receiver-audio-select");
+const receiverAudioMessage = document.getElementById("receiver-audio-message");
+const receiverPlaybackDeviceField = document.getElementById("receiver-playback-device-field");
+const receiverPlaybackDeviceSelect = document.getElementById("receiver-playback-device-select");
+const receiverPlaybackDeviceMessage = document.getElementById("receiver-playback-device-message");
+const receiverVideoOutputField = document.getElementById("receiver-video-output-field");
+const receiverVideoOutputSelect = document.getElementById("receiver-video-output-select");
+const receiverVideoOutputMessage = document.getElementById("receiver-video-output-message");
 const startRoleButton = document.getElementById("start-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
@@ -71,6 +78,7 @@ let latestStatus = null;
 let videoDevices = [];
 let audioDevices = [];
 let playbackDevices = [];
+let displayOutputs = [];
 let launchFormDirty = false;
 let selectedArchiveName = null;
 let selectedArchiveRevision = null;
@@ -80,6 +88,8 @@ const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
 const AUDIO_DEFAULT_DEVICE_VALUE = "__audio_default__";
 const AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE = "__audio_playback_default__";
+const RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE = "__receiver_audio_playback_default__";
+const RECEIVER_VIDEO_OUTPUT_AUTO_VALUE = "__receiver_video_output_auto__";
 const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
 const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
 
@@ -198,6 +208,9 @@ function describeReceiverAudioChoice(launch) {
   if (transport === "CONFIG") {
     return "audio from config";
   }
+  if (transport === "L16") {
+    return "uncompressed audio";
+  }
   if (transport === "AAC") {
     return "AAC from muxed stream";
   }
@@ -206,10 +219,20 @@ function describeReceiverAudioChoice(launch) {
 
 function normalizeReceiverAudioTransport(value) {
   const normalized = String(value || "config").trim().toLowerCase();
-  if (normalized === "muxed" || normalized === "pcm") {
+  if (normalized === "muxed") {
     return "aac";
   }
+  if (normalized === "pcm" || normalized === "uncompressed") {
+    return "l16";
+  }
   return normalized || "config";
+}
+
+function describeReceiverVideoChoice(launch) {
+  if (launch?.receiver_video_output) {
+    return `display ${launch.receiver_video_output}`;
+  }
+  return "auto display";
 }
 
 function describeLaunch(launch) {
@@ -228,7 +251,7 @@ function describeLaunch(launch) {
     return `Sender ${site} • ${videoLabel} • ${audioLabel}`;
   }
 
-  return `Receiver ${site} • ${describeReceiverAudioChoice(launch)}`;
+  return `Receiver ${site} • ${describeReceiverVideoChoice(launch)} • ${describeReceiverAudioChoice(launch)}`;
 }
 
 function formatCountryLabel(country) {
@@ -349,6 +372,8 @@ function applyRoleFormState() {
   senderAudioModeField.classList.toggle("hidden", !sender);
   senderPlaybackDeviceField.classList.toggle("hidden", !shouldShowSenderPlaybackField());
   receiverAudioField.classList.toggle("hidden", !receiver);
+  receiverPlaybackDeviceField.classList.toggle("hidden", !receiver);
+  receiverVideoOutputField.classList.toggle("hidden", !receiver);
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
 }
@@ -398,6 +423,13 @@ function syncFormFromRuntime(runtime) {
 
   if (launch.role === "receiver") {
     receiverAudioSelect.value = normalizeReceiverAudioTransport(launch.receiver_audio_transport);
+    ensureReceiverPlaybackDeviceOption(launch.receiver_playback_device);
+    receiverPlaybackDeviceSelect.value = launch.receiver_playback_device || RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+    ensureReceiverVideoOutputOption(
+      launch.receiver_video_output,
+      launch.receiver_video_output ? `Unavailable display output (${launch.receiver_video_output})` : null,
+    );
+    receiverVideoOutputSelect.value = launch.receiver_video_output || RECEIVER_VIDEO_OUTPUT_AUTO_VALUE;
   }
   applyRoleFormState();
 }
@@ -448,6 +480,38 @@ function ensurePlaybackDeviceOption(path) {
   option.value = path;
   option.textContent = path;
   senderPlaybackDeviceSelect.appendChild(option);
+}
+
+function ensureReceiverPlaybackDeviceOption(path) {
+  if (!path) {
+    return;
+  }
+
+  const existing = Array.from(receiverPlaybackDeviceSelect.options).find((option) => option.value === path);
+  if (existing) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = path;
+  option.textContent = path;
+  receiverPlaybackDeviceSelect.appendChild(option);
+}
+
+function ensureReceiverVideoOutputOption(value, label = null) {
+  if (!value) {
+    return;
+  }
+
+  const existing = Array.from(receiverVideoOutputSelect.options).find((option) => option.value === value);
+  if (existing) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = label || `Unavailable display output (${value})`;
+  receiverVideoOutputSelect.appendChild(option);
 }
 
 function renderVideoDevices(devices) {
@@ -604,6 +668,88 @@ function renderPlaybackDevices(devices) {
   }
 
   senderPlaybackDeviceMessage.textContent = `${devices.length} playback output${devices.length === 1 ? "" : "s"} discovered inside the container. Choose a playback device or the config default output.`;
+}
+
+function renderReceiverPlaybackDevices(devices) {
+  const currentValue = receiverPlaybackDeviceSelect.value;
+  const runtimeLaunch = latestStatus?.runtime?.launch;
+  const runtimePlaybackDevice = runtimeLaunch?.role === "receiver" ? runtimeLaunch.receiver_playback_device : undefined;
+  receiverPlaybackDeviceSelect.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+  defaultOption.textContent = "Default output from config";
+  receiverPlaybackDeviceSelect.appendChild(defaultOption);
+
+  devices.forEach((device) => {
+    const option = document.createElement("option");
+    option.value = device.path;
+    option.textContent = `${device.label} (${device.path})`;
+    receiverPlaybackDeviceSelect.appendChild(option);
+  });
+  ensureReceiverPlaybackDeviceOption(runtimePlaybackDevice);
+  receiverPlaybackDeviceSelect.disabled = false;
+
+  let selected = RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+  if (
+    launchFormDirty &&
+    (currentValue === RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE ||
+      devices.some((device) => device.path === currentValue))
+  ) {
+    selected = currentValue;
+  } else if (runtimePlaybackDevice) {
+    selected = runtimePlaybackDevice;
+  }
+  receiverPlaybackDeviceSelect.value = selected;
+
+  if (!devices.length) {
+    receiverPlaybackDeviceMessage.textContent = "No playback devices are currently visible inside the container. Receiver can still use the config default output.";
+    return;
+  }
+
+  receiverPlaybackDeviceMessage.textContent = `${devices.length} playback output${devices.length === 1 ? "" : "s"} discovered inside the container. Choose a playback device or the config default output.`;
+}
+
+function renderDisplayOutputs(outputs) {
+  const currentValue = receiverVideoOutputSelect.value;
+  const runtimeLaunch = latestStatus?.runtime?.launch;
+  const runtimeVideoOutput = runtimeLaunch?.role === "receiver" ? runtimeLaunch.receiver_video_output : undefined;
+  receiverVideoOutputSelect.innerHTML = "";
+
+  const autoOption = document.createElement("option");
+  autoOption.value = RECEIVER_VIDEO_OUTPUT_AUTO_VALUE;
+  autoOption.textContent = "Automatic output";
+  receiverVideoOutputSelect.appendChild(autoOption);
+
+  outputs.forEach((output) => {
+    const option = document.createElement("option");
+    option.value = output.path;
+    option.textContent = output.label;
+    receiverVideoOutputSelect.appendChild(option);
+  });
+  ensureReceiverVideoOutputOption(runtimeVideoOutput);
+  receiverVideoOutputSelect.disabled = false;
+
+  let selected = RECEIVER_VIDEO_OUTPUT_AUTO_VALUE;
+  if (
+    launchFormDirty &&
+    (
+      currentValue === RECEIVER_VIDEO_OUTPUT_AUTO_VALUE ||
+      outputs.some((output) => output.path === currentValue)
+    )
+  ) {
+    selected = currentValue;
+  } else if (runtimeVideoOutput) {
+    selected = runtimeVideoOutput;
+  }
+  receiverVideoOutputSelect.value = selected;
+
+  if (!outputs.length) {
+    receiverVideoOutputMessage.textContent = "No DRM display outputs are currently visible inside the container. Receiver can still use automatic output selection.";
+    return;
+  }
+
+  receiverVideoOutputMessage.textContent = `${outputs.length} display output${outputs.length === 1 ? "" : "s"} discovered inside the container. Choose a connector or leave it on automatic selection.`;
 }
 
 function renderPreview(preview, imageUrl, image, meta, empty) {
@@ -835,10 +981,25 @@ async function loadPlaybackDevices() {
     const payload = await api("/api/devices/audio/playback", { method: "GET" });
     playbackDevices = payload.devices || [];
     renderPlaybackDevices(playbackDevices);
+    renderReceiverPlaybackDevices(playbackDevices);
   } catch (error) {
     playbackDevices = [];
     renderPlaybackDevices(playbackDevices);
+    renderReceiverPlaybackDevices(playbackDevices);
     senderPlaybackDeviceMessage.textContent = `${error.message} Sender can still use the config default output.`;
+    receiverPlaybackDeviceMessage.textContent = `${error.message} Receiver can still use the config default output.`;
+  }
+}
+
+async function loadDisplayOutputs() {
+  try {
+    const payload = await api("/api/devices/display", { method: "GET" });
+    displayOutputs = payload.devices || [];
+    renderDisplayOutputs(displayOutputs);
+  } catch (error) {
+    displayOutputs = [];
+    renderDisplayOutputs(displayOutputs);
+    receiverVideoOutputMessage.textContent = `${error.message} Receiver can still use automatic output selection.`;
   }
 }
 
@@ -889,6 +1050,14 @@ function buildLaunchPayload() {
 
   if (payload.role === "receiver") {
     payload.receiver_audio_transport = receiverAudioSelect.value;
+    payload.receiver_playback_device =
+      receiverPlaybackDeviceSelect.value && receiverPlaybackDeviceSelect.value !== RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
+        ? receiverPlaybackDeviceSelect.value
+        : null;
+    payload.receiver_video_output =
+      receiverVideoOutputSelect.value && receiverVideoOutputSelect.value !== RECEIVER_VIDEO_OUTPUT_AUTO_VALUE
+        ? receiverVideoOutputSelect.value
+        : null;
   }
 
   return payload;
@@ -1045,6 +1214,10 @@ roleSelect.addEventListener("change", async () => {
   applyRoleFormState();
   if (roleSelect.value === "sender") {
     await Promise.all([loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices()]);
+    return;
+  }
+  if (roleSelect.value === "receiver") {
+    await Promise.all([loadPlaybackDevices(), loadDisplayOutputs()]);
   }
 });
 countrySelect.addEventListener("change", markLaunchFormDirty);
@@ -1059,6 +1232,8 @@ senderAudioModeSelect.addEventListener("change", () => {
 });
 senderPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
 receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
+receiverPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
+receiverVideoOutputSelect.addEventListener("change", markLaunchFormDirty);
 startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
@@ -1076,7 +1251,7 @@ window.addEventListener("keydown", (event) => {
 
 async function boot() {
   applyRoleFormState();
-  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices()]);
+  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices(), loadDisplayOutputs()]);
   refreshTimer = window.setInterval(refreshStatus, 3000);
 }
 

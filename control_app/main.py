@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from .services.config_service import ConfigService, ConfigValidationError
 from .services.audio_device_service import AudioDeviceService
 from .services.dashboard_service import DashboardService
+from .services.display_output_service import DisplayOutputService
 from .services.runtime_service import RuntimeLaunchRequest, RuntimeService
 from .services.storage_service import StorageService
 from .services.video_device_service import VideoDeviceService
@@ -29,6 +30,7 @@ class AppServices:
     storage_service: StorageService
     audio_device_service: AudioDeviceService
     video_device_service: VideoDeviceService
+    display_output_service: DisplayOutputService
 
 
 settings = build_settings()
@@ -58,6 +60,7 @@ async def lifespan(app: FastAPI):
     )
     audio_device_service = AudioDeviceService()
     video_device_service = VideoDeviceService(settings.paths.host_device_root)
+    display_output_service = DisplayOutputService()
 
     app.state.services = AppServices(
         settings=settings,
@@ -67,6 +70,7 @@ async def lifespan(app: FastAPI):
         storage_service=storage_service,
         audio_device_service=audio_device_service,
         video_device_service=video_device_service,
+        display_output_service=display_output_service,
     )
 
     yield
@@ -150,6 +154,14 @@ async def get_audio_playback_devices(request: Request) -> dict[str, Any]:
     services = _services(request)
     return {
         "devices": services.audio_device_service.list_playback_devices(),
+    }
+
+
+@app.get("/api/devices/display")
+async def get_display_outputs(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    return {
+        "devices": services.display_output_service.list_outputs(),
     }
 
 

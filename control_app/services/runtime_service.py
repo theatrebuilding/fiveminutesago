@@ -25,7 +25,7 @@ VALID_COUNTRIES = {"tn", "dk"}
 VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
 VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
 VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
-VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac"}
+VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac", "l16"}
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,8 @@ class RuntimeLaunchRequest:
     video_source: str = "test"
     video_device: str | None = None
     receiver_audio_transport: str = "config"
+    receiver_playback_device: str | None = None
+    receiver_video_output: str | None = None
 
     @property
     def audio_enabled(self) -> bool:
@@ -56,6 +58,8 @@ class RuntimeLaunchRequest:
             "video_source": self.video_source,
             "video_device": self.video_device,
             "receiver_audio_transport": self.receiver_audio_transport,
+            "receiver_playback_device": self.receiver_playback_device,
+            "receiver_video_output": self.receiver_video_output,
         }
 
     @classmethod
@@ -107,10 +111,24 @@ class RuntimeLaunchRequest:
             if receiver_audio_transport_raw is not None
             else "config"
         )
-        if receiver_audio_transport in {"pcm", "muxed"}:
+        if receiver_audio_transport in {"pcm", "uncompressed"}:
+            receiver_audio_transport = "l16"
+        if receiver_audio_transport == "muxed":
             receiver_audio_transport = "aac"
         if receiver_audio_transport not in VALID_RECEIVER_AUDIO_TRANSPORTS:
-            raise ValueError("Receiver audio transport must be one of: config, off, aac.")
+            raise ValueError("Receiver audio transport must be one of: config, off, aac, l16.")
+        receiver_playback_device_raw = payload.get("receiver_playback_device")
+        receiver_playback_device = (
+            str(receiver_playback_device_raw).strip() or None
+            if receiver_playback_device_raw is not None
+            else None
+        )
+        receiver_video_output_raw = payload.get("receiver_video_output")
+        receiver_video_output = (
+            str(receiver_video_output_raw).strip() or None
+            if receiver_video_output_raw is not None
+            else None
+        )
 
         if role != "sender":
             audio_source = "off"
@@ -131,6 +149,8 @@ class RuntimeLaunchRequest:
 
         if role != "receiver":
             receiver_audio_transport = "config"
+            receiver_playback_device = None
+            receiver_video_output = None
 
         return cls(
             role=role,
@@ -142,6 +162,8 @@ class RuntimeLaunchRequest:
             video_source=video_source,
             video_device=video_device,
             receiver_audio_transport=receiver_audio_transport,
+            receiver_playback_device=receiver_playback_device,
+            receiver_video_output=receiver_video_output,
         )
 
 
@@ -368,6 +390,10 @@ class RuntimeService:
                 "--preview-pattern",
                 preview_pattern,
             ]
+            if request.receiver_playback_device:
+                command.extend(["--playback-device", request.receiver_playback_device])
+            if request.receiver_video_output:
+                command.extend(["--video-output", request.receiver_video_output])
             working_dir = self._project_root / "production" / "3_receiver"
             return command, working_dir
 

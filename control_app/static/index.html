@@ -79,10 +79,27 @@
               <span class="field-label">Receiver Audio</span>
               <select id="receiver-audio-select">
                 <option value="config">Use config default</option>
+                <option value="l16">Uncompressed separate audio</option>
                 <option value="aac">AAC from muxed stream</option>
                 <option value="off">Off</option>
               </select>
-              <p id="receiver-audio-message" class="field-help">Choose whether receiver playback follows the AAC audio inside the live MPEG-TS stream or stays off.</p>
+              <p id="receiver-audio-message" class="field-help">Choose whether receiver playback follows the separate uncompressed audio return, the AAC audio inside the live MPEG-TS stream, or stays off.</p>
+            </label>
+
+            <label id="receiver-playback-device-field" class="field hidden">
+              <span class="field-label">Receiver Audio Output</span>
+              <select id="receiver-playback-device-select">
+                <option value="__receiver_audio_playback_default__">Default output from config</option>
+              </select>
+              <p id="receiver-playback-device-message" class="field-help">Choose the ALSA playback device for receiver audio output.</p>
+            </label>
+
+            <label id="receiver-video-output-field" class="field hidden">
+              <span class="field-label">Display Output</span>
+              <select id="receiver-video-output-select">
+                <option value="__receiver_video_output_auto__">Automatic output</option>
+              </select>
+              <p id="receiver-video-output-message" class="field-help">Choose the DRM / HDMI output for kmssink, or leave it on automatic selection.</p>
             </label>
           </div>
           <div class="button-row">
@@ -234,6 +251,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260404-3" defer></script>
+    <script src="/static/app.js?v=20260404-4" defer></script>
   </body>
 </html>
