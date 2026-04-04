@@ -23,7 +23,7 @@ class DashboardService:
         runtime = self._runtime_service.snapshot()
 
         try:
-            config = self.build_config_summary()
+            config = self.build_config_summary(runtime=runtime)
         except Exception as exc:
             config = {
                 "path": str(self._config_service.config_path),

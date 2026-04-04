@@ -14,6 +14,7 @@ const archivePanel = document.getElementById("archive-panel");
 const archiveSummary = document.getElementById("archive-summary");
 const archiveWarning = document.getElementById("archive-warning");
 const archiveFiles = document.getElementById("archive-files");
+const archiveRefreshButton = document.getElementById("archive-refresh-button");
 const archiveSelectedName = document.getElementById("archive-selected-name");
 const archiveSelectedMeta = document.getElementById("archive-selected-meta");
 const archiveOpenLink = document.getElementById("archive-open-link");
@@ -248,6 +249,13 @@ function archiveDownloadUrl(file) {
   return `/api/archive/files/${encodeURIComponent(file.name)}/download`;
 }
 
+function formatArchiveRefreshedAt(value) {
+  if (!value) {
+    return "not refreshed yet";
+  }
+  return new Date(value).toLocaleTimeString();
+}
+
 function clearArchiveSelection(message = "Select a file and open it in a new tab.") {
   selectedArchiveFile = null;
   archiveSelectedName.textContent = "No file selected";
@@ -284,9 +292,10 @@ function renderArchiveSelection(file) {
 
 function renderArchive(storage) {
   const archive = storage?.archive || {};
+  const refreshedAt = formatArchiveRefreshedAt(archive.refreshed_at);
   archiveSummary.textContent = archive.exists
-    ? `${archive.file_count} files in ${archive.path} • ${formatBytes(archive.total_size_bytes)} total`
-    : `Archive directory missing: ${archive.path}`;
+    ? `${archive.file_count} files in ${archive.path} • ${formatBytes(archive.total_size_bytes)} total • scanned ${refreshedAt}`
+    : `Archive directory missing: ${archive.path} • scanned ${refreshedAt}`;
   archiveWarning.textContent = storage?.warning || "";
   archiveWarning.classList.toggle("hidden", !storage?.warning);
 
@@ -770,6 +779,24 @@ async function refreshStatus() {
   }
 }
 
+async function refreshArchive() {
+  setBusy([archiveRefreshButton], true);
+  archiveActionMessage.textContent = "Refreshing archive…";
+
+  try {
+    const payload = await api("/api/archive/refresh", { method: "POST" });
+    if (latestStatus) {
+      latestStatus.storage = payload.storage;
+      renderArchive(payload.storage);
+    }
+    archiveActionMessage.textContent = payload.message;
+  } catch (error) {
+    archiveActionMessage.textContent = error.message;
+  } finally {
+    setBusy([archiveRefreshButton], false);
+  }
+}
+
 async function loadConfig() {
   try {
     const payload = await api("/api/config", { method: "GET" });
@@ -1038,6 +1065,7 @@ saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
 archiveRenameButton.addEventListener("click", renameSelectedArchive);
 archiveDeleteButton.addEventListener("click", deleteSelectedArchive);
+archiveRefreshButton.addEventListener("click", refreshArchive);
 
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {

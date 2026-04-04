@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import datetime as dt
 import os
 from pathlib import Path
+import threading
 from typing import Any
 
 
@@ -19,15 +21,25 @@ class StorageService:
         self._storage_root = storage_root
         self._archive_dir = archive_dir
         self._storage_reference_root = storage_reference_root
+        self._lock = threading.Lock()
+        self._archive_snapshot = self._describe_archive_dir()
 
     def snapshot(self) -> dict[str, Any]:
         root = self._describe_storage_root()
+        with self._lock:
+            archive = deepcopy(self._archive_snapshot)
         return {
             "storage_root": str(self._storage_root),
             "root": root,
             "warning": root.get("warning"),
-            "archive": self._describe_archive_dir(),
+            "archive": archive,
         }
+
+    def refresh_archive(self) -> dict[str, Any]:
+        archive = self._describe_archive_dir()
+        with self._lock:
+            self._archive_snapshot = archive
+        return self.snapshot()
 
     def _describe_storage_root(self) -> dict[str, Any]:
         exists = self._storage_root.exists()
@@ -76,6 +88,7 @@ class StorageService:
         return storage_dev != reference_dev
 
     def _describe_archive_dir(self) -> dict[str, Any]:
+        scanned_at = dt.datetime.now().timestamp()
         if not self._archive_dir.exists():
             return {
                 "path": str(self._archive_dir),
@@ -83,6 +96,8 @@ class StorageService:
                 "file_count": 0,
                 "total_size_bytes": 0,
                 "latest_files": [],
+                "refreshed_at": _to_iso(scanned_at),
+                "refreshed_at_ts": scanned_at,
             }
 
         files = [
@@ -98,6 +113,8 @@ class StorageService:
             "file_count": len(files),
             "total_size_bytes": sum(path.stat().st_size for path in files),
             "latest_files": [self._describe_file(path) for path in files],
+            "refreshed_at": _to_iso(scanned_at),
+            "refreshed_at_ts": scanned_at,
         }
 
     def get_archive_file(self, filename: str) -> Path | None:

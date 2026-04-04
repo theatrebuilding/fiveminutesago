@@ -324,6 +324,17 @@ async def archive_file_download(filename: str, request: Request) -> FileResponse
     )
 
 
+@app.post("/api/archive/refresh")
+async def refresh_archive(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    storage = services.storage_service.refresh_archive()
+    services.runtime_service.record_event("Archive snapshot refreshed from dashboard.")
+    return {
+        "message": "Archive refreshed.",
+        "storage": storage,
+    }
+
+
 @app.post("/api/archive/files/{filename}/rename")
 async def rename_archive_file(filename: str, request: Request) -> dict[str, Any]:
     services = _services(request)
@@ -345,7 +356,7 @@ async def rename_archive_file(filename: str, request: Request) -> dict[str, Any]
     return {
         "message": f"Renamed archive file to {file_info['name']}.",
         "file": file_info,
-        "storage": services.storage_service.snapshot(),
+        "storage": services.storage_service.refresh_archive(),
     }
 
 
@@ -361,7 +372,7 @@ async def delete_archive_file(filename: str, request: Request) -> dict[str, Any]
     services.runtime_service.record_event(f"Archive file deleted: {filename}.")
     return {
         "message": f"Deleted archive file {filename}.",
-        "storage": services.storage_service.snapshot(),
+        "storage": services.storage_service.refresh_archive(),
     }
 
 

@@ -20,6 +20,8 @@ from .udp_packet_monitor import UdpPacketMonitor
 
 Gst.init(None)
 
+PREVIEW_FRAME_INTERVAL_SECONDS = 5.0
+
 
 @dataclass
 class RecordingSession:
@@ -70,6 +72,7 @@ class ServerRuntime:
         self._running = False
         self._last_preview_log_at: dict[str, float] = {}
         self._last_continuity_warning_at: dict[str, float] = {}
+        self._next_preview_frame_at: dict[str, float] = {}
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -227,6 +230,7 @@ class ServerRuntime:
 
             self._last_preview_log_at = {}
             self._last_continuity_warning_at = {}
+            self._next_preview_frame_at = {}
 
             for feed in self._video_feeds.values():
                 self._start_video_feed(feed)
@@ -300,6 +304,18 @@ class ServerRuntime:
             f"video-{feed_state.feed}",
             lambda bus, message, feed=feed_state.feed: self._on_video_message(bus, message, feed),
         )
+        preview_parser = pipeline.get_by_name(f"{feed_state.feed}_preview_h264parse")
+        if preview_parser is None:
+            raise RuntimeError(f"Could not access preview parser for {feed_state.feed}.")
+        preview_pad = preview_parser.get_static_pad("src")
+        if preview_pad is None:
+            raise RuntimeError(f"Could not access preview parser src pad for {feed_state.feed}.")
+        self._next_preview_frame_at[feed_state.feed] = 0.0
+        preview_pad.add_probe(
+            Gst.PadProbeType.BUFFER,
+            self._throttle_preview_h264,
+            feed_state.feed,
+        )
         self._set_pipeline_state(pipeline, Gst.State.PLAYING, f"video-{feed_state.feed}")
         if self._recording_active:
             record_paths = self._recording_files.get(feed_state.feed)
@@ -320,6 +336,7 @@ class ServerRuntime:
             self._set_pipeline_state(feed_state.pipeline, Gst.State.NULL, f"video-{feed}", timeout_seconds=10)
             feed_state.pipeline = None
             feed_state.tee = None
+            self._next_preview_frame_at.pop(feed, None)
 
         self._start_video_feed(feed_state)
         return False
@@ -616,7 +633,7 @@ class ServerRuntime:
 
             {feed_state.feed}_stream_tee. ! queue max-size-buffers=120 max-size-bytes=0 max-size-time=0 !
             tsdemux name={feed_state.feed}_preview_demux
-            {feed_state.feed}_preview_demux. ! queue max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse config-interval=1 !
+            {feed_state.feed}_preview_demux. ! queue max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse name={feed_state.feed}_preview_h264parse config-interval=1 !
             avdec_h264 !
             queue leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 !
             videoconvert ! videoscale ! videorate drop-only=true !
@@ -637,6 +654,26 @@ class ServerRuntime:
             return False
         self._last_preview_log_at[feed] = now
         return True
+
+    def _throttle_preview_h264(
+        self,
+        pad: Gst.Pad,
+        info: Gst.PadProbeInfo,
+        feed: str,
+    ) -> Gst.PadProbeReturn:
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+        if buffer.has_flags(Gst.BufferFlags.DELTA_UNIT):
+            return Gst.PadProbeReturn.DROP
+
+        now = time.monotonic()
+        next_allowed_at = self._next_preview_frame_at.get(feed, 0.0)
+        if now < next_allowed_at:
+            return Gst.PadProbeReturn.DROP
+
+        self._next_preview_frame_at[feed] = now + PREVIEW_FRAME_INTERVAL_SECONDS
+        return Gst.PadProbeReturn.OK
 
     def _push_recording_buffer(
         self,
