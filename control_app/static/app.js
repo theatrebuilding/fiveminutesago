@@ -612,6 +612,42 @@ function renderPreview(preview, imageUrl, image, meta, empty) {
   meta.textContent = `Updated ${formatSeconds(preview.age_seconds)} ago`;
 }
 
+function describePacketActivity(activity) {
+  if (!activity) {
+    return "";
+  }
+  if (activity.receiving) {
+    return "UDP packets incoming";
+  }
+  if (activity.last_packet_age_seconds != null) {
+    return `UDP last seen ${formatSeconds(Math.round(activity.last_packet_age_seconds))} ago`;
+  }
+  if (activity.error) {
+    return "UDP monitor unavailable";
+  }
+  return "No UDP packets yet";
+}
+
+function renderServerPreview(preview, packetActivity, imageUrl, image, meta, empty) {
+  if (!preview || !preview.available) {
+    image.removeAttribute("src");
+    image.classList.add("hidden");
+    empty.classList.remove("hidden");
+    const packetText = describePacketActivity(packetActivity);
+    meta.textContent = packetText || "No snapshot yet.";
+    return;
+  }
+
+  image.src = `${imageUrl}?t=${Date.now()}`;
+  image.classList.remove("hidden");
+  empty.classList.add("hidden");
+
+  const packetText = describePacketActivity(packetActivity);
+  meta.textContent = packetText
+    ? `Updated ${formatSeconds(preview.age_seconds)} ago • ${packetText}`
+    : `Updated ${formatSeconds(preview.age_seconds)} ago`;
+}
+
 function renderSenderPreview(sender) {
   const country = sender?.country || latestStatus?.runtime?.launch?.country || null;
   const countryLabel = formatCountryLabel(country);
@@ -701,8 +737,22 @@ function renderStatus(status) {
   senderPanel.classList.toggle("hidden", !senderActive);
   receiverPanel.classList.toggle("hidden", !receiverActive);
   archivePanel.classList.toggle("hidden", !serverContext);
-  renderPreview(server?.previews?.tn, "/api/server/preview/tn.jpg", previewTnImage, previewTnMeta, previewTnEmpty);
-  renderPreview(server?.previews?.dk, "/api/server/preview/dk.jpg", previewDkImage, previewDkMeta, previewDkEmpty);
+  renderServerPreview(
+    server?.previews?.tn,
+    server?.packet_activity?.tn,
+    "/api/server/preview/tn.jpg",
+    previewTnImage,
+    previewTnMeta,
+    previewTnEmpty,
+  );
+  renderServerPreview(
+    server?.previews?.dk,
+    server?.packet_activity?.dk,
+    "/api/server/preview/dk.jpg",
+    previewDkImage,
+    previewDkMeta,
+    previewDkEmpty,
+  );
   renderSenderPreview(sender);
   renderReceiverPreview(receiver);
 

@@ -1,9 +1,9 @@
 services:
-  teateroen-server:
+  ldn-sender:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: teateroen-server
+    hostname: ldn-sender
     userns_mode: "host"
     dns:
       - 100.100.100.100
@@ -11,9 +11,10 @@ services:
     dns_search:
       - tail84ebbf.ts.net
     environment:
-      TS_AUTHKEY: ${TS_AUTHKEY}
+      TS_CLIENT_ID: ${TS_CLIENT_ID}
+      TS_CLIENT_SECRET: ${TS_CLIENT_SECRET}
       TS_AUTH_ONCE: "true"
-      TS_HOSTNAME: teateroen-server
+      TS_HOSTNAME: ldn-sender
       TS_EXTRA_ARGS: --advertise-tags=tag:container
       TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
       TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
@@ -22,12 +23,10 @@ services:
       TS_ENABLE_HEALTH_CHECK: "true"
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
-      TBDRIVE_ROOT: /mnt/tbdrive
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
       - /dev:/host-dev
-      - ${TBDRIVE_HOST_PATH:-/mnt/tbdrive}:/mnt/tbdrive
     devices:
       - /dev/net/tun:/dev/net/tun
     device_cgroup_rules:
@@ -35,4 +34,5 @@ services:
       - "c 116:* rmw"
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     restart: unless-stopped

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import datetime as dt
 import os
 from pathlib import Path
+import signal
 import subprocess
 import threading
 import time
@@ -205,6 +206,7 @@ class RuntimeService:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
             )
             with self._lock:
                 self._process = process
@@ -249,12 +251,18 @@ class RuntimeService:
 
         assert process is not None
         self.record_event(f"Stopping {self._current_request.role if self._current_request else 'process'} role...")
-        process.terminate()
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
         try:
             exit_code = process.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             self.record_event("Role process did not stop in time. Killing process.")
-            process.kill()
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             exit_code = process.wait(timeout=5)
 
         self._record_exit(process, exit_code)

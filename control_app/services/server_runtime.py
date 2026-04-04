@@ -15,6 +15,7 @@ from gi.repository import GLib, Gst
 
 from .live_mp4_recorder import LiveMp4Recorder, RecordingPaths
 from .preview_catalog import build_server_preview_pattern, describe_latest_preview, prune_preview_files
+from .udp_packet_monitor import UdpPacketMonitor
 
 
 Gst.init(None)
@@ -57,6 +58,7 @@ class ServerRuntime:
         self._main_loop: GLib.MainLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self._audio_pipeline: Gst.Pipeline | None = None
+        self._packet_monitor: UdpPacketMonitor | None = None
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
         self._recording_started_at: float | None = None
@@ -135,6 +137,7 @@ class ServerRuntime:
                         feed: str(paths.temp_path) for feed, paths in self._recording_files.items()
                     },
                 },
+                "packet_activity": self._packet_monitor.snapshot() if self._packet_monitor is not None else {},
                 "previews": previews,
             }
 
@@ -211,15 +214,48 @@ class ServerRuntime:
         for feed_state in self._video_feeds.values():
             prune_preview_files(self._preview_dir, feed_state.preview_pattern, keep=0)
 
-        self._audio_pipeline = self._build_audio_pipeline(config)
-        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._audio_pipeline.set_state(Gst.State.PLAYING)
+        try:
+            self._packet_monitor = UdpPacketMonitor(
+                {feed: feed_state.send_port for feed, feed_state in self._video_feeds.items()},
+                log_callback=self._log,
+            )
+            self._packet_monitor.start()
 
-        self._last_preview_log_at = {}
-        self._last_continuity_warning_at = {}
+            self._audio_pipeline = self._build_audio_pipeline(config)
+            self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
+            self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio")
 
-        for feed in self._video_feeds.values():
-            self._start_video_feed(feed)
+            self._last_preview_log_at = {}
+            self._last_continuity_warning_at = {}
+
+            for feed in self._video_feeds.values():
+                self._start_video_feed(feed)
+        except Exception:
+            for feed_state in self._video_feeds.values():
+                if feed_state.pipeline is not None:
+                    self._set_pipeline_state(
+                        feed_state.pipeline,
+                        Gst.State.NULL,
+                        f"video-{feed_state.feed}",
+                        timeout_seconds=5,
+                        suppress_errors=True,
+                    )
+                    feed_state.pipeline = None
+                    feed_state.tee = None
+                    feed_state.recording_session = None
+            if self._audio_pipeline is not None:
+                self._set_pipeline_state(
+                    self._audio_pipeline,
+                    Gst.State.NULL,
+                    "audio",
+                    timeout_seconds=5,
+                    suppress_errors=True,
+                )
+                self._audio_pipeline = None
+            if self._packet_monitor is not None:
+                self._packet_monitor.stop()
+                self._packet_monitor = None
+            raise
 
         with self._lock:
             self._running = True
@@ -240,14 +276,18 @@ class ServerRuntime:
         for feed_state in self._video_feeds.values():
             if feed_state.pipeline is not None:
                 self._detach_recording_probe(feed_state)
-                feed_state.pipeline.set_state(Gst.State.NULL)
+                self._set_pipeline_state(feed_state.pipeline, Gst.State.NULL, f"video-{feed_state.feed}", timeout_seconds=10)
                 feed_state.pipeline = None
                 feed_state.tee = None
                 feed_state.recording_session = None
 
         if self._audio_pipeline is not None:
-            self._audio_pipeline.set_state(Gst.State.NULL)
+            self._set_pipeline_state(self._audio_pipeline, Gst.State.NULL, "audio", timeout_seconds=10)
             self._audio_pipeline = None
+
+        if self._packet_monitor is not None:
+            self._packet_monitor.stop()
+            self._packet_monitor = None
 
         self._log("Server runtime stopped.")
 
@@ -260,7 +300,7 @@ class ServerRuntime:
             f"video-{feed_state.feed}",
             lambda bus, message, feed=feed_state.feed: self._on_video_message(bus, message, feed),
         )
-        pipeline.set_state(Gst.State.PLAYING)
+        self._set_pipeline_state(pipeline, Gst.State.PLAYING, f"video-{feed_state.feed}")
         if self._recording_active:
             record_paths = self._recording_files.get(feed_state.feed)
             if record_paths is not None:
@@ -277,7 +317,7 @@ class ServerRuntime:
 
         if feed_state.pipeline is not None:
             self._detach_recording_probe(feed_state)
-            feed_state.pipeline.set_state(Gst.State.NULL)
+            self._set_pipeline_state(feed_state.pipeline, Gst.State.NULL, f"video-{feed}", timeout_seconds=10)
             feed_state.pipeline = None
             feed_state.tee = None
 
@@ -291,11 +331,11 @@ class ServerRuntime:
         self._log("[audio] Restarting audio pipeline.")
 
         if self._audio_pipeline is not None:
-            self._audio_pipeline.set_state(Gst.State.NULL)
+            self._set_pipeline_state(self._audio_pipeline, Gst.State.NULL, "audio", timeout_seconds=10)
 
         self._audio_pipeline = self._build_audio_pipeline(config)
         self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._audio_pipeline.set_state(Gst.State.PLAYING)
+        self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio")
         return False
 
     def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message) -> bool:
@@ -484,6 +524,49 @@ class ServerRuntime:
         bus.connect("message", handler)
         self._log(f"[{label}] Pipeline configured.")
 
+    def _set_pipeline_state(
+        self,
+        pipeline: Gst.Pipeline,
+        target_state: Gst.State,
+        label: str,
+        timeout_seconds: float = 5.0,
+        suppress_errors: bool = False,
+    ) -> None:
+        state_change = pipeline.set_state(target_state)
+        if state_change == Gst.StateChangeReturn.FAILURE:
+            message = f"[{label}] Could not change pipeline state to {_state_label(target_state)}."
+            if suppress_errors:
+                self._log(message)
+                return
+            raise RuntimeError(message)
+
+        timeout_ns = int(timeout_seconds * Gst.SECOND)
+        result, current_state, pending_state = pipeline.get_state(timeout_ns)
+        if result == Gst.StateChangeReturn.FAILURE:
+            message = f"[{label}] Pipeline failed while changing state to {_state_label(target_state)}."
+            if suppress_errors:
+                self._log(message)
+                return
+            raise RuntimeError(message)
+        if result == Gst.StateChangeReturn.ASYNC:
+            message = (
+                f"[{label}] Timed out while waiting for pipeline state {_state_label(target_state)}; "
+                f"current={_state_label(current_state)}, pending={_state_label(pending_state)}."
+            )
+            if suppress_errors:
+                self._log(message)
+                return
+            raise RuntimeError(message)
+        if current_state != target_state:
+            message = (
+                f"[{label}] Pipeline reached unexpected state {_state_label(current_state)} "
+                f"while targeting {_state_label(target_state)}."
+            )
+            if suppress_errors:
+                self._log(message)
+                return
+            raise RuntimeError(message)
+
     def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
         ports = config.get("ports", {})
         audio = config.get("audio", {})
@@ -610,3 +693,10 @@ def _to_iso(timestamp: float | None) -> str | None:
     if timestamp is None:
         return None
     return dt.datetime.fromtimestamp(timestamp, tz=dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _state_label(state: Gst.State) -> str:
+    try:
+        return Gst.Element.state_get_name(state)
+    except Exception:
+        return str(state)

@@ -383,7 +383,7 @@ class SenderRuntime:
         bus.connect("message", self.on_message)
 
         print("[Sender] Setting state to PLAYING...")
-        self.pipeline.set_state(Gst.State.PLAYING)
+        self._set_pipeline_state(Gst.State.PLAYING, timeout_seconds=5.0)
 
         self.loop = GLib.MainLoop()
         try:
@@ -391,12 +391,62 @@ class SenderRuntime:
         except Exception as exc:
             print(f"[Sender] Exception -> {exc}")
         finally:
-            self.pipeline.set_state(Gst.State.NULL)
+            self._set_pipeline_state(Gst.State.NULL, timeout_seconds=10.0, suppress_errors=True)
             print("[Sender] Pipeline stopped.")
 
     def stop(self):
         if self.loop:
             self.loop.quit()
+
+    def _set_pipeline_state(
+        self,
+        target_state,
+        timeout_seconds=5.0,
+        suppress_errors=False,
+    ):
+        if self.pipeline is None:
+            return
+
+        state_change = self.pipeline.set_state(target_state)
+        if state_change == Gst.StateChangeReturn.FAILURE:
+            message = f"[Sender] Could not change pipeline state to {self._state_label(target_state)}."
+            if suppress_errors:
+                print(message, flush=True)
+                return
+            raise RuntimeError(message)
+
+        timeout_ns = int(timeout_seconds * Gst.SECOND)
+        result, current_state, pending_state = self.pipeline.get_state(timeout_ns)
+        if result == Gst.StateChangeReturn.FAILURE:
+            message = f"[Sender] Pipeline failed while changing state to {self._state_label(target_state)}."
+            if suppress_errors:
+                print(message, flush=True)
+                return
+            raise RuntimeError(message)
+        if result == Gst.StateChangeReturn.ASYNC:
+            message = (
+                f"[Sender] Timed out while waiting for pipeline state {self._state_label(target_state)}; "
+                f"current={self._state_label(current_state)}, pending={self._state_label(pending_state)}."
+            )
+            if suppress_errors:
+                print(message, flush=True)
+                return
+            raise RuntimeError(message)
+        if current_state != target_state:
+            message = (
+                f"[Sender] Pipeline reached unexpected state {self._state_label(current_state)} "
+                f"while targeting {self._state_label(target_state)}."
+            )
+            if suppress_errors:
+                print(message, flush=True)
+                return
+            raise RuntimeError(message)
+
+    def _state_label(self, state):
+        try:
+            return Gst.Element.state_get_name(state)
+        except Exception:
+            return str(state)
 
 
 def main():
