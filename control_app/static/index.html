@@ -67,6 +67,14 @@
               <p id="sender-audio-mode-message" class="field-help">Playback + DSP returns the remote audio to the sender Pi for local playback and echo cancellation. Capture only disables sender playback and bypasses WebRTC DSP.</p>
             </label>
 
+            <label id="sender-playback-device-field" class="field hidden">
+              <span class="field-label">Playback Output</span>
+              <select id="sender-playback-device-select">
+                <option value="__audio_playback_default__">Default output from config</option>
+              </select>
+              <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender Playback + DSP mode.</p>
+            </label>
+
             <label id="receiver-audio-field" class="field hidden">
               <span class="field-label">Receiver Audio</span>
               <select id="receiver-audio-select">
@@ -223,6 +231,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260403-1" defer></script>
+    <script src="/static/app.js?v=20260404-1" defer></script>
   </body>
 </html>

@@ -5,16 +5,25 @@ import subprocess
 from typing import Any
 
 
-CAPTURE_CARD_PATTERN = re.compile(
+ALSA_CARD_PATTERN = re.compile(
     r"^card\s+(?P<card>\d+):\s+(?P<card_id>[^\s]+)\s+\[(?P<card_name>.+?)\],\s+device\s+(?P<device>\d+):\s+(?P<device_name>.+?)\s+\[(?P<device_label>.+?)\]$"
 )
 
 
 class AudioDeviceService:
     def list_devices(self) -> list[dict[str, Any]]:
+        return self.list_capture_devices()
+
+    def list_capture_devices(self) -> list[dict[str, Any]]:
+        return self._list_alsa_devices(["arecord", "-l"])
+
+    def list_playback_devices(self) -> list[dict[str, Any]]:
+        return self._list_alsa_devices(["aplay", "-l"])
+
+    def _list_alsa_devices(self, command: list[str]) -> list[dict[str, Any]]:
         try:
             result = subprocess.run(
-                ["arecord", "-l"],
+                command,
                 capture_output=True,
                 text=True,
                 check=False,
@@ -28,7 +37,7 @@ class AudioDeviceService:
 
         devices: list[dict[str, Any]] = []
         for line in result.stdout.splitlines():
-            match = CAPTURE_CARD_PATTERN.match(line.strip())
+            match = ALSA_CARD_PATTERN.match(line.strip())
             if match is None:
                 continue
 

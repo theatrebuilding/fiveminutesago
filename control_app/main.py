@@ -141,7 +141,15 @@ async def get_video_devices(request: Request) -> dict[str, Any]:
 async def get_audio_devices(request: Request) -> dict[str, Any]:
     services = _services(request)
     return {
-        "devices": services.audio_device_service.list_devices(),
+        "devices": services.audio_device_service.list_capture_devices(),
+    }
+
+
+@app.get("/api/devices/audio/playback")
+async def get_audio_playback_devices(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    return {
+        "devices": services.audio_device_service.list_playback_devices(),
     }
 
 

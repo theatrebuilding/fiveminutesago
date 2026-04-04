@@ -34,6 +34,7 @@ class RuntimeLaunchRequest:
     audio_source: str = "off"
     sender_audio_mode: str = "aec"
     audio_device: str | None = None
+    sender_playback_device: str | None = None
     video_source: str = "test"
     video_device: str | None = None
     receiver_audio_transport: str = "config"
@@ -50,6 +51,7 @@ class RuntimeLaunchRequest:
             "audio_source": self.audio_source,
             "sender_audio_mode": self.sender_audio_mode,
             "audio_device": self.audio_device,
+            "sender_playback_device": self.sender_playback_device,
             "video_source": self.video_source,
             "video_device": self.video_device,
             "receiver_audio_transport": self.receiver_audio_transport,
@@ -84,6 +86,12 @@ class RuntimeLaunchRequest:
 
         audio_device_raw = payload.get("audio_device")
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
+        sender_playback_device_raw = payload.get("sender_playback_device")
+        sender_playback_device = (
+            str(sender_playback_device_raw).strip() or None
+            if sender_playback_device_raw is not None
+            else None
+        )
         video_device_raw = payload.get("video_device")
         video_device = str(video_device_raw).strip() or None if video_device_raw is not None else None
         video_source_raw = payload.get("video_source")
@@ -107,11 +115,14 @@ class RuntimeLaunchRequest:
             audio_source = "off"
             sender_audio_mode = "aec"
             audio_device = None
+            sender_playback_device = None
             video_source = "config"
             video_device = None
         else:
             if audio_source != "device":
                 audio_device = None
+            if sender_audio_mode != "aec" or audio_source == "off":
+                sender_playback_device = None
             if video_source != "device":
                 video_device = None
             elif video_device is None:
@@ -126,6 +137,7 @@ class RuntimeLaunchRequest:
             audio_source=audio_source,
             sender_audio_mode=sender_audio_mode,
             audio_device=audio_device,
+            sender_playback_device=sender_playback_device,
             video_source=video_source,
             video_device=video_device,
             receiver_audio_transport=receiver_audio_transport,
@@ -324,6 +336,8 @@ class RuntimeService:
                 command.append("--no-audio")
             if request.audio_source == "device" and request.audio_device:
                 command.extend(["--device", request.audio_device])
+            if request.sender_audio_mode == "aec" and request.sender_playback_device:
+                command.extend(["--playback-device", request.sender_playback_device])
             if request.video_source == "device" and request.video_device:
                 command.extend(["--video-device", request.video_device])
             else:

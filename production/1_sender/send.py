@@ -36,6 +36,7 @@ class SenderRuntime:
         preview_pattern=None,
         audio_enabled=False,
         audio_device=None,
+        playback_device=None,
         audio_source_mode="device",
         sender_audio_mode="aec",
     ):
@@ -45,6 +46,7 @@ class SenderRuntime:
         self.preview_pattern = preview_pattern
         self.audio_enabled = audio_enabled
         self.audio_device = audio_device
+        self.playback_device = playback_device
         self.audio_source_mode = audio_source_mode
         self.sender_audio_mode = sender_audio_mode
 
@@ -145,7 +147,7 @@ class SenderRuntime:
         audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = int(audio_opts.get("channels", 2))
         encoding_name = audio_opts.get("encoding_name", "L16")
-        playback_device = audio_opts.get("playback_device", "default")
+        playback_device = self.playback_device or audio_opts.get("playback_device", "default")
         playback_enabled = self.sender_audio_mode == "aec"
         normalized_transport_format = str(audio_format or "S16BE").strip().upper()
         if normalized_transport_format != "S16BE":
@@ -197,6 +199,8 @@ class SenderRuntime:
         print(f"[Sender] Using audio source: {source_label}", flush=True)
         print("[Sender] Live muxed audio transport: AAC in MPEG-TS.", flush=True)
         print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
+        if playback_enabled:
+            print(f"[Sender] Using playback device: {playback_device}", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
         elif playback_enabled:
@@ -405,6 +409,7 @@ def main():
     audio_group.add_argument("--no-audio", dest="with_audio", action="store_false", help="Run video only.")
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio capture device name (for example hw:1,0).")
+    parser.add_argument("--playback-device", help="ALSA audio playback device name (for example hw:0,0).")
     parser.add_argument("--audio-source", choices=["device", "test"], default="device", help="Audio source mode. Use 'test' for audiotestsrc instead of a capture device.")
     parser.add_argument("--sender-audio-mode", choices=["aec", "capture-only"], default="aec", help="Sender audio mode. Use 'capture-only' to disable remote playback and WebRTC DSP on the sender.")
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
@@ -439,6 +444,7 @@ def main():
         preview_pattern=args.preview_pattern,
         audio_enabled=run_audio,
         audio_device=audio_device,
+        playback_device=args.playback_device,
         audio_source_mode=audio_source_mode,
         sender_audio_mode=sender_audio_mode,
     )

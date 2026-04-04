@@ -37,6 +37,9 @@ const audioDeviceSelect = document.getElementById("audio-device-select");
 const audioDeviceMessage = document.getElementById("audio-device-message");
 const senderAudioModeField = document.getElementById("sender-audio-mode-field");
 const senderAudioModeSelect = document.getElementById("sender-audio-mode-select");
+const senderPlaybackDeviceField = document.getElementById("sender-playback-device-field");
+const senderPlaybackDeviceSelect = document.getElementById("sender-playback-device-select");
+const senderPlaybackDeviceMessage = document.getElementById("sender-playback-device-message");
 const receiverAudioField = document.getElementById("receiver-audio-field");
 const receiverAudioSelect = document.getElementById("receiver-audio-select");
 const startRoleButton = document.getElementById("start-role");
@@ -66,6 +69,7 @@ let refreshTimer = null;
 let latestStatus = null;
 let videoDevices = [];
 let audioDevices = [];
+let playbackDevices = [];
 let launchFormDirty = false;
 let selectedArchiveName = null;
 let selectedArchiveRevision = null;
@@ -74,6 +78,7 @@ let selectedArchiveFile = null;
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
 const AUDIO_DEFAULT_DEVICE_VALUE = "__audio_default__";
+const AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE = "__audio_playback_default__";
 const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
 const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
 
@@ -159,6 +164,17 @@ function describeSenderAudioChoice(launch) {
   }
 
   return `${sourceLabel} • playback+dsp`;
+}
+
+function shouldShowSenderPlaybackField() {
+  if (roleSelect.value !== "sender") {
+    return false;
+  }
+  if (senderAudioModeSelect.value !== "aec") {
+    return false;
+  }
+  const selectedAudioValue = audioDeviceSelect.value || AUDIO_OFF_VALUE;
+  return selectedAudioValue !== AUDIO_OFF_VALUE;
 }
 
 function getLaunchVideoSource(launch) {
@@ -322,6 +338,7 @@ function applyRoleFormState() {
   videoDeviceField.classList.toggle("hidden", !sender);
   audioDeviceField.classList.toggle("hidden", !sender);
   senderAudioModeField.classList.toggle("hidden", !sender);
+  senderPlaybackDeviceField.classList.toggle("hidden", !shouldShowSenderPlaybackField());
   receiverAudioField.classList.toggle("hidden", !receiver);
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
@@ -366,6 +383,8 @@ function syncFormFromRuntime(runtime) {
     } else {
       audioDeviceSelect.value = AUDIO_OFF_VALUE;
     }
+    ensurePlaybackDeviceOption(launch.sender_playback_device);
+    senderPlaybackDeviceSelect.value = launch.sender_playback_device || AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
   }
 
   if (launch.role === "receiver") {
@@ -404,6 +423,22 @@ function ensureAudioDeviceOption(path) {
   option.value = path;
   option.textContent = path;
   audioDeviceSelect.appendChild(option);
+}
+
+function ensurePlaybackDeviceOption(path) {
+  if (!path) {
+    return;
+  }
+
+  const existing = Array.from(senderPlaybackDeviceSelect.options).find((option) => option.value === path);
+  if (existing) {
+    return;
+  }
+
+  const option = document.createElement("option");
+  option.value = path;
+  option.textContent = path;
+  senderPlaybackDeviceSelect.appendChild(option);
 }
 
 function renderVideoDevices(devices) {
@@ -520,6 +555,46 @@ function renderAudioDevices(devices) {
   }
 
   audioDeviceMessage.textContent = `${devices.length} audio input${devices.length === 1 ? "" : "s"} discovered inside the container. Choose a device, the config default input, or the test signal.`;
+}
+
+function renderPlaybackDevices(devices) {
+  const currentValue = senderPlaybackDeviceSelect.value;
+  const runtimeLaunch = latestStatus?.runtime?.launch;
+  const runtimePlaybackDevice = runtimeLaunch?.role === "sender" ? runtimeLaunch.sender_playback_device : undefined;
+  senderPlaybackDeviceSelect.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+  defaultOption.textContent = "Default output from config";
+  senderPlaybackDeviceSelect.appendChild(defaultOption);
+
+  devices.forEach((device) => {
+    const option = document.createElement("option");
+    option.value = device.path;
+    option.textContent = `${device.label} (${device.path})`;
+    senderPlaybackDeviceSelect.appendChild(option);
+  });
+  ensurePlaybackDeviceOption(runtimePlaybackDevice);
+  senderPlaybackDeviceSelect.disabled = false;
+
+  let selected = AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+  if (
+    launchFormDirty &&
+    (currentValue === AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE ||
+      devices.some((device) => device.path === currentValue))
+  ) {
+    selected = currentValue;
+  } else if (runtimePlaybackDevice) {
+    selected = runtimePlaybackDevice;
+  }
+  senderPlaybackDeviceSelect.value = selected;
+
+  if (!devices.length) {
+    senderPlaybackDeviceMessage.textContent = "No playback devices are currently visible inside the container. Sender can still use the config default output.";
+    return;
+  }
+
+  senderPlaybackDeviceMessage.textContent = `${devices.length} playback output${devices.length === 1 ? "" : "s"} discovered inside the container. Choose a playback device or the config default output.`;
 }
 
 function renderPreview(preview, imageUrl, image, meta, empty) {
@@ -678,6 +753,18 @@ async function loadAudioDevices() {
   }
 }
 
+async function loadPlaybackDevices() {
+  try {
+    const payload = await api("/api/devices/audio/playback", { method: "GET" });
+    playbackDevices = payload.devices || [];
+    renderPlaybackDevices(playbackDevices);
+  } catch (error) {
+    playbackDevices = [];
+    renderPlaybackDevices(playbackDevices);
+    senderPlaybackDeviceMessage.textContent = `${error.message} Sender can still use the config default output.`;
+  }
+}
+
 function buildLaunchPayload() {
   const payload = {
     role: roleSelect.value,
@@ -713,6 +800,14 @@ function buildLaunchPayload() {
       payload.audio_device = null;
     }
     payload.audio_enabled = payload.audio_source !== "off";
+    if (payload.audio_enabled && payload.sender_audio_mode === "aec") {
+      payload.sender_playback_device =
+        senderPlaybackDeviceSelect.value && senderPlaybackDeviceSelect.value !== AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
+          ? senderPlaybackDeviceSelect.value
+          : null;
+    } else {
+      payload.sender_playback_device = null;
+    }
   }
 
   if (payload.role === "receiver") {
@@ -872,13 +967,20 @@ roleSelect.addEventListener("change", async () => {
   markLaunchFormDirty();
   applyRoleFormState();
   if (roleSelect.value === "sender") {
-    await Promise.all([loadVideoDevices(), loadAudioDevices()]);
+    await Promise.all([loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices()]);
   }
 });
 countrySelect.addEventListener("change", markLaunchFormDirty);
 videoDeviceSelect.addEventListener("change", markLaunchFormDirty);
-audioDeviceSelect.addEventListener("change", markLaunchFormDirty);
-senderAudioModeSelect.addEventListener("change", markLaunchFormDirty);
+audioDeviceSelect.addEventListener("change", () => {
+  markLaunchFormDirty();
+  applyRoleFormState();
+});
+senderAudioModeSelect.addEventListener("change", () => {
+  markLaunchFormDirty();
+  applyRoleFormState();
+});
+senderPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
 receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
 startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
@@ -896,7 +998,7 @@ window.addEventListener("keydown", (event) => {
 
 async function boot() {
   applyRoleFormState();
-  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices()]);
+  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices()]);
   refreshTimer = window.setInterval(refreshStatus, 3000);
 }
 
