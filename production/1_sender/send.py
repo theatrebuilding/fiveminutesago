@@ -18,6 +18,9 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+root_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 from audio_support import (
     build_webrtcdsp_properties,
@@ -25,6 +28,7 @@ from audio_support import (
     validate_audio_rate,
 )
 from config_loader import load_config
+from live_queue_settings import build_queue_element
 
 
 class SenderRuntime:
@@ -96,11 +100,21 @@ class SenderRuntime:
 
         print(f"[Sender] Using video source: {source_label}", flush=True)
 
+        sender_preview_queue = build_queue_element(
+            cfg,
+            ("sender", "preview"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
         preview_branch = ""
         if self.preview_pattern:
             preview_location = gst_escape(self.preview_pattern)
             preview_branch = f"""
-                video_tee. ! queue leaky=downstream max-size-buffers=30 max-size-bytes=0 max-size-time=0 !
+                video_tee. ! {sender_preview_queue} !
                 videoconvert ! videoscale ! videorate drop-only=true !
                 video/x-raw,width=640,height=360,framerate=1/5 !
                 jpegenc quality=70 !
@@ -153,6 +167,15 @@ class SenderRuntime:
         if normalized_transport_format != "S16BE":
             print("ERROR: audio.format must be S16BE for the separate RTP L16 transport.")
             sys.exit(1)
+        playback_input_queue = build_queue_element(
+            cfg,
+            ("sender", "playback_input"),
+            {
+                "max_size_buffers": 500,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 2000,
+            },
+        )
 
         if playback_enabled:
             try:
@@ -172,7 +195,7 @@ class SenderRuntime:
         if playback_enabled:
             playback_branch = f"""
                 srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false !
-                    queue max-size-time=2000000000 max-size-buffers=500
+                    {playback_input_queue}
                     ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                     ! rtpL16depay
                     ! audioconvert

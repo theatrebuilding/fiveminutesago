@@ -15,9 +15,13 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
+root_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
 
 # Import configuration loader (assumes a config_loader.py module is available)
 from config_loader import load_config
+from live_queue_settings import build_queue_element
 
 
 DEFAULT_VIDEO_SINK = "auto"
@@ -77,6 +81,25 @@ class VideoReceiver:
         audio_transport = self.resolve_audio_transport(config)
         print(f"VideoReceiver: Using audio transport '{audio_transport}'.")
         audio_branch = self.build_audio_branch(config, audio_transport)
+        receiver_preview_queue = build_queue_element(
+            config,
+            ("receiver", "preview"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        receiver_video_input_queue = build_queue_element(
+            config,
+            ("receiver", "video_input"),
+            {
+                "max_size_buffers": 500,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 2000,
+            },
+        )
 
         selector_output = f"input-selector name=selector ! {sink_pipeline}"
         if self.preview_pattern:
@@ -84,7 +107,7 @@ class VideoReceiver:
             selector_output = f"""
                 input-selector name=selector ! queue ! tee name=output_tee
                 output_tee. ! queue ! {sink_pipeline}
-                output_tee. ! queue leaky=downstream max-size-buffers=30 max-size-bytes=0 max-size-time=0 !
+                output_tee. ! {receiver_preview_queue} !
                 videoconvert ! videoscale ! videorate drop-only=true !
                 video/x-raw,width=640,height=360,framerate=1/5 !
                 jpegenc quality=70 !
@@ -94,7 +117,7 @@ class VideoReceiver:
         pipeline_str = f"""
             {selector_output}
             srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller"
-                ! queue max-size-time=2000000000 max-size-buffers=500
+                ! {receiver_video_input_queue}
                 ! tsparse set-timestamps=true
                 ! tsdemux name=demux
                 demux. ! queue ! h264parse config-interval=1
@@ -189,6 +212,15 @@ class VideoReceiver:
         channels = int(audio_cfg.get("channels", 2))
         encoding_name = str(audio_cfg.get("encoding_name", "L16")).strip() or "L16"
         escaped_device = gst_escape(playback_device)
+        receiver_l16_input_queue = build_queue_element(
+            config,
+            ("receiver", "l16_input"),
+            {
+                "max_size_buffers": 500,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 2000,
+            },
+        )
 
         print(f"VideoReceiver: Using playback device '{playback_device}'.")
 
@@ -208,7 +240,7 @@ class VideoReceiver:
 
         return f"""
             srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller" wait-for-connection=false !
-                queue max-size-time=2000000000 max-size-buffers=500 !
+                {receiver_l16_input_queue} !
                 application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
                 rtpL16depay !
                 audioconvert !

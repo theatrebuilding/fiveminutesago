@@ -1,5 +1,5 @@
 server_ip: 100.119.85.108
-streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=2000"  # Separate RTP L16 audio transport settings.
+streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=100"  # Separate RTP L16 audio transport settings.
 streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
 
 ports:
@@ -21,7 +21,7 @@ audio:
   rate: 48000                    # Shared sender/receiver audio sample rate. 48000 is recommended for DSP and AAC playback.
   channels: 2
   encoding_name: "L16"           # Separate RTP L16 transport encoding name.
-  aac_bitrate: 128000            # AAC bitrate for the sender's muxed MPEG-TS audio stream.
+  aac_bitrate: 320000            # AAC bitrate for the sender's muxed MPEG-TS audio stream.
   test_source_wave: "sine"       # Sender test audio options include: sine, square, saw, triangle, silence, white-noise, pink-noise, ticks, gaussian-noise, red-noise, blue-noise, violet-noise
   test_source_freq: 440          # Sender test tone frequency in Hz
   test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
@@ -35,7 +35,52 @@ recording:
     mode: "copy"                 # MP4 video recording mode. Only "copy" is currently supported.
   audio:
     codec: "aac"                 # MP4 audio recording codec. Only "aac" is currently supported.
-    bitrate: 128000              # Used when the recorder must encode AAC itself; AAC transport is otherwise copied through.
+    bitrate: 320000              # Used when the recorder must encode AAC itself; AAC transport is otherwise copied through.
+
+live_queues:
+  # Queue timings are in milliseconds
+  sender:
+    preview:
+      leaky: "downstream"
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    playback_input:
+      max_size_buffers: 500
+      max_size_bytes: 0
+      max_size_time_ms: 500
+  receiver:
+    preview:
+      leaky: "downstream"
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    video_input:
+      max_size_buffers: 500
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    l16_input:
+      max_size_buffers: 500
+      max_size_bytes: 0
+      max_size_time_ms: 500
+  server:
+    relay_input:
+      max_size_buffers: 500
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    preview_branch:
+      max_size_buffers: 120
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    preview_demux:
+      max_size_buffers: 60
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    preview_output:
+      leaky: "downstream"
+      max_size_buffers: 5
+      max_size_bytes: 0
+      max_size_time_ms: 0
 
 video:
   source: "v4l2src device=/dev/video0"

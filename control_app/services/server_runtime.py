@@ -13,6 +13,7 @@ import yaml
 gi.require_version("Gst", "1.0")
 from gi.repository import GLib, Gst
 
+from live_queue_settings import build_queue_element
 from .live_mp4_recorder import LiveMp4Recorder, RecordingPaths
 from .preview_catalog import build_server_preview_pattern, describe_latest_preview, prune_preview_files
 from .udp_packet_monitor import UdpPacketMonitor
@@ -652,20 +653,58 @@ class ServerRuntime:
         return Gst.parse_launch(pipeline_str.strip())
 
     def _build_video_pipeline(self, feed_state: VideoFeedState) -> Gst.Pipeline:
+        config = _load_config(self._config_path)
+        relay_input_queue = build_queue_element(
+            config,
+            ("server", "relay_input"),
+            {
+                "max_size_buffers": 500,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 5000,
+            },
+        )
+        preview_branch_queue = build_queue_element(
+            config,
+            ("server", "preview_branch"),
+            {
+                "max_size_buffers": 120,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        preview_demux_queue = build_queue_element(
+            config,
+            ("server", "preview_demux"),
+            {
+                "max_size_buffers": 60,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        preview_output_queue = build_queue_element(
+            config,
+            ("server", "preview_output"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 5,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
         pipeline_str = f"""
             srtsrc name={feed_state.feed}_source uri="srt://:{feed_state.send_port}?mode=listener" wait-for-connection=false !
-            queue max-size-time=5000000000 max-size-buffers=500 !
+            {relay_input_queue} !
             tsparse set-timestamps=true !
             tee name={feed_state.feed}_stream_tee
 
             {feed_state.feed}_stream_tee. ! queue !
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
 
-            {feed_state.feed}_stream_tee. ! queue max-size-buffers=120 max-size-bytes=0 max-size-time=0 !
+            {feed_state.feed}_stream_tee. ! {preview_branch_queue} !
             tsdemux name={feed_state.feed}_preview_demux
-            {feed_state.feed}_preview_demux. ! queue max-size-buffers=60 max-size-bytes=0 max-size-time=0 ! h264parse name={feed_state.feed}_preview_h264parse config-interval=1 !
+            {feed_state.feed}_preview_demux. ! {preview_demux_queue} ! h264parse name={feed_state.feed}_preview_h264parse config-interval=1 !
             avdec_h264 !
-            queue leaky=downstream max-size-buffers=5 max-size-bytes=0 max-size-time=0 !
+            {preview_output_queue} !
             videoconvert ! videoscale ! videorate drop-only=true !
             video/x-raw,width=640,height=360,framerate=1/5 !
             jpegenc quality=70 !
