@@ -45,10 +45,18 @@ live_queues:
       max_size_buffers: 30
       max_size_bytes: 0
       max_size_time_ms: 0
-    playback_input:
-      max_size_buffers: 500
+    video_encode:
+      max_size_buffers: 30
       max_size_bytes: 0
-      max_size_time_ms: 500
+      max_size_time_ms: 100
+    mux_input:
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 100
+    playback_input:
+      max_size_buffers: 120
+      max_size_bytes: 0
+      max_size_time_ms: 150
   receiver:
     preview:
       leaky: "downstream"
@@ -56,18 +64,18 @@ live_queues:
       max_size_bytes: 0
       max_size_time_ms: 0
     video_input:
-      max_size_buffers: 500
+      max_size_buffers: 120
       max_size_bytes: 0
-      max_size_time_ms: 500
+      max_size_time_ms: 150
     l16_input:
-      max_size_buffers: 500
+      max_size_buffers: 120
       max_size_bytes: 0
-      max_size_time_ms: 500
+      max_size_time_ms: 150
   server:
     relay_input:
-      max_size_buffers: 500
+      max_size_buffers: 120
       max_size_bytes: 0
-      max_size_time_ms: 500
+      max_size_time_ms: 150
     preview_branch:
       max_size_buffers: 120
       max_size_bytes: 0

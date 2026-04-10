@@ -110,6 +110,24 @@ class SenderRuntime:
                 "max_size_time_ms": 0,
             },
         )
+        sender_video_encode_queue = build_queue_element(
+            cfg,
+            ("sender", "video_encode"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        sender_mux_queue = build_queue_element(
+            cfg,
+            ("sender", "mux_input"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
         preview_branch = ""
         if self.preview_pattern:
             preview_location = gst_escape(self.preview_pattern)
@@ -138,11 +156,11 @@ class SenderRuntime:
             video/x-raw,format=I420,width={video_width},height={video_height},framerate={video_framerate}/1,pixel-aspect-ratio=1/1,interlace-mode=progressive !
             tee name=video_tee
 
-            video_tee. ! queue !
+            video_tee. ! {sender_video_encode_queue} !
             {video_encoder} {encoder_properties} !
             video/x-h264,stream-format=byte-stream,alignment=au{profile_caps} !
             h264parse config-interval={config_interval} !
-            queue !
+            {sender_mux_queue} !
             av_mux.
 
             {preview_branch}
@@ -157,6 +175,7 @@ class SenderRuntime:
         audio_opts = cfg.get("audio", {})
         dsp_cfg = cfg.get("webrtcdsp_settings", {})
         streaming_settings_audio = cfg.get("streaming_settings_audio", "")
+        audio_srt_suffix = f"&{streaming_settings_audio}" if streaming_settings_audio else ""
         audio_format = audio_opts.get("format", "S16BE")
         audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = int(audio_opts.get("channels", 2))
@@ -171,9 +190,45 @@ class SenderRuntime:
             cfg,
             ("sender", "playback_input"),
             {
-                "max_size_buffers": 500,
+                "max_size_buffers": 120,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 2000,
+                "max_size_time_ms": 150,
+            },
+        )
+        playback_output_queue = build_queue_element(
+            cfg,
+            ("sender", "playback_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
+            },
+        )
+        audio_capture_queue = build_queue_element(
+            cfg,
+            ("sender", "audio_capture"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
+            },
+        )
+        audio_l16_output_queue = build_queue_element(
+            cfg,
+            ("sender", "audio_l16_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
+            },
+        )
+        audio_aac_output_queue = build_queue_element(
+            cfg,
+            ("sender", "audio_aac_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
             },
         )
 
@@ -194,7 +249,7 @@ class SenderRuntime:
         playback_branch = ""
         if playback_enabled:
             playback_branch = f"""
-                srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false !
+                srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                     {playback_input_queue}
                     ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                     ! rtpL16depay
@@ -202,7 +257,7 @@ class SenderRuntime:
                     ! audioresample
                     ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                     ! webrtcechoprobe name=playback_probe
-                    ! queue
+                    ! {playback_output_queue}
                     ! alsasink device="{gst_escape(playback_device)}" async=true
             """
 
@@ -233,14 +288,14 @@ class SenderRuntime:
             {playback_branch}
 
             {audio_source}
-                ! queue
+                ! {audio_capture_queue}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                 {dsp_segment}
                 ! tee name=audio_capture_tee
 
-            audio_capture_tee. ! queue
+            audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate}
@@ -248,13 +303,13 @@ class SenderRuntime:
                 ! srtsink wait-for-connection=true
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
 
-            audio_capture_tee. ! queue
+            audio_capture_tee. ! {audio_aac_output_queue}
                 ! audioconvert
                 ! audioresample
                 ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                 ! {aac_encoder}
                 ! aacparse
-                ! queue
+                ! {sender_mux_queue}
                 ! av_mux.
         """
 

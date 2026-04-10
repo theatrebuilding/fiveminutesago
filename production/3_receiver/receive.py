@@ -25,7 +25,7 @@ from live_queue_settings import build_queue_element
 
 
 DEFAULT_VIDEO_SINK = "auto"
-KMS_VIDEO_SINK = "kmssink"
+KMS_VIDEO_SINK = "kmssink sync=false async=false"
 HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
 DEFAULT_AUDIO_TRANSPORT = "config"
 
@@ -81,6 +81,8 @@ class VideoReceiver:
         audio_transport = self.resolve_audio_transport(config)
         print(f"VideoReceiver: Using audio transport '{audio_transport}'.")
         audio_branch = self.build_audio_branch(config, audio_transport)
+        video_streaming_settings = str(config.get("streaming_settings_video", "") or "").strip()
+        video_srt_suffix = f"&{video_streaming_settings}" if video_streaming_settings else ""
         receiver_preview_queue = build_queue_element(
             config,
             ("receiver", "preview"),
@@ -95,18 +97,76 @@ class VideoReceiver:
             config,
             ("receiver", "video_input"),
             {
-                "max_size_buffers": 500,
+                "max_size_buffers": 120,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 2000,
+                "max_size_time_ms": 150,
+            },
+        )
+        receiver_video_demux_queue = build_queue_element(
+            config,
+            ("receiver", "video_demux"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_in_queue = build_queue_element(
+            config,
+            ("receiver", "primary_in"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_selector_queue = build_queue_element(
+            config,
+            ("receiver", "primary_selector"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_monitor_queue = build_queue_element(
+            config,
+            ("receiver", "primary_monitor"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_selector_output_queue = build_queue_element(
+            config,
+            ("receiver", "selector_output"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_fallback_queue = build_queue_element(
+            config,
+            ("receiver", "fallback"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
             },
         )
 
-        selector_output = f"input-selector name=selector ! {sink_pipeline}"
+        selector_output = f"input-selector name=selector ! {receiver_selector_output_queue} ! {sink_pipeline}"
         if self.preview_pattern:
             preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
             selector_output = f"""
-                input-selector name=selector ! queue ! tee name=output_tee
-                output_tee. ! queue ! {sink_pipeline}
+                input-selector name=selector ! {receiver_selector_output_queue} ! tee name=output_tee
+                output_tee. ! {receiver_selector_output_queue} ! {sink_pipeline}
                 output_tee. ! {receiver_preview_queue} !
                 videoconvert ! videoscale ! videorate drop-only=true !
                 video/x-raw,width=640,height=360,framerate=1/5 !
@@ -116,25 +176,25 @@ class VideoReceiver:
 
         pipeline_str = f"""
             {selector_output}
-            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller"
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller{video_srt_suffix}"
                 ! {receiver_video_input_queue}
                 ! tsparse set-timestamps=true
-                ! tsdemux name=demux
-                demux. ! queue ! h264parse config-interval=1
+                ! tsdemux latency=50 name=demux
+                demux. ! {receiver_video_demux_queue} ! h264parse config-interval=1
                 ! avdec_h264
                 ! videoconvert
                 ! videoscale
                 ! video/x-raw,width=1920,height=1080
-                ! queue name=primary_in
+                ! {receiver_primary_in_queue} name=primary_in
                 ! tee name=primary_tee
-                primary_tee. ! queue name=primary_selector ! selector.
-                primary_tee. ! queue name=primary_monitor ! fakesink sync=false async=false
+                primary_tee. ! {receiver_primary_selector_queue} name=primary_selector ! selector.
+                primary_tee. ! {receiver_primary_monitor_queue} name=primary_monitor ! fakesink sync=false async=false
                 {audio_branch}
                 videotestsrc pattern=snow
                 ! videoconvert
                 ! videoscale
                 ! video/x-raw,width=1920,height=1080
-                ! queue ! selector.
+                ! {receiver_fallback_queue} ! selector.
         """
         return pipeline_str.strip()
 
@@ -147,7 +207,7 @@ class VideoReceiver:
             connector_id = self.parse_connector_id(self.video_output)
             return (
                 "kmssink",
-                f"kmssink connector-id={connector_id}",
+                f"kmssink connector-id={connector_id} sync=false async=false",
                 f"using explicit DRM connector id {connector_id}",
             )
         if requested_sink in {"", DEFAULT_VIDEO_SINK}:
@@ -211,14 +271,34 @@ class VideoReceiver:
         audio_rate = int(audio_cfg.get("rate", 32000))
         channels = int(audio_cfg.get("channels", 2))
         encoding_name = str(audio_cfg.get("encoding_name", "L16")).strip() or "L16"
+        audio_streaming_settings = str(config.get("streaming_settings_audio", "") or "").strip()
+        audio_srt_suffix = f"&{audio_streaming_settings}" if audio_streaming_settings else ""
         escaped_device = gst_escape(playback_device)
         receiver_l16_input_queue = build_queue_element(
             config,
             ("receiver", "l16_input"),
             {
-                "max_size_buffers": 500,
+                "max_size_buffers": 120,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 2000,
+                "max_size_time_ms": 150,
+            },
+        )
+        receiver_aac_input_queue = build_queue_element(
+            config,
+            ("receiver", "aac_input"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_audio_output_queue = build_queue_element(
+            config,
+            ("receiver", "audio_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
             },
         )
 
@@ -226,12 +306,12 @@ class VideoReceiver:
 
         if audio_transport == "aac":
             return f"""
-                demux. ! queue !
+                demux. ! {receiver_aac_input_queue} !
                     decodebin !
                     audioconvert !
                     audioresample !
                     audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
-                    queue !
+                    {receiver_audio_output_queue} !
                     alsasink device="{escaped_device}" async=true
             """.strip()
 
@@ -239,14 +319,14 @@ class VideoReceiver:
             raise RuntimeError("Receiver uncompressed audio transport requires an audio_receive_* port in the config.")
 
         return f"""
-            srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller" wait-for-connection=false !
+            srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                 {receiver_l16_input_queue} !
                 application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
                 rtpL16depay !
                 audioconvert !
                 audioresample !
                 audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
-                queue !
+                {receiver_audio_output_queue} !
                 alsasink device="{escaped_device}" async=true
         """.strip()
 

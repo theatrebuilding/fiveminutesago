@@ -622,45 +622,76 @@ class ServerRuntime:
         channels = int(audio.get("channels", 2))
         encoding_name = str(audio.get("encoding_name", "L16")).strip() or "L16"
         audio_format = str(audio.get("format", "S16BE")).strip().upper() or "S16BE"
+        audio_streaming_settings = str(config.get("streaming_settings_audio", "") or "").strip()
+        audio_srt_suffix = f"&{audio_streaming_settings}" if audio_streaming_settings else ""
         if audio_format != "S16BE":
             raise RuntimeError("audio.format must be S16BE for the separate RTP L16 relay pipeline.")
+        audio_input_queue = build_queue_element(
+            config,
+            ("server", "audio_input"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
+            },
+        )
+        audio_output_queue = build_queue_element(
+            config,
+            ("server", "audio_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 75,
+            },
+        )
 
         pipeline_str = f"""
-            srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener wait-for-connection=false !
-              queue !
+            srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
+              {audio_input_queue} !
               application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
               rtpL16depay !
               tee name=tee_tn
 
-            srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener wait-for-connection=false !
-              queue !
+            srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
+              {audio_input_queue} !
               application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
               rtpL16depay !
               tee name=tee_dk
 
-            tee_tn. ! queue !
+            tee_tn. ! {audio_output_queue} !
               audioconvert ! audioresample !
               audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
               rtpL16pay !
-              srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener wait-for-connection=false
+              srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false
 
-            tee_dk. ! queue !
+            tee_dk. ! {audio_output_queue} !
               audioconvert ! audioresample !
               audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
               rtpL16pay !
-              srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener wait-for-connection=false
+              srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener{audio_srt_suffix} wait-for-connection=false
         """
         return Gst.parse_launch(pipeline_str.strip())
 
     def _build_video_pipeline(self, feed_state: VideoFeedState) -> Gst.Pipeline:
         config = _load_config(self._config_path)
+        video_streaming_settings = str(config.get("streaming_settings_video", "") or "").strip()
+        video_srt_suffix = f"&{video_streaming_settings}" if video_streaming_settings else ""
         relay_input_queue = build_queue_element(
             config,
             ("server", "relay_input"),
             {
-                "max_size_buffers": 500,
+                "max_size_buffers": 120,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 5000,
+                "max_size_time_ms": 150,
+            },
+        )
+        relay_output_queue = build_queue_element(
+            config,
+            ("server", "relay_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
             },
         )
         preview_branch_queue = build_queue_element(
@@ -692,16 +723,16 @@ class ServerRuntime:
             },
         )
         pipeline_str = f"""
-            srtsrc name={feed_state.feed}_source uri="srt://:{feed_state.send_port}?mode=listener" wait-for-connection=false !
+            srtsrc name={feed_state.feed}_source uri="srt://:{feed_state.send_port}?mode=listener{video_srt_suffix}" wait-for-connection=false !
             {relay_input_queue} !
             tsparse set-timestamps=true !
             tee name={feed_state.feed}_stream_tee
 
-            {feed_state.feed}_stream_tee. ! queue !
-            srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener" wait-for-connection=false
+            {feed_state.feed}_stream_tee. ! {relay_output_queue} !
+            srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener{video_srt_suffix}" wait-for-connection=false
 
             {feed_state.feed}_stream_tee. ! {preview_branch_queue} !
-            tsdemux name={feed_state.feed}_preview_demux
+            tsdemux latency=50 name={feed_state.feed}_preview_demux
             {feed_state.feed}_preview_demux. ! {preview_demux_queue} ! h264parse name={feed_state.feed}_preview_h264parse config-interval=1 !
             avdec_h264 !
             {preview_output_queue} !
