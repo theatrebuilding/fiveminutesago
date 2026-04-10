@@ -231,6 +231,15 @@ class SenderRuntime:
                 "max_size_time_ms": 100,
             },
         )
+        audio_mux_queue = build_queue_element(
+            cfg,
+            ("sender", "mux_input"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
 
         if playback_enabled:
             try:
@@ -309,7 +318,7 @@ class SenderRuntime:
                 ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                 ! {aac_encoder}
                 ! aacparse
-                ! {sender_mux_queue}
+                ! {audio_mux_queue}
                 ! av_mux.
         """
 
