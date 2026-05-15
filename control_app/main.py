@@ -126,10 +126,27 @@ async def get_status(request: Request) -> dict[str, Any]:
 @app.get("/api/config")
 async def get_config(request: Request) -> dict[str, Any]:
     services = _services(request)
+    try:
+        text = services.config_service.read_text()
+    except OSError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Server config file is not available at {services.config_service.config_path}. "
+                "Check the shared mount or CONFIG_PATH."
+            ),
+        ) from exc
+    try:
+        summary = services.dashboard_service.build_config_summary()
+    except Exception as exc:
+        summary = {
+            "path": str(services.config_service.config_path),
+            "error": str(exc),
+        }
     return {
         "path": str(services.config_service.config_path),
-        "text": services.config_service.read_text(),
-        "summary": services.dashboard_service.build_config_summary(),
+        "text": text,
+        "summary": summary,
     }
 
 
@@ -181,6 +198,11 @@ async def update_config(request: Request) -> dict[str, Any]:
         parsed = services.config_service.write_text(text)
     except ConfigValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not write config at {services.config_service.config_path}: {exc}",
+        ) from exc
 
     services.runtime_service.record_event("Configuration updated from dashboard.")
 

@@ -40,11 +40,17 @@ def build_settings() -> AppSettings:
     project_root = Path(__file__).resolve().parents[1]
     storage_root = Path(os.getenv("TBDRIVE_ROOT", "/mnt/tbdrive"))
     storage_reference_root = Path(os.getenv("TBDRIVE_REFERENCE_ROOT", "/config"))
+    config_path_override = os.getenv("CONFIG_PATH")
+    config_path = (
+        Path(config_path_override.strip()).expanduser()
+        if config_path_override and config_path_override.strip()
+        else project_root / "production" / "config.yaml"
+    )
     paths = AppPaths(
         project_root=project_root,
         static_dir=project_root / "control_app" / "static",
         production_dir=project_root / "production",
-        config_path=project_root / "production" / "config.yaml",
+        config_path=config_path,
         storage_root=storage_root,
         storage_reference_root=storage_reference_root,
         recording_dir=storage_root,

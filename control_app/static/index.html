@@ -152,13 +152,14 @@
           <pre id="log-output" class="log-output">Loading logs…</pre>
         </section>
 
-        <section class="panel config-panel">
+        <section id="config-panel" class="panel config-panel">
           <div class="panel-heading">
-            <h2>Config Editor</h2>
+            <h2 id="config-panel-title">Config Editor</h2>
           </div>
-          <div class="button-row">
+          <div id="config-editor-actions" class="button-row">
             <button id="save-config" class="button-muted">Save Config</button>
             <button id="apply-config" class="button-accent">Save + Relaunch Active Role</button>
+            <button id="show-config" class="button-muted hidden">Show Config</button>
           </div>
           <textarea id="config-editor" spellcheck="false"></textarea>
           <p id="config-message" class="action-message"></p>

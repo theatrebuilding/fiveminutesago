@@ -440,6 +440,10 @@ button:disabled {
   font-size: 0.84rem;
 }
 
+.config-panel textarea[readonly] {
+  color: var(--text-dim);
+}
+
 .hidden {
   display: none !important;
 }

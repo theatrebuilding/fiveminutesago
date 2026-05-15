@@ -23,6 +23,7 @@ const archiveRenameButton = document.getElementById("archive-rename-button");
 const archiveDeleteButton = document.getElementById("archive-delete-button");
 const archiveActionMessage = document.getElementById("archive-action-message");
 const logOutput = document.getElementById("log-output");
+const configPanelTitle = document.getElementById("config-panel-title");
 const configEditor = document.getElementById("config-editor");
 const configMessage = document.getElementById("config-message");
 const recordMessage = document.getElementById("record-message");
@@ -61,6 +62,7 @@ const receiverVideoDelayMessage = document.getElementById("receiver-video-delay-
 const startRoleButton = document.getElementById("start-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
+const showConfigButton = document.getElementById("show-config");
 const serverPanel = document.getElementById("server-panel");
 const senderPanel = document.getElementById("sender-panel");
 const receiverPanel = document.getElementById("receiver-panel");
@@ -91,6 +93,7 @@ let launchFormDirty = false;
 let selectedArchiveName = null;
 let selectedArchiveRevision = null;
 let selectedArchiveFile = null;
+let lastConfigPanelRole = null;
 
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
@@ -396,6 +399,40 @@ function renderArchive(storage) {
   clearArchiveSelection("Select a file and open it in a new tab.");
 }
 
+function getConfigPanelRole() {
+  return latestStatus?.runtime?.running ? latestStatus.runtime.role : roleSelect.value;
+}
+
+function applyConfigPanelState() {
+  const role = getConfigPanelRole();
+  const editable = role === "server";
+  const roleChanged = role !== lastConfigPanelRole;
+  lastConfigPanelRole = role;
+
+  configPanelTitle.textContent = editable ? "Config Editor" : "Server Config";
+  saveConfigButton.classList.toggle("hidden", !editable);
+  applyConfigButton.classList.toggle("hidden", !editable);
+  showConfigButton.classList.toggle("hidden", editable);
+  configEditor.readOnly = !editable;
+
+  if (editable) {
+    configEditor.classList.remove("hidden");
+    configEditor.dataset.configShown = "true";
+    if (roleChanged) {
+      configMessage.textContent = "";
+    }
+    return;
+  }
+
+  if (roleChanged) {
+    configEditor.classList.add("hidden");
+    configEditor.dataset.configShown = "false";
+    configMessage.textContent = "Click Show Config to read the central server config mounted on this Pi.";
+  } else if (configEditor.dataset.configShown !== "true") {
+    configEditor.classList.add("hidden");
+  }
+}
+
 function applyRoleFormState() {
   const role = roleSelect.value;
   const sender = role === "sender";
@@ -416,6 +453,7 @@ function applyRoleFormState() {
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
   updateSyncDelayLabels();
+  applyConfigPanelState();
 }
 
 function markLaunchFormDirty() {
@@ -985,12 +1023,24 @@ async function refreshArchive() {
   }
 }
 
-async function loadConfig() {
+async function loadConfig(options = {}) {
+  const reveal = options.reveal !== false;
+  const showSuccess = Boolean(options.showSuccess);
   try {
     const payload = await api("/api/config", { method: "GET" });
     configEditor.value = payload.text;
+    configEditor.dataset.configShown = "true";
+    if (reveal) {
+      configEditor.classList.remove("hidden");
+    }
+    if (showSuccess) {
+      configMessage.textContent = `Loaded config from ${payload.path}.`;
+    }
   } catch (error) {
-    configMessage.textContent = error.message;
+    configEditor.value = "";
+    configEditor.dataset.configShown = "false";
+    configEditor.classList.add("hidden");
+    configMessage.textContent = `Server config file is not available. ${error.message}`;
   }
 }
 
@@ -1291,6 +1341,11 @@ async function deleteSelectedArchive() {
 }
 
 async function saveConfig(restart) {
+  if (getConfigPanelRole() !== "server") {
+    await loadConfig({ reveal: true, showSuccess: true });
+    return;
+  }
+
   setBusy([saveConfigButton, applyConfigButton], true);
   configMessage.textContent = restart ? "Saving config and relaunching active role…" : "Saving config…";
 
@@ -1321,6 +1376,10 @@ roleSelect.addEventListener("change", async () => {
   }
   if (roleSelect.value === "receiver") {
     await Promise.all([loadPlaybackDevices(), loadDisplayOutputs()]);
+    return;
+  }
+  if (roleSelect.value === "server") {
+    await loadConfig({ reveal: true });
   }
 });
 countrySelect.addEventListener("change", markLaunchFormDirty);
@@ -1343,6 +1402,7 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
+showConfigButton.addEventListener("click", () => loadConfig({ reveal: true, showSuccess: true }));
 archiveRenameButton.addEventListener("click", renameSelectedArchive);
 archiveDeleteButton.addEventListener("click", deleteSelectedArchive);
 archiveRefreshButton.addEventListener("click", refreshArchive);
@@ -1356,7 +1416,11 @@ window.addEventListener("keydown", (event) => {
 
 async function boot() {
   applyRoleFormState();
-  await Promise.all([refreshStatus(), loadConfig(), loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices(), loadDisplayOutputs()]);
+  await refreshStatus();
+  if (getConfigPanelRole() === "server") {
+    await loadConfig({ reveal: true });
+  }
+  await Promise.all([loadVideoDevices(), loadAudioDevices(), loadPlaybackDevices(), loadDisplayOutputs()]);
   refreshTimer = window.setInterval(refreshStatus, 3000);
 }
 

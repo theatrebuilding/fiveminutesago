@@ -2,14 +2,23 @@ import os
 import sys
 import yaml
 
+
+def get_config_path():
+    override = os.getenv("CONFIG_PATH")
+    if override and override.strip():
+        return os.path.abspath(os.path.expanduser(override.strip()))
+
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+    return os.path.join(dir_path, "config.yaml")
+
+
 def load_config():
     """
-    Loads 'config.yaml' from the *same* directory this file is in.
+    Loads config from CONFIG_PATH when set, otherwise from the local
+    production/config.yaml next to this file.
     Returns a Python dictionary with the config contents.
     """
-    # Get the directory where *this* file (config_loader.py) is located
-    dir_path = os.path.dirname(os.path.realpath(__file__))
-    config_path = os.path.join(dir_path, "config.yaml")
+    config_path = get_config_path()
 
     if not os.path.isfile(config_path):
         print(f"ERROR: Could not find config file at {config_path}")
