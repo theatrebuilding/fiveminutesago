@@ -23,6 +23,7 @@ class AppPaths:
     recording_dir: Path
     archive_dir: Path
     preview_dir: Path
+    runtime_dir: Path
     host_device_root: Path
 
 
@@ -49,6 +50,7 @@ def build_settings() -> AppSettings:
         recording_dir=storage_root,
         archive_dir=storage_root / "video",
         preview_dir=storage_root / "previews",
+        runtime_dir=storage_root / "runtime",
         host_device_root=Path(os.getenv("HOST_DEVICE_ROOT", "/host-dev")),
     )
 

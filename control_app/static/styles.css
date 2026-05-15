@@ -219,9 +219,15 @@ h3 {
 }
 
 select,
+input[type="range"],
 input[type="text"],
 textarea {
   width: 100%;
+}
+
+select,
+input[type="text"],
+textarea {
   padding: 10px 12px;
   background: var(--bg-soft);
   color: var(--text);
@@ -235,6 +241,10 @@ select:focus,
 input[type="text"]:focus,
 textarea:focus {
   background: var(--bg-strong);
+}
+
+input[type="range"] {
+  accent-color: var(--accent);
 }
 
 button {

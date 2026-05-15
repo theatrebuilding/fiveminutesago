@@ -31,6 +31,25 @@ from config_loader import load_config
 from live_queue_settings import build_queue_element
 
 
+MAX_SYNC_DELAY_MS = 3000
+DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
+SYNC_DELAY_POLL_MS = 500
+
+
+def parse_sync_delay_ms(value):
+    try:
+        delay_ms = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be an integer from 0 to {MAX_SYNC_DELAY_MS} ms"
+        )
+    if delay_ms < 0 or delay_ms > MAX_SYNC_DELAY_MS:
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be between 0 and {MAX_SYNC_DELAY_MS} ms"
+        )
+    return delay_ms
+
+
 class SenderRuntime:
     def __init__(
         self,
@@ -43,6 +62,8 @@ class SenderRuntime:
         playback_device=None,
         audio_source_mode="device",
         sender_audio_mode="aec",
+        audio_delay_ms=0,
+        sync_delay_file=None,
     ):
         self.country = country
         self.video_device = video_device
@@ -53,6 +74,8 @@ class SenderRuntime:
         self.playback_device = playback_device
         self.audio_source_mode = audio_source_mode
         self.sender_audio_mode = sender_audio_mode
+        self.audio_delay_ms = audio_delay_ms
+        self.sync_delay_file = sync_delay_file
 
         self.pipeline = None
         self.loop = None
@@ -257,6 +280,7 @@ class SenderRuntime:
         enable_dsp = playback_enabled and uses_dsp
         playback_branch = ""
         if playback_enabled:
+            audio_delay_ns = self.audio_delay_ms * 1_000_000
             playback_branch = f"""
                 srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                     {playback_input_queue}
@@ -265,6 +289,7 @@ class SenderRuntime:
                     ! audioconvert
                     ! audioresample
                     ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
+                    ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     ! webrtcechoprobe name=playback_probe
                     ! {playback_output_queue}
                     ! alsasink device="{gst_escape(playback_device)}" async=true
@@ -288,6 +313,7 @@ class SenderRuntime:
         print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
         if playback_enabled:
             print(f"[Sender] Using playback device: {playback_device}", flush=True)
+            print(f"[Sender] Audio playback/probe delay: {self.audio_delay_ms} ms", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
         elif playback_enabled:
@@ -451,6 +477,40 @@ class SenderRuntime:
                 print(f"[Sender] Debug info: {debug}")
             self.stop()
 
+    def poll_sync_delay_file(self):
+        if self.pipeline is None or not self.sync_delay_file:
+            return True
+
+        try:
+            with open(self.sync_delay_file, encoding="utf-8") as delay_file:
+                raw_value = delay_file.read().strip()
+        except OSError:
+            return True
+
+        try:
+            next_delay_ms = parse_sync_delay_ms(raw_value or 0)
+        except argparse.ArgumentTypeError as exc:
+            print(f"[Sender] Ignoring invalid sync delay file value: {exc}", flush=True)
+            return True
+
+        if next_delay_ms != self.audio_delay_ms:
+            self.apply_audio_delay(next_delay_ms)
+        return True
+
+    def apply_audio_delay(self, delay_ms):
+        if self.pipeline is None:
+            self.audio_delay_ms = delay_ms
+            return
+
+        delay_queue = self.pipeline.get_by_name("audio_playback_delay_queue")
+        if delay_queue is None:
+            self.audio_delay_ms = delay_ms
+            return
+
+        delay_queue.set_property("min-threshold-time", delay_ms * 1_000_000)
+        self.audio_delay_ms = delay_ms
+        print(f"[Sender] Audio playback/probe delay updated to {delay_ms} ms.", flush=True)
+
     def run(self):
         pipeline_str = self.build_pipeline()
         print("[Sender] Pipeline:\n" + pipeline_str + "\n", flush=True)
@@ -468,6 +528,8 @@ class SenderRuntime:
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
+        if self.sender_audio_mode == "aec" and self.audio_enabled and self.sync_delay_file:
+            GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
 
         print("[Sender] Setting state to PLAYING...")
         self._set_pipeline_state(Gst.State.PLAYING, timeout_seconds=5.0)
@@ -549,6 +611,8 @@ def main():
     parser.add_argument("--playback-device", help="ALSA audio playback device name (for example hw:0,0).")
     parser.add_argument("--audio-source", choices=["device", "test"], default="device", help="Audio source mode. Use 'test' for audiotestsrc instead of a capture device.")
     parser.add_argument("--sender-audio-mode", choices=["aec", "capture-only"], default="aec", help="Sender audio mode. Use 'capture-only' to disable remote playback and WebRTC DSP on the sender.")
+    parser.add_argument("--audio-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial sender remote-audio playback/probe delay in milliseconds for A/V sync calibration.")
+    parser.add_argument("--sync-delay-file", help="Optional control file containing the live sender audio delay in milliseconds.")
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
     parser.add_argument("--video-source", choices=["config", "test"], default="config", help="Video source mode. Use 'test' to send a test signal instead of a camera.")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/sender-tn-preview-%05d.jpg.")
@@ -584,6 +648,8 @@ def main():
         playback_device=args.playback_device,
         audio_source_mode=audio_source_mode,
         sender_audio_mode=sender_audio_mode,
+        audio_delay_ms=args.audio_delay_ms,
+        sync_delay_file=args.sync_delay_file,
     )
     shared_clock = Gst.SystemClock.obtain()
     sender.set_clock(shared_clock)

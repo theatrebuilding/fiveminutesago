@@ -28,10 +28,27 @@ DEFAULT_VIDEO_SINK = "auto"
 KMS_VIDEO_SINK = "kmssink sync=false async=false"
 HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
 DEFAULT_AUDIO_TRANSPORT = "config"
+MAX_SYNC_DELAY_MS = 3000
+DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
+SYNC_DELAY_POLL_MS = 500
 
 
 def gst_escape(value):
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def parse_sync_delay_ms(value):
+    try:
+        delay_ms = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be an integer from 0 to {MAX_SYNC_DELAY_MS} ms"
+        )
+    if delay_ms < 0 or delay_ms > MAX_SYNC_DELAY_MS:
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be between 0 and {MAX_SYNC_DELAY_MS} ms"
+        )
+    return delay_ms
 
 
 class VideoReceiver:
@@ -43,6 +60,8 @@ class VideoReceiver:
         audio_transport=DEFAULT_AUDIO_TRANSPORT,
         playback_device=None,
         video_output=None,
+        video_delay_ms=0,
+        sync_delay_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -50,6 +69,8 @@ class VideoReceiver:
         self.audio_transport = audio_transport
         self.playback_device = playback_device
         self.video_output = video_output
+        self.video_delay_ms = video_delay_ms
+        self.sync_delay_file = sync_delay_file
         self.pipeline = None
         self.loop = None
         self.server_address = None
@@ -160,12 +181,21 @@ class VideoReceiver:
                 "max_size_time_ms": 100,
             },
         )
+        video_delay_ns = self.video_delay_ms * 1_000_000
+        receiver_video_delay_queue = (
+            "queue name=video_delay_queue "
+            "max-size-buffers=0 max-size-bytes=0 "
+            f"max-size-time={DELAY_QUEUE_MAX_TIME_NS} "
+            f"min-threshold-time={video_delay_ns}"
+        )
 
-        selector_output = f"input-selector name=selector ! {receiver_selector_output_queue} ! {sink_pipeline}"
+        print(f"VideoReceiver: Video delay: {self.video_delay_ms} ms.")
+
+        selector_output = f"input-selector name=selector ! {receiver_video_delay_queue} ! {receiver_selector_output_queue} ! {sink_pipeline}"
         if self.preview_pattern:
             preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
             selector_output = f"""
-                input-selector name=selector ! {receiver_selector_output_queue} ! tee name=output_tee
+                input-selector name=selector ! {receiver_video_delay_queue} ! tee name=output_tee
                 output_tee. ! {receiver_selector_output_queue} ! {sink_pipeline}
                 output_tee. ! {receiver_preview_queue} !
                 videoconvert ! videoscale ! videorate drop-only=true !
@@ -379,6 +409,40 @@ class VideoReceiver:
             if debug:
                 print(f"Debug info: {debug}")
 
+    def poll_sync_delay_file(self):
+        if self.pipeline is None or not self.sync_delay_file:
+            return True
+
+        try:
+            with open(self.sync_delay_file, encoding="utf-8") as delay_file:
+                raw_value = delay_file.read().strip()
+        except OSError:
+            return True
+
+        try:
+            next_delay_ms = parse_sync_delay_ms(raw_value or 0)
+        except argparse.ArgumentTypeError as exc:
+            print(f"VideoReceiver: Ignoring invalid sync delay file value: {exc}", flush=True)
+            return True
+
+        if next_delay_ms != self.video_delay_ms:
+            self.apply_video_delay(next_delay_ms)
+        return True
+
+    def apply_video_delay(self, delay_ms):
+        if self.pipeline is None:
+            self.video_delay_ms = delay_ms
+            return
+
+        delay_queue = self.pipeline.get_by_name("video_delay_queue")
+        if delay_queue is None:
+            self.video_delay_ms = delay_ms
+            return
+
+        delay_queue.set_property("min-threshold-time", delay_ms * 1_000_000)
+        self.video_delay_ms = delay_ms
+        print(f"VideoReceiver: Video delay updated to {delay_ms} ms.", flush=True)
+
     def run(self):
         pipeline_str = self.build_pipeline()
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
@@ -415,6 +479,8 @@ class VideoReceiver:
         
         # Set up a periodic timer (every 2 seconds) to monitor primary health.
         GLib.timeout_add_seconds(2, self.monitor_primary)
+        if self.sync_delay_file:
+            GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
         
         self.pipeline.set_state(Gst.State.PLAYING)
         self.loop = GLib.MainLoop()
@@ -440,6 +506,8 @@ class ReceiverManager:
         audio_transport=DEFAULT_AUDIO_TRANSPORT,
         playback_device=None,
         video_output=None,
+        video_delay_ms=0,
+        sync_delay_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -447,6 +515,8 @@ class ReceiverManager:
         self.audio_transport = audio_transport
         self.playback_device = playback_device
         self.video_output = video_output
+        self.video_delay_ms = video_delay_ms
+        self.sync_delay_file = sync_delay_file
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -462,6 +532,8 @@ class ReceiverManager:
                 audio_transport=self.audio_transport,
                 playback_device=self.playback_device,
                 video_output=self.video_output,
+                video_delay_ms=self.video_delay_ms,
+                sync_delay_file=self.sync_delay_file,
             )
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
@@ -501,6 +573,8 @@ def main():
     parser.add_argument("--video-output", help="Optional DRM connector id override for kmssink, for example 32.")
     parser.add_argument("--playback-device", help="Optional ALSA playback device override, for example hw:0,0.")
     parser.add_argument("--audio-transport", choices=["config", "off", "aac", "l16"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'l16' for the separate uncompressed return audio or 'aac' for audio from the live MPEG-TS stream.")
+    parser.add_argument("--video-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial receiver video delay in milliseconds for A/V sync calibration.")
+    parser.add_argument("--sync-delay-file", help="Optional control file containing the live receiver video delay in milliseconds.")
     args = parser.parse_args()
 
     manager = ReceiverManager(
@@ -510,6 +584,8 @@ def main():
         audio_transport=args.audio_transport,
         playback_device=args.playback_device,
         video_output=args.video_output,
+        video_delay_ms=args.video_delay_ms,
+        sync_delay_file=args.sync_delay_file,
     )
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))

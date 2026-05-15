@@ -46,6 +46,7 @@ async def lifespan(app: FastAPI):
         recording_dir=settings.paths.recording_dir,
         archive_dir=settings.paths.archive_dir,
         preview_dir=settings.paths.preview_dir,
+        runtime_dir=settings.paths.runtime_dir,
         log_capacity=settings.log_capacity,
     )
     storage_service = StorageService(
@@ -215,6 +216,19 @@ async def runtime_stop(request: Request) -> dict[str, Any]:
     services = _services(request)
     status = services.runtime_service.stop()
     return {"message": "Active role stopped.", "runtime": status}
+
+
+@app.post("/api/runtime/sync-delay")
+async def runtime_sync_delay(request: Request) -> dict[str, Any]:
+    services = _services(request)
+    payload = await request.json()
+    try:
+        status = services.runtime_service.set_sync_delay(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"message": "Sync delay updated.", "runtime": status}
 
 
 @app.post("/api/server/recording/{action}")

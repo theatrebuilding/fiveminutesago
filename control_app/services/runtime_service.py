@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import datetime as dt
 import os
 from pathlib import Path
@@ -26,6 +26,7 @@ VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
 VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
 VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
 VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac", "l16"}
+MAX_SYNC_DELAY_MS = 3000
 
 
 @dataclass(frozen=True)
@@ -38,9 +39,11 @@ class RuntimeLaunchRequest:
     sender_playback_device: str | None = None
     video_source: str = "test"
     video_device: str | None = None
+    sender_audio_delay_ms: int = 0
     receiver_audio_transport: str = "config"
     receiver_playback_device: str | None = None
     receiver_video_output: str | None = None
+    receiver_video_delay_ms: int = 0
 
     @property
     def audio_enabled(self) -> bool:
@@ -57,9 +60,11 @@ class RuntimeLaunchRequest:
             "sender_playback_device": self.sender_playback_device,
             "video_source": self.video_source,
             "video_device": self.video_device,
+            "sender_audio_delay_ms": self.sender_audio_delay_ms,
             "receiver_audio_transport": self.receiver_audio_transport,
             "receiver_playback_device": self.receiver_playback_device,
             "receiver_video_output": self.receiver_video_output,
+            "receiver_video_delay_ms": self.receiver_video_delay_ms,
         }
 
     @classmethod
@@ -117,6 +122,14 @@ class RuntimeLaunchRequest:
             receiver_audio_transport = "aac"
         if receiver_audio_transport not in VALID_RECEIVER_AUDIO_TRANSPORTS:
             raise ValueError("Receiver audio transport must be one of: config, off, aac, l16.")
+        sender_audio_delay_ms = _parse_sync_delay_ms(
+            payload.get("sender_audio_delay_ms", 0),
+            "sender_audio_delay_ms",
+        )
+        receiver_video_delay_ms = _parse_sync_delay_ms(
+            payload.get("receiver_video_delay_ms", 0),
+            "receiver_video_delay_ms",
+        )
         receiver_playback_device_raw = payload.get("receiver_playback_device")
         receiver_playback_device = (
             str(receiver_playback_device_raw).strip() or None
@@ -137,11 +150,13 @@ class RuntimeLaunchRequest:
             sender_playback_device = None
             video_source = "config"
             video_device = None
+            sender_audio_delay_ms = 0
         else:
             if audio_source != "device":
                 audio_device = None
             if sender_audio_mode != "aec" or audio_source == "off":
                 sender_playback_device = None
+                sender_audio_delay_ms = 0
             if video_source != "device":
                 video_device = None
             elif video_device is None:
@@ -151,6 +166,7 @@ class RuntimeLaunchRequest:
             receiver_audio_transport = "config"
             receiver_playback_device = None
             receiver_video_output = None
+            receiver_video_delay_ms = 0
 
         return cls(
             role=role,
@@ -161,9 +177,11 @@ class RuntimeLaunchRequest:
             sender_playback_device=sender_playback_device,
             video_source=video_source,
             video_device=video_device,
+            sender_audio_delay_ms=sender_audio_delay_ms,
             receiver_audio_transport=receiver_audio_transport,
             receiver_playback_device=receiver_playback_device,
             receiver_video_output=receiver_video_output,
+            receiver_video_delay_ms=receiver_video_delay_ms,
         )
 
 
@@ -176,6 +194,7 @@ class RuntimeService:
         recording_dir: Path,
         archive_dir: Path,
         preview_dir: Path,
+        runtime_dir: Path,
         log_capacity: int = 500,
     ) -> None:
         self._python_executable = python_executable
@@ -184,6 +203,7 @@ class RuntimeService:
         self._recording_dir = recording_dir
         self._archive_dir = archive_dir
         self._preview_dir = preview_dir
+        self._runtime_dir = runtime_dir
         self._log_capacity = log_capacity
 
         self._lock = threading.Lock()
@@ -216,6 +236,7 @@ class RuntimeService:
                 self._stopped_at = None
                 self._last_exit_code = None
         else:
+            self._write_initial_sync_delay(request)
             command, working_dir = self._build_process_command(request)
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
@@ -316,6 +337,43 @@ class RuntimeService:
         self.record_event("Recording stopped from dashboard.")
         return self.snapshot()
 
+    def set_sync_delay(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(payload, dict):
+            raise ValueError("Sync delay payload must be a JSON object.")
+
+        with self._lock:
+            self._sync_state_locked()
+            request = self._current_request
+            process = self._process
+
+        if process is None or request is None or request.role not in {"sender", "receiver"}:
+            raise RuntimeError("Sync delay controls require a running sender or receiver role.")
+
+        if request.role == "sender":
+            if not request.audio_enabled or request.sender_audio_mode != "aec":
+                raise RuntimeError("Sender audio delay requires a running sender in Playback + DSP mode.")
+            delay_ms = _parse_sync_delay_ms(
+                payload.get("sender_audio_delay_ms", payload.get("delay_ms", request.sender_audio_delay_ms)),
+                "sender_audio_delay_ms",
+            )
+            next_request = replace(request, sender_audio_delay_ms=delay_ms)
+            self._write_sync_delay_file("sender-audio-delay-ms.txt", delay_ms)
+            label = "sender audio playback/probe"
+        else:
+            delay_ms = _parse_sync_delay_ms(
+                payload.get("receiver_video_delay_ms", payload.get("delay_ms", request.receiver_video_delay_ms)),
+                "receiver_video_delay_ms",
+            )
+            next_request = replace(request, receiver_video_delay_ms=delay_ms)
+            self._write_sync_delay_file("receiver-video-delay-ms.txt", delay_ms)
+            label = "receiver video"
+
+        with self._lock:
+            if self._current_request is request:
+                self._current_request = next_request
+        self.record_event(f"Updated {label} delay to {delay_ms} ms.")
+        return self.snapshot()
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             self._sync_state_locked()
@@ -368,6 +426,15 @@ class RuntimeService:
                 command.extend(["--device", request.audio_device])
             if request.sender_audio_mode == "aec" and request.sender_playback_device:
                 command.extend(["--playback-device", request.sender_playback_device])
+            if request.sender_audio_mode == "aec" and request.audio_enabled:
+                command.extend(
+                    [
+                        "--audio-delay-ms",
+                        str(request.sender_audio_delay_ms),
+                        "--sync-delay-file",
+                        str(self._sync_delay_file("sender-audio-delay-ms.txt")),
+                    ]
+                )
             if request.video_source == "device" and request.video_device:
                 command.extend(["--video-device", request.video_device])
             else:
@@ -387,6 +454,10 @@ class RuntimeService:
                 request.country or "tn",
                 "--audio-transport",
                 request.receiver_audio_transport,
+                "--video-delay-ms",
+                str(request.receiver_video_delay_ms),
+                "--sync-delay-file",
+                str(self._sync_delay_file("receiver-video-delay-ms.txt")),
                 "--preview-pattern",
                 preview_pattern,
             ]
@@ -398,6 +469,19 @@ class RuntimeService:
             return command, working_dir
 
         raise ValueError(f"Unsupported subprocess role: {request.role}")
+
+    def _write_initial_sync_delay(self, request: RuntimeLaunchRequest) -> None:
+        if request.role == "sender":
+            self._write_sync_delay_file("sender-audio-delay-ms.txt", request.sender_audio_delay_ms)
+        elif request.role == "receiver":
+            self._write_sync_delay_file("receiver-video-delay-ms.txt", request.receiver_video_delay_ms)
+
+    def _sync_delay_file(self, filename: str) -> Path:
+        return self._runtime_dir / filename
+
+    def _write_sync_delay_file(self, filename: str, delay_ms: int) -> None:
+        self._runtime_dir.mkdir(parents=True, exist_ok=True)
+        self._sync_delay_file(filename).write_text(f"{delay_ms}\n", encoding="utf-8")
 
     def _build_sender_snapshot_locked(self, request: RuntimeLaunchRequest | None) -> dict[str, Any] | None:
         if request is None or request.role != "sender" or request.country is None:
@@ -469,3 +553,17 @@ def _to_iso(timestamp: float | None) -> str | None:
     if timestamp is None:
         return None
     return dt.datetime.fromtimestamp(timestamp, tz=dt.timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+def _parse_sync_delay_ms(value: Any, field_name: str) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer from 0 to {MAX_SYNC_DELAY_MS}.")
+    try:
+        delay_ms = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer from 0 to {MAX_SYNC_DELAY_MS}.") from exc
+    if delay_ms < 0 or delay_ms > MAX_SYNC_DELAY_MS:
+        raise ValueError(f"{field_name} must be between 0 and {MAX_SYNC_DELAY_MS} ms.")
+    return delay_ms

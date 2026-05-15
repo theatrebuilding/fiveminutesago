@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crying By the Sea Control</title>
-    <link rel="stylesheet" href="/static/styles.css?v=20260401-2" />
+    <link rel="stylesheet" href="/static/styles.css?v=20260515-sync-delay" />
   </head>
   <body>
     <div class="page-shell">
@@ -75,6 +75,12 @@
               <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender Playback + DSP mode.</p>
             </label>
 
+            <label id="sender-audio-delay-field" class="field hidden">
+              <span class="field-label">Audio Delay <span id="sender-audio-delay-value">0 ms</span></span>
+              <input id="sender-audio-delay-input" type="range" min="0" max="3000" step="10" value="0" />
+              <p id="sender-audio-delay-message" class="field-help">Use when returned audio is early. Delays sender playback and the echo probe together.</p>
+            </label>
+
             <label id="receiver-audio-field" class="field hidden">
               <span class="field-label">Receiver Audio</span>
               <select id="receiver-audio-select">
@@ -100,6 +106,12 @@
                 <option value="__receiver_video_output_auto__">Automatic output</option>
               </select>
               <p id="receiver-video-output-message" class="field-help">Choose the DRM / HDMI output for kmssink, or leave it on automatic selection.</p>
+            </label>
+
+            <label id="receiver-video-delay-field" class="field hidden">
+              <span class="field-label">Video Delay <span id="receiver-video-delay-value">0 ms</span></span>
+              <input id="receiver-video-delay-input" type="range" min="0" max="3000" step="10" value="0" />
+              <p id="receiver-video-delay-message" class="field-help">Use when projector video is early. Adjust live during clap/slate calibration.</p>
             </label>
           </div>
           <div class="button-row">
@@ -251,6 +263,6 @@
       </main>
     </div>
 
-    <script src="/static/app.js?v=20260404-4" defer></script>
+    <script src="/static/app.js?v=20260515-sync-delay" defer></script>
   </body>
 </html>

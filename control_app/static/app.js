@@ -41,6 +41,10 @@ const senderAudioModeSelect = document.getElementById("sender-audio-mode-select"
 const senderPlaybackDeviceField = document.getElementById("sender-playback-device-field");
 const senderPlaybackDeviceSelect = document.getElementById("sender-playback-device-select");
 const senderPlaybackDeviceMessage = document.getElementById("sender-playback-device-message");
+const senderAudioDelayField = document.getElementById("sender-audio-delay-field");
+const senderAudioDelayInput = document.getElementById("sender-audio-delay-input");
+const senderAudioDelayValue = document.getElementById("sender-audio-delay-value");
+const senderAudioDelayMessage = document.getElementById("sender-audio-delay-message");
 const receiverAudioField = document.getElementById("receiver-audio-field");
 const receiverAudioSelect = document.getElementById("receiver-audio-select");
 const receiverAudioMessage = document.getElementById("receiver-audio-message");
@@ -50,6 +54,10 @@ const receiverPlaybackDeviceMessage = document.getElementById("receiver-playback
 const receiverVideoOutputField = document.getElementById("receiver-video-output-field");
 const receiverVideoOutputSelect = document.getElementById("receiver-video-output-select");
 const receiverVideoOutputMessage = document.getElementById("receiver-video-output-message");
+const receiverVideoDelayField = document.getElementById("receiver-video-delay-field");
+const receiverVideoDelayInput = document.getElementById("receiver-video-delay-input");
+const receiverVideoDelayValue = document.getElementById("receiver-video-delay-value");
+const receiverVideoDelayMessage = document.getElementById("receiver-video-delay-message");
 const startRoleButton = document.getElementById("start-role");
 const saveConfigButton = document.getElementById("save-config");
 const applyConfigButton = document.getElementById("apply-config");
@@ -92,6 +100,10 @@ const RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE = "__receiver_audio_playback_
 const RECEIVER_VIDEO_OUTPUT_AUTO_VALUE = "__receiver_video_output_auto__";
 const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
 const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
+const MAX_SYNC_DELAY_MS = 3000;
+const SYNC_DELAY_DEBOUNCE_MS = 250;
+
+let syncDelayTimer = null;
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -156,6 +168,23 @@ function formatSeconds(seconds) {
   return `${hours}h ${mins % 60}m`;
 }
 
+function normalizeSyncDelayMs(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return 0;
+  }
+  return Math.min(MAX_SYNC_DELAY_MS, Math.max(0, parsed));
+}
+
+function formatSyncDelay(value) {
+  return `${normalizeSyncDelayMs(value)} ms`;
+}
+
+function updateSyncDelayLabels() {
+  senderAudioDelayValue.textContent = formatSyncDelay(senderAudioDelayInput.value);
+  receiverVideoDelayValue.textContent = formatSyncDelay(receiverVideoDelayInput.value);
+}
+
 function describeSenderAudioChoice(launch) {
   const source = launch?.audio_source || (launch?.audio_enabled ? "device" : "off");
   const senderAudioMode = launch?.sender_audio_mode || "aec";
@@ -174,7 +203,9 @@ function describeSenderAudioChoice(launch) {
     return `${sourceLabel} • capture only`;
   }
 
-  return `${sourceLabel} • playback+dsp`;
+  const delayMs = normalizeSyncDelayMs(launch.sender_audio_delay_ms);
+  const delayLabel = delayMs ? ` • audio delay ${delayMs} ms` : "";
+  return `${sourceLabel} • playback+dsp${delayLabel}`;
 }
 
 function shouldShowSenderPlaybackField() {
@@ -186,6 +217,10 @@ function shouldShowSenderPlaybackField() {
   }
   const selectedAudioValue = audioDeviceSelect.value || AUDIO_OFF_VALUE;
   return selectedAudioValue !== AUDIO_OFF_VALUE;
+}
+
+function shouldShowSenderAudioDelayField() {
+  return shouldShowSenderPlaybackField();
 }
 
 function getLaunchVideoSource(launch) {
@@ -229,10 +264,12 @@ function normalizeReceiverAudioTransport(value) {
 }
 
 function describeReceiverVideoChoice(launch) {
+  const delayMs = normalizeSyncDelayMs(launch?.receiver_video_delay_ms);
+  const delayLabel = delayMs ? ` • video delay ${delayMs} ms` : "";
   if (launch?.receiver_video_output) {
-    return `display ${launch.receiver_video_output}`;
+    return `display ${launch.receiver_video_output}${delayLabel}`;
   }
-  return "auto display";
+  return `auto display${delayLabel}`;
 }
 
 function describeLaunch(launch) {
@@ -371,11 +408,14 @@ function applyRoleFormState() {
   audioDeviceField.classList.toggle("hidden", !sender);
   senderAudioModeField.classList.toggle("hidden", !sender);
   senderPlaybackDeviceField.classList.toggle("hidden", !shouldShowSenderPlaybackField());
+  senderAudioDelayField.classList.toggle("hidden", !shouldShowSenderAudioDelayField());
   receiverAudioField.classList.toggle("hidden", !receiver);
   receiverPlaybackDeviceField.classList.toggle("hidden", !receiver);
   receiverVideoOutputField.classList.toggle("hidden", !receiver);
+  receiverVideoDelayField.classList.toggle("hidden", !receiver);
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
+  updateSyncDelayLabels();
 }
 
 function markLaunchFormDirty() {
@@ -419,6 +459,7 @@ function syncFormFromRuntime(runtime) {
     }
     ensurePlaybackDeviceOption(launch.sender_playback_device);
     senderPlaybackDeviceSelect.value = launch.sender_playback_device || AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+    senderAudioDelayInput.value = normalizeSyncDelayMs(launch.sender_audio_delay_ms);
   }
 
   if (launch.role === "receiver") {
@@ -430,6 +471,7 @@ function syncFormFromRuntime(runtime) {
       launch.receiver_video_output ? `Unavailable display output (${launch.receiver_video_output})` : null,
     );
     receiverVideoOutputSelect.value = launch.receiver_video_output || RECEIVER_VIDEO_OUTPUT_AUTO_VALUE;
+    receiverVideoDelayInput.value = normalizeSyncDelayMs(launch.receiver_video_delay_ms);
   }
   applyRoleFormState();
 }
@@ -1043,8 +1085,10 @@ function buildLaunchPayload() {
         senderPlaybackDeviceSelect.value && senderPlaybackDeviceSelect.value !== AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
           ? senderPlaybackDeviceSelect.value
           : null;
+      payload.sender_audio_delay_ms = normalizeSyncDelayMs(senderAudioDelayInput.value);
     } else {
       payload.sender_playback_device = null;
+      payload.sender_audio_delay_ms = 0;
     }
   }
 
@@ -1058,6 +1102,7 @@ function buildLaunchPayload() {
       receiverVideoOutputSelect.value && receiverVideoOutputSelect.value !== RECEIVER_VIDEO_OUTPUT_AUTO_VALUE
         ? receiverVideoOutputSelect.value
         : null;
+    payload.receiver_video_delay_ms = normalizeSyncDelayMs(receiverVideoDelayInput.value);
   }
 
   return payload;
@@ -1095,6 +1140,64 @@ async function stopRole() {
   } finally {
     setBusy([startRoleButton], false);
   }
+}
+
+async function updateRuntimeSyncDelay(payload, messageElement, successMessage) {
+  try {
+    const response = await api("/api/runtime/sync-delay", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    messageElement.textContent = successMessage || response.message;
+    await refreshStatus();
+  } catch (error) {
+    messageElement.textContent = error.message;
+  }
+}
+
+function scheduleRuntimeSyncDelay(payload, messageElement, successMessage) {
+  window.clearTimeout(syncDelayTimer);
+  syncDelayTimer = window.setTimeout(() => {
+    updateRuntimeSyncDelay(payload, messageElement, successMessage);
+  }, SYNC_DELAY_DEBOUNCE_MS);
+}
+
+function handleSenderAudioDelayInput() {
+  const delayMs = normalizeSyncDelayMs(senderAudioDelayInput.value);
+  senderAudioDelayInput.value = delayMs;
+  updateSyncDelayLabels();
+
+  if (latestStatus?.runtime?.running && latestStatus.runtime.role === "sender") {
+    senderAudioDelayMessage.textContent = `Updating sender audio playback/probe delay to ${delayMs} ms…`;
+    scheduleRuntimeSyncDelay(
+      { sender_audio_delay_ms: delayMs },
+      senderAudioDelayMessage,
+      `Sender audio playback/probe delay set to ${delayMs} ms.`,
+    );
+    return;
+  }
+
+  markLaunchFormDirty();
+  senderAudioDelayMessage.textContent = `Sender will start with ${delayMs} ms audio playback/probe delay.`;
+}
+
+function handleReceiverVideoDelayInput() {
+  const delayMs = normalizeSyncDelayMs(receiverVideoDelayInput.value);
+  receiverVideoDelayInput.value = delayMs;
+  updateSyncDelayLabels();
+
+  if (latestStatus?.runtime?.running && latestStatus.runtime.role === "receiver") {
+    receiverVideoDelayMessage.textContent = `Updating receiver video delay to ${delayMs} ms…`;
+    scheduleRuntimeSyncDelay(
+      { receiver_video_delay_ms: delayMs },
+      receiverVideoDelayMessage,
+      `Receiver video delay set to ${delayMs} ms.`,
+    );
+    return;
+  }
+
+  markLaunchFormDirty();
+  receiverVideoDelayMessage.textContent = `Receiver will start with ${delayMs} ms video delay.`;
 }
 
 async function toggleRoleAction() {
@@ -1231,9 +1334,11 @@ senderAudioModeSelect.addEventListener("change", () => {
   applyRoleFormState();
 });
 senderPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
+senderAudioDelayInput.addEventListener("input", handleSenderAudioDelayInput);
 receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
 receiverPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoOutputSelect.addEventListener("change", markLaunchFormDirty);
+receiverVideoDelayInput.addEventListener("input", handleReceiverVideoDelayInput);
 startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
