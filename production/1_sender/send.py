@@ -189,7 +189,7 @@ class SenderRuntime:
             {preview_branch}
 
             mpegtsmux name=av_mux alignment={alignment} !
-            srtsink wait-for-connection=true
+            srtsink wait-for-connection=false
                 uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings_video}"
         """
         return pipeline_str.strip()
@@ -335,7 +335,7 @@ class SenderRuntime:
                 ! audioresample
                 ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate}
                 ! rtpL16pay
-                ! srtsink wait-for-connection=true
+                ! srtsink wait-for-connection=false
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
 
             audio_capture_tee. ! {audio_aac_output_queue}
@@ -532,7 +532,7 @@ class SenderRuntime:
             GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
 
         print("[Sender] Setting state to PLAYING...")
-        self._set_pipeline_state(Gst.State.PLAYING, timeout_seconds=5.0)
+        self._set_pipeline_state(Gst.State.PLAYING, timeout_seconds=5.0, allow_pending=True)
 
         self.loop = GLib.MainLoop()
         try:
@@ -552,6 +552,7 @@ class SenderRuntime:
         target_state,
         timeout_seconds=5.0,
         suppress_errors=False,
+        allow_pending=False,
     ):
         if self.pipeline is None:
             return
@@ -572,6 +573,13 @@ class SenderRuntime:
                 print(message, flush=True)
                 return
             raise RuntimeError(message)
+        if allow_pending and target_state == Gst.State.PLAYING:
+            if result in {Gst.StateChangeReturn.ASYNC, Gst.StateChangeReturn.NO_PREROLL}:
+                print("[Sender] Pipeline armed and waiting for stream connections/data.", flush=True)
+                return
+            if pending_state == target_state:
+                print("[Sender] Pipeline armed and waiting to complete PLAYING.", flush=True)
+                return
         if result == Gst.StateChangeReturn.ASYNC:
             message = (
                 f"[Sender] Timed out while waiting for pipeline state {self._state_label(target_state)}; "

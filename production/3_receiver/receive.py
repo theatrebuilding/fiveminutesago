@@ -206,7 +206,7 @@ class VideoReceiver:
 
         pipeline_str = f"""
             {selector_output}
-            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller{video_srt_suffix}"
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller{video_srt_suffix}" wait-for-connection=false
                 ! {receiver_video_input_queue}
                 ! tsparse set-timestamps=true
                 ! tsdemux latency=50 name=demux
@@ -403,11 +403,13 @@ class VideoReceiver:
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
             print("VideoReceiver: End of Stream")
+            self.stop()
         elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             print(f"VideoReceiver: ERROR -> {err}")
             if debug:
                 print(f"Debug info: {debug}")
+            self.stop()
 
     def poll_sync_delay_file(self):
         if self.pipeline is None or not self.sync_delay_file:
