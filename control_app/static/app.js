@@ -64,7 +64,6 @@ const dspSettingsButton = document.getElementById("dsp-settings-button");
 const applyConfigButton = document.getElementById("apply-config");
 const showConfigButton = document.getElementById("show-config");
 const dspSettingsModal = document.getElementById("dsp-settings-modal");
-const dspSettingsCloseButton = document.getElementById("dsp-settings-close");
 const dspSettingsCancelButton = document.getElementById("dsp-settings-cancel");
 const dspSettingsSaveButton = document.getElementById("dsp-settings-save");
 const dspSettingsMessage = document.getElementById("dsp-settings-message");
@@ -1440,7 +1439,7 @@ function closeDspSettings() {
 }
 
 async function saveDspSettings() {
-  setBusy([dspSettingsSaveButton, dspSettingsCancelButton, dspSettingsCloseButton], true);
+  setBusy([dspSettingsSaveButton, dspSettingsCancelButton], true);
   dspSettingsMessage.textContent = "Saving DSP settings and relaunching active role…";
   try {
     const payload = await api("/api/config/dsp-settings", {
@@ -1456,7 +1455,7 @@ async function saveDspSettings() {
   } catch (error) {
     dspSettingsMessage.textContent = error.message;
   } finally {
-    setBusy([dspSettingsSaveButton, dspSettingsCancelButton, dspSettingsCloseButton], false);
+    setBusy([dspSettingsSaveButton, dspSettingsCancelButton], false);
   }
 }
 
@@ -1522,7 +1521,6 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 applyConfigButton.addEventListener("click", () => saveConfig(true));
 dspSettingsButton.addEventListener("click", openDspSettings);
-dspSettingsCloseButton.addEventListener("click", closeDspSettings);
 dspSettingsCancelButton.addEventListener("click", closeDspSettings);
 dspSettingsSaveButton.addEventListener("click", saveDspSettings);
 dspSettingsModal.addEventListener("change", (event) => {
