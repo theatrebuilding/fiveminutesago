@@ -8,14 +8,19 @@ def get_config_path():
     if override and override.strip():
         return os.path.abspath(os.path.expanduser(override.strip()))
 
+    shared_path = "/config/config.yaml"
+    if os.path.isfile(shared_path):
+        return shared_path
+
     dir_path = os.path.dirname(os.path.realpath(__file__))
     return os.path.join(dir_path, "config.yaml")
 
 
 def load_config():
     """
-    Loads config from CONFIG_PATH when set, otherwise from the local
-    production/config.yaml next to this file.
+    Loads config from CONFIG_PATH when set, otherwise from the shared
+    /config/config.yaml when present, otherwise from the local production
+    config.yaml next to this file.
     Returns a Python dictionary with the config contents.
     """
     config_path = get_config_path()

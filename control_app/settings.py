@@ -40,12 +40,7 @@ def build_settings() -> AppSettings:
     project_root = Path(__file__).resolve().parents[1]
     storage_root = Path(os.getenv("TBDRIVE_ROOT", "/mnt/tbdrive"))
     storage_reference_root = Path(os.getenv("TBDRIVE_REFERENCE_ROOT", "/config"))
-    config_path_override = os.getenv("CONFIG_PATH")
-    config_path = (
-        Path(config_path_override.strip()).expanduser()
-        if config_path_override and config_path_override.strip()
-        else project_root / "production" / "config.yaml"
-    )
+    config_path = _resolve_config_path(project_root)
     paths = AppPaths(
         project_root=project_root,
         static_dir=project_root / "control_app" / "static",
@@ -67,3 +62,18 @@ def build_settings() -> AppSettings:
         log_capacity=int(os.getenv("LOG_CAPACITY", "500")),
         python_executable=os.getenv("PYTHON_EXECUTABLE", sys.executable),
     )
+
+
+def _resolve_config_path(project_root: Path) -> Path:
+    config_path_override = os.getenv("CONFIG_PATH")
+    if config_path_override and config_path_override.strip():
+        return Path(config_path_override.strip()).expanduser().resolve()
+
+    shared_config_path = Path("/config/config.yaml")
+    shared_config_dir = shared_config_path.parent
+    if shared_config_path.exists() or (
+        shared_config_dir.is_dir() and os.access(shared_config_dir, os.W_OK)
+    ):
+        return shared_config_path
+
+    return project_root / "production" / "config.yaml"

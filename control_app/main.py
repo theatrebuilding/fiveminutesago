@@ -39,6 +39,7 @@ settings = build_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     config_service = ConfigService(settings.paths.config_path)
+    config_service.ensure_exists(settings.paths.production_dir / "config.yaml")
     runtime_service = RuntimeService(
         python_executable=settings.python_executable,
         project_root=settings.paths.project_root,

@@ -240,6 +240,7 @@ class RuntimeService:
             command, working_dir = self._build_process_command(request)
             env = os.environ.copy()
             env["PYTHONUNBUFFERED"] = "1"
+            env["CONFIG_PATH"] = str(self._config_path)
             process = subprocess.Popen(
                 command,
                 cwd=working_dir,

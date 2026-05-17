@@ -15,4 +15,6 @@ tailscale/state/*
 !tailscale/state/.gitkeep
 tailscale/config/generated/*
 !tailscale/config/generated/.gitkeep
+tailscale/config/config.yaml
+tailscale/config/.config.yaml.tmp
 .omx/

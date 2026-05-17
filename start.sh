@@ -71,6 +71,19 @@ print(data.get("Self", {}).get("DNSName", "").rstrip("."))
   echo "Warning: could not determine Tailscale certificate domain; skipping serve config render." >&2
 }
 
+seed_shared_config() {
+  local config_path="${CONFIG_PATH:-}"
+  local seed_path="/app/production/config.yaml"
+
+  [[ -n "$config_path" ]] || return 0
+  [[ -f "$config_path" ]] && return 0
+  [[ -f "$seed_path" ]] || return 0
+
+  mkdir -p "$(dirname "$config_path")"
+  cp "$seed_path" "$config_path"
+  echo "Seeded shared application config at ${config_path}."
+}
+
 cleanup() {
   kill -TERM "${TS_PID:-}" 2>/dev/null || true
   wait "${TS_PID:-}" 2>/dev/null || true
@@ -87,6 +100,7 @@ done
 
 expose_optional_host_sound
 expose_optional_host_drm
+seed_shared_config
 render_serve_config &
 
 exec "$@"
