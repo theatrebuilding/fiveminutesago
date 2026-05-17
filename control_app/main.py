@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import secrets
@@ -11,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .services.config_service import ConfigService, ConfigValidationError
+from .services.config_service import ConfigService, ConfigSyncError, ConfigValidationError
 from .services.audio_device_service import AudioDeviceService
 from .services.dashboard_service import DashboardService
 from .services.display_output_service import DisplayOutputService
@@ -38,7 +39,13 @@ settings = build_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    config_service = ConfigService(settings.paths.config_path)
+    config_service = ConfigService(
+        settings.paths.config_path,
+        central_config_url=settings.central_config_url,
+        dashboard_username=settings.dashboard_username,
+        dashboard_password=settings.dashboard_password,
+        sync_timeout_seconds=settings.config_sync_timeout_seconds,
+    )
     config_service.ensure_exists(settings.paths.production_dir / "config.yaml")
     runtime_service = RuntimeService(
         python_executable=settings.python_executable,
@@ -125,8 +132,16 @@ async def get_status(request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/config")
-async def get_config(request: Request) -> dict[str, Any]:
+async def get_config(request: Request, sync: bool = False) -> dict[str, Any]:
     services = _services(request)
+    sync_result = None
+    sync_error = None
+    if sync:
+        try:
+            sync_result = await asyncio.to_thread(services.config_service.sync_from_central)
+        except ConfigSyncError as exc:
+            sync_error = str(exc)
+
     try:
         text = services.config_service.read_text()
     except OSError as exc:
@@ -148,6 +163,8 @@ async def get_config(request: Request) -> dict[str, Any]:
         "path": str(services.config_service.config_path),
         "text": text,
         "summary": summary,
+        "sync": sync_result,
+        "sync_error": sync_error,
     }
 
 
@@ -225,9 +242,16 @@ async def runtime_start(request: Request) -> dict[str, Any]:
 
     try:
         launch_request = RuntimeLaunchRequest.from_payload(payload)
+        if launch_request.role in {"sender", "receiver"}:
+            await asyncio.to_thread(services.config_service.sync_from_central)
         status = services.runtime_service.start(launch_request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ConfigSyncError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not sync central config before starting {launch_request.role}: {exc}",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 

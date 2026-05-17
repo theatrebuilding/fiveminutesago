@@ -32,6 +32,8 @@ class AppSettings:
     paths: AppPaths
     dashboard_username: str
     dashboard_password: str
+    central_config_url: str | None
+    config_sync_timeout_seconds: float
     log_capacity: int
     python_executable: str
 
@@ -59,6 +61,8 @@ def build_settings() -> AppSettings:
         paths=paths,
         dashboard_username=os.getenv("DASHBOARD_USERNAME", "admin"),
         dashboard_password=os.getenv("DASHBOARD_PASSWORD", ""),
+        central_config_url=_non_empty_env("CENTRAL_CONFIG_URL"),
+        config_sync_timeout_seconds=float(os.getenv("CONFIG_SYNC_TIMEOUT_SECONDS", "5")),
         log_capacity=int(os.getenv("LOG_CAPACITY", "500")),
         python_executable=os.getenv("PYTHON_EXECUTABLE", sys.executable),
     )
@@ -77,3 +81,11 @@ def _resolve_config_path(project_root: Path) -> Path:
         return shared_config_path
 
     return project_root / "production" / "config.yaml"
+
+
+def _non_empty_env(name: str) -> str | None:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None

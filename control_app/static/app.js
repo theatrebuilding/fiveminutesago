@@ -407,12 +407,14 @@ function applyConfigPanelState() {
   const role = getConfigPanelRole();
   const editable = role === "server";
   const roleChanged = role !== lastConfigPanelRole;
+  const configShown = configEditor.dataset.configShown === "true";
   lastConfigPanelRole = role;
 
   configPanelTitle.textContent = editable ? "Config Editor" : "Server Config";
   saveConfigButton.classList.toggle("hidden", !editable);
   applyConfigButton.classList.toggle("hidden", !editable);
   showConfigButton.classList.toggle("hidden", editable);
+  showConfigButton.textContent = configShown ? "Update config" : "Show Config";
   configEditor.readOnly = !editable;
 
   if (editable) {
@@ -427,9 +429,11 @@ function applyConfigPanelState() {
   if (roleChanged) {
     configEditor.classList.add("hidden");
     configEditor.dataset.configShown = "false";
+    showConfigButton.textContent = "Show Config";
     configMessage.textContent = "Click Show Config to read the central server config mounted on this Pi.";
   } else if (configEditor.dataset.configShown !== "true") {
     configEditor.classList.add("hidden");
+    showConfigButton.textContent = "Show Config";
   }
 }
 
@@ -1026,20 +1030,30 @@ async function refreshArchive() {
 async function loadConfig(options = {}) {
   const reveal = options.reveal !== false;
   const showSuccess = Boolean(options.showSuccess);
+  const sync = options.sync ?? getConfigPanelRole() !== "server";
+  const path = sync ? "/api/config?sync=1" : "/api/config";
   try {
-    const payload = await api("/api/config", { method: "GET" });
+    const payload = await api(path, { method: "GET" });
     configEditor.value = payload.text;
     configEditor.dataset.configShown = "true";
+    showConfigButton.textContent = getConfigPanelRole() === "server" ? "Show Config" : "Update config";
     if (reveal) {
       configEditor.classList.remove("hidden");
     }
     if (showSuccess) {
-      configMessage.textContent = `Loaded config from ${payload.path}.`;
+      if (payload.sync_error) {
+        configMessage.textContent = `Showing local cached config from ${payload.path}. Central sync failed: ${payload.sync_error}`;
+      } else if (payload.sync?.attempted) {
+        configMessage.textContent = `${payload.sync.updated ? "Synced" : "Loaded"} central config into ${payload.path}.`;
+      } else {
+        configMessage.textContent = `Loaded config from ${payload.path}.`;
+      }
     }
   } catch (error) {
     configEditor.value = "";
     configEditor.dataset.configShown = "false";
     configEditor.classList.add("hidden");
+    showConfigButton.textContent = "Show Config";
     configMessage.textContent = `Server config file is not available. ${error.message}`;
   }
 }
@@ -1342,7 +1356,7 @@ async function deleteSelectedArchive() {
 
 async function saveConfig(restart) {
   if (getConfigPanelRole() !== "server") {
-    await loadConfig({ reveal: true, showSuccess: true });
+    await loadConfig({ reveal: true, showSuccess: true, sync: true });
     return;
   }
 
@@ -1402,7 +1416,7 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
-showConfigButton.addEventListener("click", () => loadConfig({ reveal: true, showSuccess: true }));
+showConfigButton.addEventListener("click", () => loadConfig({ reveal: true, showSuccess: true, sync: true }));
 archiveRenameButton.addEventListener("click", renameSelectedArchive);
 archiveDeleteButton.addEventListener("click", deleteSelectedArchive);
 archiveRefreshButton.addEventListener("click", refreshArchive);
