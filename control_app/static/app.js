@@ -1044,7 +1044,7 @@ async function loadConfig(options = {}) {
       if (payload.sync_error) {
         configMessage.textContent = `Showing local cached config from ${payload.path}. Central sync failed: ${payload.sync_error}`;
       } else if (payload.sync?.attempted) {
-        configMessage.textContent = `${payload.sync.updated ? "Synced" : "Loaded"} central config into ${payload.path}.`;
+        configMessage.textContent = `${payload.sync.updated ? "Synced" : "Loaded"} central config from ${payload.sync.url} into ${payload.path}.`;
       } else {
         configMessage.textContent = `Loaded config from ${payload.path}.`;
       }

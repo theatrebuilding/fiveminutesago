@@ -19,6 +19,8 @@ services:
       TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
       TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
       CONFIG_PATH: /config/config.yaml
+      CENTRAL_CONFIG_URL: ${CENTRAL_CONFIG_URL:-}
+      CONFIG_SYNC_TIMEOUT_SECONDS: ${CONFIG_SYNC_TIMEOUT_SECONDS:-5}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
       TS_ENABLE_HEALTH_CHECK: "true"
