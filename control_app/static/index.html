@@ -157,13 +157,129 @@
             <h2 id="config-panel-title">Config Editor</h2>
           </div>
           <div id="config-editor-actions" class="button-row">
-            <button id="save-config" class="button-muted">Save Config</button>
-            <button id="apply-config" class="button-accent">Save + Relaunch Active Role</button>
+            <button id="dsp-settings-button" class="button-muted">DSP Settings</button>
+            <button id="apply-config" class="button-accent">Save</button>
             <button id="show-config" class="button-muted hidden">Show Config</button>
           </div>
           <textarea id="config-editor" spellcheck="false"></textarea>
           <p id="config-message" class="action-message"></p>
         </section>
+
+        <div id="dsp-settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="dsp-settings-title">
+          <section class="modal-card dsp-settings-card">
+            <div class="modal-heading">
+              <div>
+                <p class="field-label">Sender audio DSP</p>
+                <h2 id="dsp-settings-title">DSP Settings</h2>
+              </div>
+              <button id="dsp-settings-close" class="button-muted" type="button">Close</button>
+            </div>
+            <div class="dsp-settings-grid">
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-echo-cancel" type="checkbox" data-dsp-key="echo-cancel" />
+                  <span>Echo cancellation</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <span class="field-label">Suppression level</span>
+                  <select data-dsp-key="echo-suppression-level">
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <input type="checkbox" data-dsp-key="delay-agnostic" />
+                  <span>Delay agnostic</span>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <input type="checkbox" data-dsp-key="extended-filter" />
+                  <span>Extended filter</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-noise-suppression" type="checkbox" data-dsp-key="noise-suppression" />
+                  <span>Noise suppression</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="noise-suppression">
+                  <span class="field-label">Noise level</span>
+                  <select data-dsp-key="noise-suppression-level">
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                    <option value="very-high">Very high</option>
+                  </select>
+                </label>
+                <label class="toggle-field">
+                  <input type="checkbox" data-dsp-key="high-pass-filter" />
+                  <span>High-pass filter</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-gain-control" type="checkbox" data-dsp-key="gain-control" />
+                  <span>Gain control</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Gain mode</span>
+                  <select data-dsp-key="gain-control-mode">
+                    <option value="adaptive-digital">Adaptive digital</option>
+                    <option value="fixed-digital">Fixed digital</option>
+                    <option value="adaptive-analog">Adaptive analog</option>
+                  </select>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Target level dBFS</span>
+                  <input type="number" min="0" max="31" step="1" data-dsp-key="target-level-dbfs" />
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Compression gain dB</span>
+                  <input type="number" min="0" max="90" step="1" data-dsp-key="compression-gain-db" />
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Startup min volume</span>
+                  <input type="number" min="0" max="255" step="1" data-dsp-key="startup-min-volume" />
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="gain-control">
+                  <input type="checkbox" data-dsp-key="limiter" />
+                  <span>Limiter</span>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="gain-control">
+                  <input type="checkbox" data-dsp-key="experimental-agc" />
+                  <span>Experimental AGC</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-voice-detection" type="checkbox" data-dsp-key="voice-detection" />
+                  <span>Voice detection</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="voice-detection">
+                  <span class="field-label">Detection likelihood</span>
+                  <select data-dsp-key="voice-detection-likelihood">
+                    <option value="very-low">Very low</option>
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="voice-detection">
+                  <span class="field-label">Frame size ms</span>
+                  <input type="number" min="0" max="1000" step="1" data-dsp-key="voice-detection-frame-size-ms" />
+                </label>
+              </article>
+            </div>
+            <p id="dsp-settings-message" class="action-message"></p>
+            <div class="button-row modal-actions">
+              <button id="dsp-settings-save" class="button-accent" type="button">Save</button>
+              <button id="dsp-settings-cancel" class="button-muted" type="button">Cancel</button>
+            </div>
+          </section>
+        </div>
 
         <section id="server-panel" class="panel storage-panel hidden">
           <div class="panel-heading">

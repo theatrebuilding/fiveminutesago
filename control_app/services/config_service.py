@@ -3,12 +3,15 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+import re
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
 
 import yaml
+
+from production.audio_support import WEBRTC_DSP_PROPERTY_ORDER, build_webrtcdsp_properties
 
 
 class ConfigValidationError(ValueError):
@@ -44,6 +47,10 @@ class ConfigService:
 
     def read_data(self) -> dict[str, Any]:
         return self.validate_text(self.read_text())
+
+    def read_dsp_settings(self) -> dict[str, Any]:
+        config = self.read_data()
+        return _normalize_dsp_settings(config.get("webrtcdsp_settings", {}))
 
     def ensure_exists(self, seed_path: Path) -> bool:
         if self._config_path.exists():
@@ -116,6 +123,18 @@ class ConfigService:
         self._write_normalized_text(text)
         return parsed
 
+    def write_dsp_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        normalized_settings = _normalize_dsp_settings(settings)
+        next_text = _replace_top_level_yaml_mapping(
+            self.read_text(),
+            "webrtcdsp_settings",
+            normalized_settings,
+        )
+        parsed = self.validate_text(next_text)
+        _normalize_dsp_settings(parsed.get("webrtcdsp_settings", {}))
+        self._write_normalized_text(next_text)
+        return parsed
+
     def _write_normalized_text(self, text: str) -> None:
         normalized = text.rstrip() + "\n"
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,3 +177,73 @@ def _with_query_param(url: str, name: str, value: str) -> str:
     query = [(key, item_value) for key, item_value in parse_qsl(parsed.query, keep_blank_values=True) if key != name]
     query.append((name, value))
     return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, urlencode(query), parsed.fragment))
+
+
+def _normalize_dsp_settings(settings: Any) -> dict[str, Any]:
+    try:
+        _properties, resolved = build_webrtcdsp_properties(settings)
+    except ValueError as exc:
+        raise ConfigValidationError(str(exc)) from exc
+    return {key: resolved[key] for key in WEBRTC_DSP_PROPERTY_ORDER}
+
+
+def _replace_top_level_yaml_mapping(
+    text: str,
+    mapping_key: str,
+    values: dict[str, Any],
+) -> str:
+    lines = text.rstrip("\n").splitlines()
+    start_index = _find_top_level_mapping(lines, mapping_key)
+    if start_index is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.append(f"{mapping_key}:")
+        lines.extend(_format_yaml_mapping_items(values))
+        return "\n".join(lines) + "\n"
+
+    end_index = len(lines)
+    for index in range(start_index + 1, len(lines)):
+        line = lines[index]
+        if line and not line[0].isspace() and not line.lstrip().startswith("#"):
+            end_index = index
+            break
+
+    seen_keys: set[str] = set()
+    next_block: list[str] = []
+    item_pattern = re.compile(r"^(\s*)([A-Za-z0-9_-]+)\s*:\s*([^#]*?)(\s+#.*)?$")
+    for line in lines[start_index + 1 : end_index]:
+        match = item_pattern.match(line)
+        if match and match.group(2) in values:
+            indent, item_key, _old_value, comment = match.groups()
+            seen_keys.add(item_key)
+            next_block.append(f"{indent}{item_key}: {_format_yaml_scalar(values[item_key])}{comment or ''}")
+            continue
+        next_block.append(line)
+
+    missing_items = {
+        item_key: item_value
+        for item_key, item_value in values.items()
+        if item_key not in seen_keys
+    }
+    next_block.extend(_format_yaml_mapping_items(missing_items))
+    return "\n".join(lines[: start_index + 1] + next_block + lines[end_index:]) + "\n"
+
+
+def _find_top_level_mapping(lines: list[str], mapping_key: str) -> int | None:
+    pattern = re.compile(rf"^{re.escape(mapping_key)}\s*:\s*(#.*)?$")
+    for index, line in enumerate(lines):
+        if pattern.match(line):
+            return index
+    return None
+
+
+def _format_yaml_mapping_items(values: dict[str, Any]) -> list[str]:
+    return [f"  {key}: {_format_yaml_scalar(value)}" for key, value in values.items()]
+
+
+def _format_yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    return str(value)

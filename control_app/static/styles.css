@@ -220,12 +220,14 @@ h3 {
 
 select,
 input[type="range"],
+input[type="number"],
 input[type="text"],
 textarea {
   width: 100%;
 }
 
 select,
+input[type="number"],
 input[type="text"],
 textarea {
   padding: 10px 12px;
@@ -238,12 +240,17 @@ textarea {
 }
 
 select:focus,
+input[type="number"]:focus,
 input[type="text"]:focus,
 textarea:focus {
   background: var(--bg-strong);
 }
 
 input[type="range"] {
+  accent-color: var(--accent);
+}
+
+input[type="checkbox"] {
   accent-color: var(--accent);
 }
 
@@ -309,6 +316,76 @@ button:disabled {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(7, 8, 9, 0.82);
+}
+
+.modal-card {
+  width: min(1040px, 100%);
+  max-height: min(86vh, 920px);
+  overflow: auto;
+  padding: 20px;
+  border: 1px solid var(--text-faint);
+  background: var(--bg);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+}
+
+.modal-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.dsp-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.dsp-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--bg-strong);
+  background: var(--bg-soft);
+}
+
+.toggle-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+}
+
+.toggle-field input {
+  width: auto;
+}
+
+.dsp-dependent.is-disabled {
+  opacity: 0.42;
+}
+
+.dsp-dependent select:disabled,
+.dsp-dependent input:disabled {
+  color: var(--text-faint);
+  background: transparent;
+}
+
+.modal-actions {
+  justify-content: flex-end;
+  margin-top: 16px;
 }
 
 .preview-grid {
@@ -467,6 +544,7 @@ button:disabled {
   .panel-heading-inline,
   .metric-grid,
   .preview-grid,
+  .dsp-settings-grid,
   .form-grid {
     grid-template-columns: 1fr;
     flex-direction: column;

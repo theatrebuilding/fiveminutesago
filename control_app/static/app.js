@@ -60,9 +60,14 @@ const receiverVideoDelayInput = document.getElementById("receiver-video-delay-in
 const receiverVideoDelayValue = document.getElementById("receiver-video-delay-value");
 const receiverVideoDelayMessage = document.getElementById("receiver-video-delay-message");
 const startRoleButton = document.getElementById("start-role");
-const saveConfigButton = document.getElementById("save-config");
+const dspSettingsButton = document.getElementById("dsp-settings-button");
 const applyConfigButton = document.getElementById("apply-config");
 const showConfigButton = document.getElementById("show-config");
+const dspSettingsModal = document.getElementById("dsp-settings-modal");
+const dspSettingsCloseButton = document.getElementById("dsp-settings-close");
+const dspSettingsCancelButton = document.getElementById("dsp-settings-cancel");
+const dspSettingsSaveButton = document.getElementById("dsp-settings-save");
+const dspSettingsMessage = document.getElementById("dsp-settings-message");
 const serverPanel = document.getElementById("server-panel");
 const senderPanel = document.getElementById("sender-panel");
 const receiverPanel = document.getElementById("receiver-panel");
@@ -105,6 +110,13 @@ const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
 const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
 const MAX_SYNC_DELAY_MS = 3000;
 const SYNC_DELAY_DEBOUNCE_MS = 250;
+const DSP_INT_KEYS = new Set([
+  "compression-gain-db",
+  "startup-min-volume",
+  "target-level-dbfs",
+  "voice-detection-frame-size-ms",
+]);
+const DSP_PARENT_KEYS = ["echo-cancel", "noise-suppression", "gain-control", "voice-detection"];
 
 let syncDelayTimer = null;
 
@@ -135,7 +147,9 @@ async function safeJson(response) {
 
 function setBusy(buttons, busy) {
   buttons.forEach((button) => {
-    button.disabled = busy;
+    if (button) {
+      button.disabled = busy;
+    }
   });
 }
 
@@ -411,7 +425,7 @@ function applyConfigPanelState() {
   lastConfigPanelRole = role;
 
   configPanelTitle.textContent = editable ? "Config Editor" : "Server Config";
-  saveConfigButton.classList.toggle("hidden", !editable);
+  dspSettingsButton.classList.toggle("hidden", !editable);
   applyConfigButton.classList.toggle("hidden", !editable);
   showConfigButton.classList.toggle("hidden", editable);
   showConfigButton.textContent = configShown ? "Update config" : "Show Config";
@@ -1354,13 +1368,105 @@ async function deleteSelectedArchive() {
   }
 }
 
+function getDspControl(key) {
+  return dspSettingsModal.querySelector(`[data-dsp-key="${key}"]`);
+}
+
+function setDspSettings(settings) {
+  Object.entries(settings || {}).forEach(([key, value]) => {
+    const control = getDspControl(key);
+    if (!control) {
+      return;
+    }
+    if (control.type === "checkbox") {
+      control.checked = Boolean(value);
+      return;
+    }
+    control.value = value;
+  });
+  updateDspDependentFields();
+}
+
+function collectDspSettings() {
+  const settings = {};
+  dspSettingsModal.querySelectorAll("[data-dsp-key]").forEach((control) => {
+    const key = control.dataset.dspKey;
+    if (control.type === "checkbox") {
+      settings[key] = control.checked;
+    } else if (DSP_INT_KEYS.has(key)) {
+      settings[key] = Number.parseInt(control.value, 10);
+    } else {
+      settings[key] = control.value;
+    }
+  });
+  return settings;
+}
+
+function updateDspDependentFields() {
+  DSP_PARENT_KEYS.forEach((key) => {
+    const parent = getDspControl(key);
+    const enabled = Boolean(parent?.checked);
+    dspSettingsModal.querySelectorAll(`[data-dsp-parent="${key}"]`).forEach((wrapper) => {
+      wrapper.classList.toggle("is-disabled", !enabled);
+      wrapper.querySelectorAll("input, select").forEach((control) => {
+        control.disabled = !enabled;
+      });
+    });
+  });
+}
+
+async function openDspSettings() {
+  if (getConfigPanelRole() !== "server") {
+    return;
+  }
+  setBusy([dspSettingsButton], true);
+  configMessage.textContent = "Loading DSP settings…";
+  try {
+    const payload = await api("/api/config/dsp-settings", { method: "GET" });
+    setDspSettings(payload.settings || {});
+    dspSettingsMessage.textContent = "";
+    dspSettingsModal.classList.remove("hidden");
+    configMessage.textContent = `Loaded DSP settings from ${payload.path}.`;
+  } catch (error) {
+    configMessage.textContent = error.message;
+  } finally {
+    setBusy([dspSettingsButton], false);
+  }
+}
+
+function closeDspSettings() {
+  dspSettingsModal.classList.add("hidden");
+  dspSettingsMessage.textContent = "";
+}
+
+async function saveDspSettings() {
+  setBusy([dspSettingsSaveButton, dspSettingsCancelButton, dspSettingsCloseButton], true);
+  dspSettingsMessage.textContent = "Saving DSP settings and relaunching active role…";
+  try {
+    const payload = await api("/api/config/dsp-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        settings: collectDspSettings(),
+      }),
+    });
+    closeDspSettings();
+    configMessage.textContent = payload.message;
+    await refreshStatus();
+    await loadConfig({ reveal: true, sync: false });
+  } catch (error) {
+    dspSettingsMessage.textContent = error.message;
+  } finally {
+    setBusy([dspSettingsSaveButton, dspSettingsCancelButton, dspSettingsCloseButton], false);
+  }
+}
+
 async function saveConfig(restart) {
   if (getConfigPanelRole() !== "server") {
     await loadConfig({ reveal: true, showSuccess: true, sync: true });
     return;
   }
 
-  setBusy([saveConfigButton, applyConfigButton], true);
+  setBusy([applyConfigButton, dspSettingsButton], true);
   configMessage.textContent = restart ? "Saving config and relaunching active role…" : "Saving config…";
 
   try {
@@ -1377,7 +1483,7 @@ async function saveConfig(restart) {
   } catch (error) {
     configMessage.textContent = error.message;
   } finally {
-    setBusy([saveConfigButton, applyConfigButton], false);
+    setBusy([applyConfigButton, dspSettingsButton], false);
   }
 }
 
@@ -1414,8 +1520,21 @@ receiverVideoOutputSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoDelayInput.addEventListener("input", handleReceiverVideoDelayInput);
 startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
-saveConfigButton.addEventListener("click", () => saveConfig(false));
 applyConfigButton.addEventListener("click", () => saveConfig(true));
+dspSettingsButton.addEventListener("click", openDspSettings);
+dspSettingsCloseButton.addEventListener("click", closeDspSettings);
+dspSettingsCancelButton.addEventListener("click", closeDspSettings);
+dspSettingsSaveButton.addEventListener("click", saveDspSettings);
+dspSettingsModal.addEventListener("change", (event) => {
+  if (event.target?.matches?.("[data-dsp-key]")) {
+    updateDspDependentFields();
+  }
+});
+dspSettingsModal.addEventListener("click", (event) => {
+  if (event.target === dspSettingsModal) {
+    closeDspSettings();
+  }
+});
 showConfigButton.addEventListener("click", () => loadConfig({ reveal: true, showSuccess: true, sync: true }));
 archiveRenameButton.addEventListener("click", renameSelectedArchive);
 archiveDeleteButton.addEventListener("click", deleteSelectedArchive);
@@ -1424,7 +1543,7 @@ archiveRefreshButton.addEventListener("click", refreshArchive);
 window.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
-    saveConfig(false);
+    saveConfig(true);
   }
 });
 
