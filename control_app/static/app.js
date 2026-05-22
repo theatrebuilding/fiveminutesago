@@ -224,6 +224,27 @@ function describeSenderAudioChoice(launch) {
   return `${sourceLabel} • playback+dsp${delayLabel}`;
 }
 
+function describeSenderRecovery(recovery) {
+  if (!recovery || !recovery.degraded) {
+    return "";
+  }
+  const activeMode = recovery.active_mode === "video-only"
+    ? "video-only"
+    : recovery.active_mode === "capture-only"
+      ? "capture-only"
+      : "Playback + DSP";
+  if (recovery.phase === "restoring") {
+    const stableText = recovery.stable_in_seconds != null
+      ? `; clearing degraded status in ${formatSeconds(recovery.stable_in_seconds)}`
+      : "";
+    return `Restoring Playback + DSP${stableText}`;
+  }
+  const retryText = recovery.next_retry_in_seconds != null
+    ? `; retrying Playback + DSP in ${formatSeconds(recovery.next_retry_in_seconds)}`
+    : "";
+  return `Running ${activeMode} fallback${retryText}`;
+}
+
 function shouldShowSenderPlaybackField() {
   if (roleSelect.value !== "sender") {
     return false;
@@ -885,6 +906,10 @@ function renderServerPreview(preview, packetActivity, imageUrl, image, meta, emp
     image.removeAttribute("src");
     image.classList.add("hidden");
     empty.classList.remove("hidden");
+    if (preview?.health?.message) {
+      meta.textContent = preview.health.message;
+      return;
+    }
     const packetText = describePacketActivity(packetActivity);
     meta.textContent = packetText || "No snapshot yet.";
     return;
@@ -956,6 +981,11 @@ function renderStatus(status) {
     : runtime.last_exit_code == null
       ? "Nothing is running."
       : `Last exit code ${runtime.last_exit_code}`;
+  const senderRecoveryText = senderActive ? describeSenderRecovery(sender?.recovery) : "";
+  if (senderRecoveryText) {
+    processState.textContent = "Degraded";
+    processMeta.textContent = senderRecoveryText;
+  }
 
   if (config.error) {
     configState.textContent = "Config Error";

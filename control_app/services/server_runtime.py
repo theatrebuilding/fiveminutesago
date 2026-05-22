@@ -22,6 +22,8 @@ from .udp_packet_monitor import UdpPacketMonitor
 Gst.init(None)
 
 PREVIEW_FRAME_INTERVAL_SECONDS = 5.0
+PACKETS_WITHOUT_DECODE_WARNING_SECONDS = 20.0
+PACKETS_WITHOUT_DECODE_RESTART_SECONDS = 30.0
 
 
 @dataclass
@@ -74,6 +76,9 @@ class ServerRuntime:
         self._last_preview_log_at: dict[str, float] = {}
         self._last_continuity_warning_at: dict[str, float] = {}
         self._next_preview_frame_at: dict[str, float] = {}
+        self._last_decoded_frame_at: dict[str, float] = {}
+        self._video_decode_missing_since: dict[str, float] = {}
+        self._last_no_decode_restart_at: dict[str, float] = {}
 
     def start(self) -> dict[str, Any]:
         with self._lock:
@@ -233,9 +238,13 @@ class ServerRuntime:
             self._last_preview_log_at = {}
             self._last_continuity_warning_at = {}
             self._next_preview_frame_at = {}
+            self._last_decoded_frame_at = {}
+            self._video_decode_missing_since = {}
+            self._last_no_decode_restart_at = {}
 
             for feed in self._video_feeds.values():
                 self._start_video_feed(feed)
+            GLib.timeout_add_seconds(5, self._check_video_decode_health)
         except Exception:
             for feed_state in self._video_feeds.values():
                 if feed_state.pipeline is not None:
@@ -344,6 +353,8 @@ class ServerRuntime:
             feed_state.pipeline = None
             feed_state.tee = None
             self._next_preview_frame_at.pop(feed, None)
+            self._last_decoded_frame_at.pop(feed, None)
+            self._video_decode_missing_since.pop(feed, None)
 
         self._start_video_feed(feed_state)
         return False
@@ -399,6 +410,46 @@ class ServerRuntime:
                 filename = structure.get_value("filename") if structure.has_field("filename") else None
                 if filename and self._should_log_preview_update(feed):
                     self._log(f"[{feed}] Preview updated: {filename}")
+                if filename:
+                    self._last_decoded_frame_at[feed] = time.time()
+                    self._video_decode_missing_since.pop(feed, None)
+        return True
+
+    def _check_video_decode_health(self) -> bool:
+        if not self._running:
+            return False
+        if self._packet_monitor is None:
+            return True
+
+        now = time.time()
+        packet_activity = self._packet_monitor.snapshot()
+        for feed, feed_state in list(self._video_feeds.items()):
+            packet_state = packet_activity.get(feed) or {}
+            if not bool(packet_state.get("receiving")):
+                self._video_decode_missing_since.pop(feed, None)
+                continue
+
+            preview = describe_latest_preview(self._preview_dir, feed_state.preview_pattern)
+            if preview.get("available"):
+                self._last_decoded_frame_at[feed] = float(preview.get("updated_at_ts") or now)
+                self._video_decode_missing_since.pop(feed, None)
+                continue
+
+            missing_since = self._video_decode_missing_since.setdefault(feed, now)
+            missing_for = now - missing_since
+            if missing_for < PACKETS_WITHOUT_DECODE_WARNING_SECONDS:
+                continue
+
+            last_restart = self._last_no_decode_restart_at.get(feed, 0.0)
+            if now - last_restart < PACKETS_WITHOUT_DECODE_RESTART_SECONDS:
+                continue
+
+            self._last_no_decode_restart_at[feed] = now
+            self._log(
+                f"[{feed}] UDP/SRT packets are arriving but no decodable video preview has appeared for "
+                f"{int(missing_for)}s; restarting video pipeline."
+            )
+            self._restart_video_feed(feed)
         return True
 
     def _start_recording_on_loop(self) -> None:
@@ -612,8 +663,27 @@ class ServerRuntime:
                 "updated_at": None,
                 "updated_at_ts": None,
                 "age_seconds": None,
+                "health": {
+                    "state": "no_packets",
+                    "message": None,
+                },
             }
-        return describe_latest_preview(self._preview_dir, pattern)
+        preview = describe_latest_preview(self._preview_dir, pattern)
+        health: dict[str, Any] = {
+            "state": "ok" if preview.get("available") else "waiting_for_video",
+            "message": None,
+        }
+        if packet_state is not None and bool(packet_state.get("receiving")) and not preview.get("available"):
+            missing_since = self._video_decode_missing_since.get(feed)
+            missing_for = int(max(0.0, time.time() - missing_since)) if missing_since is not None else 0
+            if missing_for >= PACKETS_WITHOUT_DECODE_WARNING_SECONDS:
+                health = {
+                    "state": "packets_without_decodable_video",
+                    "message": f"UDP/SRT packets incoming, but no decodable video frame yet ({missing_for}s).",
+                    "missing_for_seconds": missing_for,
+                }
+        preview["health"] = health
+        return preview
 
     def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
         ports = config.get("ports", {})

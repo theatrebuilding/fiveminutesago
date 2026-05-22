@@ -6,10 +6,13 @@ import datetime as dt
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import threading
 import time
 from typing import Any
+
+import yaml
 
 from .preview_catalog import (
     build_receiver_preview_pattern,
@@ -18,6 +21,15 @@ from .preview_catalog import (
     prune_preview_files,
 )
 from .server_runtime import ServerRuntime
+from .sender_recovery import (
+    CAPTURE_ONLY_MODE,
+    DEGRADED_PHASE,
+    PLAYBACK_DSP_MODE,
+    RESTORING_PHASE,
+    RecoveryAction,
+    SenderRecoveryPolicy,
+    sender_mode_for_request,
+)
 
 
 VALID_ROLES = {"server", "sender", "receiver"}
@@ -210,15 +222,22 @@ class RuntimeService:
         self._process: subprocess.Popen[str] | None = None
         self._server_runtime: ServerRuntime | None = None
         self._current_request: RuntimeLaunchRequest | None = None
+        self._active_process_request: RuntimeLaunchRequest | None = None
         self._log_lines: deque[str] = deque(maxlen=log_capacity)
         self._started_at: float | None = None
         self._stopped_at: float | None = None
         self._last_exit_code: int | None = None
+        self._sender_recovery = SenderRecoveryPolicy()
+        self._ignored_process_pids: set[int] = set()
+        self._sender_retry_timer: threading.Timer | None = None
+        self._sender_stable_timer: threading.Timer | None = None
 
     def start(self, request: RuntimeLaunchRequest) -> dict[str, Any]:
         self.stop()
         with self._lock:
             self._log_lines.clear()
+            self._sender_recovery.reset()
+            self._cancel_sender_timers_locked()
 
         if request.role == "server":
             runtime = ServerRuntime(
@@ -232,50 +251,31 @@ class RuntimeService:
             with self._lock:
                 self._server_runtime = runtime
                 self._current_request = request
+                self._active_process_request = None
                 self._started_at = time.time()
                 self._stopped_at = None
                 self._last_exit_code = None
         else:
-            self._write_initial_sync_delay(request)
-            command, working_dir = self._build_process_command(request)
-            env = os.environ.copy()
-            env["PYTHONUNBUFFERED"] = "1"
-            env["CONFIG_PATH"] = str(self._config_path)
-            process = subprocess.Popen(
-                command,
-                cwd=working_dir,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                start_new_session=True,
-            )
+            active_request = self._prepare_process_request(request)
+            process = self._launch_process(active_request)
             with self._lock:
                 self._process = process
                 self._current_request = request
+                self._active_process_request = active_request
                 self._started_at = time.time()
                 self._stopped_at = None
                 self._last_exit_code = None
-            threading.Thread(
-                target=self._drain_output,
-                args=(process,),
-                daemon=True,
-                name="runtime-log-reader",
-            ).start()
-            threading.Thread(
-                target=self._watch_process,
-                args=(process,),
-                daemon=True,
-                name="runtime-process-watcher",
-            ).start()
+                if request.role == "sender":
+                    self._sender_recovery.launched(active_request, self._started_at)
+                    self._schedule_sender_timers_locked()
 
         self.record_event(f"{request.role.title()} role started.")
         return self.snapshot()
 
     def stop(self, timeout: float = 10.0) -> dict[str, Any]:
         with self._lock:
+            self._cancel_sender_timers_locked()
+            self._sender_recovery.reset()
             self._sync_state_locked()
             process = self._process
             runtime = self._server_runtime
@@ -289,26 +289,16 @@ class RuntimeService:
             with self._lock:
                 if self._server_runtime is runtime:
                     self._server_runtime = None
+                    self._active_process_request = None
                     self._stopped_at = time.time()
                     self._last_exit_code = runtime.snapshot().get("last_exit_code", 0)
             return self.snapshot()
 
         assert process is not None
         self.record_event(f"Stopping {self._current_request.role if self._current_request else 'process'} role...")
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        try:
-            exit_code = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            self.record_event("Role process did not stop in time. Killing process.")
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            exit_code = process.wait(timeout=5)
-
+        with self._lock:
+            self._ignored_process_pids.add(process.pid)
+        exit_code = self._terminate_process(process, timeout=timeout)
         self._record_exit(process, exit_code)
         return self.snapshot()
 
@@ -345,14 +335,19 @@ class RuntimeService:
         with self._lock:
             self._sync_state_locked()
             request = self._current_request
+            active_request = self._active_process_request
             process = self._process
 
         if process is None or request is None or request.role not in {"sender", "receiver"}:
             raise RuntimeError("Sync delay controls require a running sender or receiver role.")
 
         if request.role == "sender":
-            if not request.audio_enabled or request.sender_audio_mode != "aec":
-                raise RuntimeError("Sender audio delay requires a running sender in Playback + DSP mode.")
+            if (
+                active_request is None
+                or not active_request.audio_enabled
+                or active_request.sender_audio_mode != "aec"
+            ):
+                raise RuntimeError("Sender audio delay requires active Playback + DSP mode; the sender is currently degraded.")
             delay_ms = _parse_sync_delay_ms(
                 payload.get("sender_audio_delay_ms", payload.get("delay_ms", request.sender_audio_delay_ms)),
                 "sender_audio_delay_ms",
@@ -383,10 +378,12 @@ class RuntimeService:
             sender = self._build_sender_snapshot_locked(request)
             receiver = self._build_receiver_snapshot_locked(request)
             running = self._process is not None or (server is not None and server.get("running"))
+            active_request = self._active_process_request
             return {
                 "running": running,
                 "role": request.role if request is not None else None,
                 "launch": request.to_dict() if request is not None else None,
+                "active_launch": active_request.to_dict() if active_request is not None else None,
                 "started_at": _to_iso(self._started_at),
                 "started_at_ts": self._started_at,
                 "stopped_at": _to_iso(self._stopped_at),
@@ -405,12 +402,59 @@ class RuntimeService:
         with self._lock:
             self._log_lines.append(f"[control {timestamp}] {message}")
 
+    def _prepare_process_request(self, request: RuntimeLaunchRequest) -> RuntimeLaunchRequest:
+        if request.role != "sender":
+            self._write_initial_sync_delay(request)
+            return request
+
+        now = time.time()
+        preflight_errors = self._sender_preflight_errors(request)
+        active_request = self._sender_recovery.begin(request, now, preflight_errors)
+        self._write_initial_sync_delay(active_request)
+        if active_request is not request:
+            self.record_event(
+                "Playback + DSP preflight failed; starting sender in "
+                f"{_sender_mode_label(sender_mode_for_request(active_request))} while retrying in the background. "
+                + " ".join(preflight_errors)
+            )
+        return active_request
+
+    def _launch_process(self, request: RuntimeLaunchRequest) -> subprocess.Popen[str]:
+        command, working_dir = self._build_process_command(request)
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+        env["CONFIG_PATH"] = str(self._config_path)
+        process = subprocess.Popen(
+            command,
+            cwd=working_dir,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            start_new_session=True,
+        )
+        threading.Thread(
+            target=self._drain_output,
+            args=(process,),
+            daemon=True,
+            name="runtime-log-reader",
+        ).start()
+        threading.Thread(
+            target=self._watch_process,
+            args=(process,),
+            daemon=True,
+            name="runtime-process-watcher",
+        ).start()
+        return process
+
     def _build_process_command(self, request: RuntimeLaunchRequest) -> tuple[list[str], Path]:
         if request.role == "sender":
             self._preview_dir.mkdir(parents=True, exist_ok=True)
             preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country or "tn")
             prune_preview_files(self._preview_dir, preview_pattern, keep=0)
-            command = [self._python_executable, "send.py", "--country", request.country or "tn"]
+            command = [self._python_executable, "send.py", "--country", request.country or "tn", "--supervised"]
             if request.audio_enabled:
                 command.extend(
                     [
@@ -492,6 +536,7 @@ class RuntimeService:
         return {
             "country": request.country,
             "preview": describe_latest_preview(self._preview_dir, preview_pattern),
+            "recovery": self._sender_recovery.snapshot(time.time()),
         }
 
     def _build_receiver_snapshot_locked(self, request: RuntimeLaunchRequest | None) -> dict[str, Any] | None:
@@ -521,26 +566,46 @@ class RuntimeService:
 
     def _record_exit(self, process: subprocess.Popen[str], exit_code: int) -> None:
         should_log = False
+        recovery_action = None
+        ignored = False
         with self._lock:
+            ignored = process.pid in self._ignored_process_pids
+            if ignored:
+                self._ignored_process_pids.discard(process.pid)
             if self._process is process:
                 self._process = None
                 self._last_exit_code = exit_code
                 self._stopped_at = time.time()
                 should_log = True
+                if self._active_process_request is not None and self._active_process_request.role == "sender":
+                    if ignored:
+                        self._active_process_request = None
+                    else:
+                        recovery_action = self._sender_recovery.on_exit(exit_code, self._stopped_at)
+                        self._active_process_request = None
             elif self._last_exit_code is None:
                 self._last_exit_code = exit_code
                 self._stopped_at = self._stopped_at or time.time()
 
         if should_log:
             self.record_event(f"Role process exited with code {exit_code}.")
+        if recovery_action is not None:
+            self._handle_sender_recovery_action(recovery_action)
 
     def _sync_state_locked(self) -> None:
         if self._process is not None:
             exit_code = self._process.poll()
-            if exit_code is not None:
+            if (
+                exit_code is not None
+                and (
+                    self._active_process_request is None
+                    or self._active_process_request.role != "sender"
+                )
+            ):
                 self._process = None
                 self._last_exit_code = exit_code
                 self._stopped_at = self._stopped_at or time.time()
+                self._active_process_request = None
 
         if self._server_runtime is not None:
             server_snapshot = self._server_runtime.snapshot()
@@ -548,6 +613,218 @@ class RuntimeService:
                 self._last_exit_code = server_snapshot.get("last_exit_code")
                 self._stopped_at = self._stopped_at or time.time()
                 self._server_runtime = None
+                self._active_process_request = None
+
+    def _handle_sender_recovery_action(self, action: RecoveryAction) -> None:
+        if action.reason:
+            self.record_event(f"Sender recovery: {action.reason}")
+        if action.kind != "launch" or action.request is None:
+            with self._lock:
+                self._cancel_sender_timers_locked()
+            return
+
+        self.record_event(
+            "Sender recovery launching "
+            f"{_sender_mode_label(sender_mode_for_request(action.request))} mode."
+        )
+        self._replace_active_process(action.request)
+
+    def _replace_active_process(self, request: RuntimeLaunchRequest) -> None:
+        with self._lock:
+            old_process = self._process
+            if old_process is not None:
+                self._ignored_process_pids.add(old_process.pid)
+
+        if old_process is not None:
+            exit_code = self._terminate_process(old_process, timeout=10)
+            self._record_exit(old_process, exit_code)
+
+        self._write_initial_sync_delay(request)
+        try:
+            process = self._launch_process(request)
+        except Exception as exc:
+            self.record_event(f"Sender recovery could not launch {_sender_mode_label(sender_mode_for_request(request))}: {exc}")
+            with self._lock:
+                action = self._sender_recovery.on_exit(1, time.time())
+            self._handle_sender_recovery_action(action)
+            return
+
+        now = time.time()
+        with self._lock:
+            self._process = process
+            self._active_process_request = request
+            self._stopped_at = None
+            self._last_exit_code = None
+            self._sender_recovery.launched(request, now)
+            self._schedule_sender_timers_locked()
+
+    def _terminate_process(self, process: subprocess.Popen[str], timeout: float = 10.0) -> int:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            return process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            self.record_event("Role process did not stop in time. Killing process.")
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            return process.wait(timeout=5)
+
+    def _cancel_sender_timers_locked(self) -> None:
+        if self._sender_retry_timer is not None:
+            self._sender_retry_timer.cancel()
+            self._sender_retry_timer = None
+        if self._sender_stable_timer is not None:
+            self._sender_stable_timer.cancel()
+            self._sender_stable_timer = None
+
+    def _schedule_sender_timers_locked(self) -> None:
+        self._cancel_sender_timers_locked()
+        snapshot = self._sender_recovery.snapshot(time.time())
+        if snapshot["phase"] == DEGRADED_PHASE and snapshot["next_retry_at"] is not None:
+            delay = max(0.1, snapshot["next_retry_at"] - time.time())
+            timer = threading.Timer(delay, self._attempt_sender_restore)
+            timer.daemon = True
+            self._sender_retry_timer = timer
+            timer.start()
+        if snapshot["phase"] == RESTORING_PHASE and snapshot["stable_after"] is not None:
+            delay = max(0.1, snapshot["stable_after"] - time.time())
+            timer = threading.Timer(delay, self._mark_sender_restore_stable)
+            timer.daemon = True
+            self._sender_stable_timer = timer
+            timer.start()
+
+    def _attempt_sender_restore(self) -> None:
+        now = time.time()
+        with self._lock:
+            if not self._sender_recovery.due_for_retry(now):
+                return
+            desired_request = self._sender_recovery.state.desired_request
+
+        if desired_request is None:
+            return
+
+        preflight_errors = self._sender_preflight_errors(desired_request)
+        if preflight_errors:
+            reason = "Playback + DSP retry preflight still failing: " + "; ".join(preflight_errors)
+            with self._lock:
+                if not self._sender_recovery.due_for_retry(time.time()):
+                    return
+                self._sender_recovery.defer_retry(time.time(), reason)
+                next_retry = self._sender_recovery.snapshot(time.time()).get("next_retry_in_seconds")
+                self._schedule_sender_timers_locked()
+            self.record_event(f"{reason} Next retry in {next_retry}s.")
+            return
+
+        with self._lock:
+            restore_request = self._sender_recovery.prepare_restore_attempt(time.time())
+        if restore_request is None:
+            return
+
+        self.record_event("Retrying Playback + DSP now; video may briefly reconnect.")
+        self._replace_active_process(restore_request)
+
+    def _mark_sender_restore_stable(self) -> None:
+        with self._lock:
+            if self._process is None:
+                return
+            marked = self._sender_recovery.mark_stable(time.time())
+            self._schedule_sender_timers_locked()
+        if marked:
+            self.record_event("Playback + DSP has been stable for 30s; degraded mode cleared.")
+
+    def _sender_preflight_errors(self, request: RuntimeLaunchRequest) -> list[str]:
+        if request.role != "sender" or sender_mode_for_request(request) != PLAYBACK_DSP_MODE:
+            return []
+
+        errors: list[str] = []
+        elements = [
+            "alsasink",
+            "srtsrc",
+            "srtsink",
+            "webrtcechoprobe",
+            "rtpL16pay",
+            "rtpL16depay",
+        ]
+        if request.audio_source == "device":
+            elements.extend(["alsasrc", "webrtcdsp"])
+        else:
+            elements.append("audiotestsrc")
+        for element in elements:
+            if not self._gst_element_available(element):
+                errors.append(f"missing GStreamer element {element}")
+
+        config = self._read_config_for_preflight()
+        audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
+        if request.audio_source == "device":
+            capture_device = request.audio_device or str(audio.get("device", "default"))
+            capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
+            if capture_error:
+                errors.append(capture_error)
+        playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
+        playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")
+        if playback_error:
+            errors.append(playback_error)
+
+        return errors
+
+    def _gst_element_available(self, element: str) -> bool:
+        if shutil.which("gst-inspect-1.0") is None:
+            return False
+        try:
+            result = subprocess.run(
+                ["gst-inspect-1.0", element],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+                timeout=3,
+            )
+        except subprocess.SubprocessError:
+            return False
+        return result.returncode == 0
+
+    def _alsa_device_error(self, command: list[str], device: str, label: str) -> str | None:
+        executable = command[0]
+        if shutil.which(executable) is None:
+            return f"{executable} unavailable for {label} device preflight"
+        normalized_device = (device or "default").strip()
+        if not normalized_device or normalized_device == "default":
+            return None
+        if not normalized_device.startswith("hw:"):
+            return None
+        try:
+            card, alsa_device = normalized_device.removeprefix("hw:").split(",", 1)
+        except ValueError:
+            return f"{label} device {normalized_device!r} is not a valid hw:CARD,DEVICE ALSA name"
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=3,
+            )
+        except subprocess.SubprocessError as exc:
+            return f"could not list {label} devices with {executable}: {exc}"
+        if result.returncode != 0:
+            return f"could not list {label} devices with {executable}: {result.stderr.strip() or result.stdout.strip()}"
+        needle = f"card {card}:"
+        device_needle = f"device {alsa_device}:"
+        for line in result.stdout.splitlines():
+            if needle in line and device_needle in line:
+                return None
+        return f"{label} device {normalized_device} is not visible to ALSA"
+
+    def _read_config_for_preflight(self) -> dict[str, Any]:
+        try:
+            with self._config_path.open("r", encoding="utf-8") as file:
+                data = yaml.safe_load(file)
+        except OSError:
+            return {}
+        return data if isinstance(data, dict) else {}
 
 
 def _to_iso(timestamp: float | None) -> str | None:
@@ -568,3 +845,13 @@ def _parse_sync_delay_ms(value: Any, field_name: str) -> int:
     if delay_ms < 0 or delay_ms > MAX_SYNC_DELAY_MS:
         raise ValueError(f"{field_name} must be between 0 and {MAX_SYNC_DELAY_MS} ms.")
     return delay_ms
+
+
+def _sender_mode_label(mode: str | None) -> str:
+    if mode == PLAYBACK_DSP_MODE:
+        return "Playback + DSP"
+    if mode == CAPTURE_ONLY_MODE:
+        return "capture-only"
+    if mode == "video-only":
+        return "video-only"
+    return mode or "unknown"

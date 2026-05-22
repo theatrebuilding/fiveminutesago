@@ -84,6 +84,7 @@ class SenderRuntime:
         self.video_send_port = None
         self.audio_send_port = None
         self.audio_recv_port = None
+        self.exit_code = 0
 
     def set_clock(self, clock):
         self.clock = clock
@@ -467,14 +468,17 @@ class SenderRuntime:
             return default
 
     def on_message(self, bus, message):
+        source_name = message.src.get_name() if message.src is not None else "unknown"
         if message.type == Gst.MessageType.EOS:
-            print("[Sender] End of Stream")
+            print(f"[Sender] End of Stream from {source_name}", flush=True)
+            self.exit_code = 1
             self.stop()
         elif message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            print(f"[Sender] ERROR -> {err}")
+            print(f"[Sender] ERROR from {source_name} -> {err}", flush=True)
             if debug:
-                print(f"[Sender] Debug info: {debug}")
+                print(f"[Sender] Debug info: {debug}", flush=True)
+            self.exit_code = 1
             self.stop()
 
     def poll_sync_delay_file(self):
@@ -512,6 +516,7 @@ class SenderRuntime:
         print(f"[Sender] Audio playback/probe delay updated to {delay_ms} ms.", flush=True)
 
     def run(self):
+        self.exit_code = 0
         pipeline_str = self.build_pipeline()
         print("[Sender] Pipeline:\n" + pipeline_str + "\n", flush=True)
         if self.preview_pattern:
@@ -542,6 +547,7 @@ class SenderRuntime:
         finally:
             self._set_pipeline_state(Gst.State.NULL, timeout_seconds=10.0, suppress_errors=True)
             print("[Sender] Pipeline stopped.")
+        return self.exit_code
 
     def stop(self):
         if self.loop:
@@ -624,6 +630,7 @@ def main():
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")
     parser.add_argument("--video-source", choices=["config", "test"], default="config", help="Video source mode. Use 'test' to send a test signal instead of a camera.")
     parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/sender-tn-preview-%05d.jpg.")
+    parser.add_argument("--supervised", action="store_true", help="Run once and exit on failure so the control app can manage fallback/retry.")
     args = parser.parse_args()
 
     if args.with_audio is None:
@@ -669,6 +676,14 @@ def main():
 
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
+
+    if args.supervised:
+        try:
+            exit_code = sender.run()
+        except Exception as exc:
+            print(f"[Main] Sender exception: {exc}", flush=True)
+            exit_code = 1
+        sys.exit(exit_code)
 
     while True:
         try:
