@@ -4,6 +4,8 @@ from typing import Any
 
 
 SUPPORTED_WEBRTC_SAMPLE_RATES = {8000, 16000, 32000, 48000}
+DEFAULT_AUDIO_CHANNEL_PAIR = [1, 2]
+MAX_AUDIO_HARDWARE_CHANNELS = 64
 SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES = {48000, 96000}
 SUPPORTED_MPEGTS_LPCM_FORMATS = {
     "S16BE": 16,
@@ -90,6 +92,129 @@ def validate_audio_rate(audio_rate: Any) -> int:
         )
 
     return rate
+
+
+def normalize_audio_channel_pair(value: Any, field_name: str) -> list[int]:
+    """Normalize a 1-based stereo hardware channel pair.
+
+    The app transports audio as stereo. Multichannel hardware routing is expressed
+    as a physical stereo pair such as [1, 2], [3, 4], or [5, 6].
+    """
+
+    if value is None or value == "":
+        return list(DEFAULT_AUDIO_CHANNEL_PAIR)
+
+    if isinstance(value, str):
+        cleaned = value.strip().replace("/", ",")
+        try:
+            parts = [int(part.strip()) for part in cleaned.split(",") if part.strip()]
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be a stereo channel pair like [1, 2] or '1/2'.") from exc
+    elif isinstance(value, (list, tuple)):
+        try:
+            parts = [int(part) for part in value]
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{field_name} must be a stereo channel pair like [1, 2].") from exc
+    else:
+        raise ValueError(f"{field_name} must be a stereo channel pair like [1, 2].")
+
+    if len(parts) != 2:
+        raise ValueError(f"{field_name} must contain exactly two channels.")
+
+    left, right = parts
+    if left < 1 or right < 1:
+        raise ValueError(f"{field_name} channels are 1-based and must be positive.")
+    if right != left + 1:
+        raise ValueError(f"{field_name} must be a consecutive stereo pair.")
+    if left % 2 != 1:
+        raise ValueError(f"{field_name} must start on an odd channel: 1/2, 3/4, 5/6, ...")
+    if right > MAX_AUDIO_HARDWARE_CHANNELS:
+        raise ValueError(f"{field_name} cannot exceed channel {MAX_AUDIO_HARDWARE_CHANNELS}.")
+
+    return [left, right]
+
+
+def normalize_audio_hardware_channels(value: Any, channel_pair: Any, field_name: str) -> int:
+    pair = normalize_audio_channel_pair(channel_pair, field_name.replace("hardware_channels", "channels"))
+    minimum = max(pair)
+    if value is None or value == "":
+        return minimum
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer channel count.")
+    try:
+        channels = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer channel count.") from exc
+    if channels < minimum:
+        raise ValueError(f"{field_name} must be at least {minimum} for pair {pair[0]}/{pair[1]}.")
+    if channels > MAX_AUDIO_HARDWARE_CHANNELS:
+        raise ValueError(f"{field_name} cannot exceed {MAX_AUDIO_HARDWARE_CHANNELS}.")
+    return channels
+
+
+def channel_pairs_for_count(channel_count: Any) -> list[dict[str, Any]]:
+    try:
+        count = int(channel_count)
+    except (TypeError, ValueError):
+        count = 2
+    count = max(2, min(count, MAX_AUDIO_HARDWARE_CHANNELS))
+    if count % 2:
+        count -= 1
+    return [
+        {
+            "value": f"{channel}/{channel + 1}",
+            "label": f"Channels {channel}/{channel + 1}",
+            "channels": [channel, channel + 1],
+        }
+        for channel in range(1, count + 1, 2)
+    ]
+
+
+def build_input_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> str:
+    pair = normalize_audio_channel_pair(channel_pair, "input channel pair")
+    input_channels = normalize_audio_hardware_channels(
+        hardware_channels,
+        pair,
+        "input hardware_channels",
+    )
+    if pair == DEFAULT_AUDIO_CHANNEL_PAIR and input_channels == 2:
+        return ""
+
+    rows = [[0.0 for _ in range(input_channels)] for _ in range(2)]
+    rows[0][pair[0] - 1] = 1.0
+    rows[1][pair[1] - 1] = 1.0
+    return (
+        f'audiomixmatrix in-channels={input_channels} out-channels=2 '
+        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+    )
+
+
+def build_output_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> str:
+    pair = normalize_audio_channel_pair(channel_pair, "output channel pair")
+    output_channels = normalize_audio_hardware_channels(
+        hardware_channels,
+        pair,
+        "output hardware_channels",
+    )
+    if pair == DEFAULT_AUDIO_CHANNEL_PAIR and output_channels == 2:
+        return ""
+
+    rows = [[0.0, 0.0] for _ in range(output_channels)]
+    rows[pair[0] - 1][0] = 1.0
+    rows[pair[1] - 1][1] = 1.0
+    return (
+        f'audiomixmatrix in-channels=2 out-channels={output_channels} '
+        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+    )
+
+
+def format_gst_mix_matrix(rows: list[list[float]]) -> str:
+    formatted_rows = []
+    for row in rows:
+        formatted_rows.append(
+            "<" + ", ".join(f"(double){float(value):.1f}" for value in row) + ">"
+        )
+    return "<" + ", ".join(formatted_rows) + ">"
 
 
 def validate_mpegts_lpcm_config(audio_format: Any, audio_rate: Any) -> tuple[str, int, int]:

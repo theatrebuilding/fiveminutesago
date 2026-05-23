@@ -23,8 +23,12 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from audio_support import (
+    build_input_pair_mix_element,
+    build_output_pair_mix_element,
     build_webrtcdsp_properties,
     gst_escape,
+    normalize_audio_channel_pair,
+    normalize_audio_hardware_channels,
     validate_audio_rate,
 )
 from config_loader import load_config
@@ -203,9 +207,34 @@ class SenderRuntime:
         audio_format = audio_opts.get("format", "S16BE")
         audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = int(audio_opts.get("channels", 2))
+        if channels != 2:
+            print("ERROR: audio.channels must be 2; hardware routing uses separate channel-pair settings.")
+            sys.exit(1)
         encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = self.playback_device or audio_opts.get("playback_device", "default")
         playback_enabled = self.sender_audio_mode == "aec"
+        try:
+            capture_pair = normalize_audio_channel_pair(
+                audio_opts.get("capture_input_channels", [1, 2]),
+                "audio.capture_input_channels",
+            )
+            capture_hardware_channels = normalize_audio_hardware_channels(
+                audio_opts.get("capture_hardware_channels"),
+                capture_pair,
+                "audio.capture_hardware_channels",
+            )
+            playback_pair = normalize_audio_channel_pair(
+                audio_opts.get("playback_output_channels", [1, 2]),
+                "audio.playback_output_channels",
+            )
+            playback_hardware_channels = normalize_audio_hardware_channels(
+                audio_opts.get("playback_hardware_channels"),
+                playback_pair,
+                "audio.playback_hardware_channels",
+            )
+        except ValueError as exc:
+            print(f"ERROR: {exc}")
+            sys.exit(1)
         normalized_transport_format = str(audio_format or "S16BE").strip().upper()
         if normalized_transport_format != "S16BE":
             print("ERROR: audio.format must be S16BE for the separate RTP L16 transport.")
@@ -279,6 +308,12 @@ class SenderRuntime:
         audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, audio_rate)
         aac_encoder = self.resolve_aac_encoder(audio_opts)
         enable_dsp = playback_enabled and uses_dsp
+        capture_input_channels = capture_hardware_channels if uses_dsp else channels
+        capture_mix_element = build_input_pair_mix_element(capture_pair, capture_hardware_channels) if uses_dsp else ""
+        capture_pair_segment = f"! {capture_mix_element}" if capture_mix_element else ""
+        playback_mix_element = build_output_pair_mix_element(playback_pair, playback_hardware_channels)
+        playback_pair_segment = f"! {playback_mix_element}" if playback_mix_element else ""
+        playback_output_channels = playback_hardware_channels if playback_mix_element else channels
         playback_branch = ""
         if playback_enabled:
             audio_delay_ns = self.audio_delay_ms * 1_000_000
@@ -293,6 +328,8 @@ class SenderRuntime:
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     ! webrtcechoprobe name=playback_probe
                     ! {playback_output_queue}
+                    {playback_pair_segment}
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channels},rate={audio_rate}
                     ! alsasink device="{gst_escape(playback_device)}" async=true
             """
 
@@ -310,10 +347,21 @@ class SenderRuntime:
             )
 
         print(f"[Sender] Using audio source: {source_label}", flush=True)
+        if uses_dsp:
+            print(
+                f"[Sender] Capture input pair: {capture_pair[0]}/{capture_pair[1]} "
+                f"(requesting {capture_hardware_channels} hardware channels).",
+                flush=True,
+            )
         print("[Sender] Live muxed audio transport: AAC in MPEG-TS.", flush=True)
         print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
         if playback_enabled:
             print(f"[Sender] Using playback device: {playback_device}", flush=True)
+            print(
+                f"[Sender] Playback output pair: {playback_pair[0]}/{playback_pair[1]} "
+                f"(requesting {playback_output_channels} hardware channels).",
+                flush=True,
+            )
             print(f"[Sender] Audio playback/probe delay: {self.audio_delay_ms} ms", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
@@ -327,6 +375,8 @@ class SenderRuntime:
                 ! {audio_capture_queue}
                 ! audioconvert
                 ! audioresample
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channels},rate={audio_rate}
+                {capture_pair_segment}
                 ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
                 {dsp_segment}
                 ! tee name=audio_capture_tee

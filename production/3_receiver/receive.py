@@ -22,6 +22,11 @@ if root_dir not in sys.path:
 # Import configuration loader (assumes a config_loader.py module is available)
 from config_loader import load_config
 from live_queue_settings import build_queue_element
+from audio_support import (
+    build_output_pair_mix_element,
+    normalize_audio_channel_pair,
+    normalize_audio_hardware_channels,
+)
 
 
 DEFAULT_VIDEO_SINK = "auto"
@@ -297,13 +302,31 @@ class VideoReceiver:
             return ""
 
         playback_device = self.playback_device or config.get("receiver_audio", {}).get("playback_device", "default")
+        receiver_audio_cfg = config.get("receiver_audio", {})
         audio_cfg = config.get("audio", {})
         audio_rate = int(audio_cfg.get("rate", 32000))
         channels = int(audio_cfg.get("channels", 2))
+        if channels != 2:
+            raise RuntimeError("audio.channels must be 2; hardware routing uses separate channel-pair settings.")
         encoding_name = str(audio_cfg.get("encoding_name", "L16")).strip() or "L16"
         audio_streaming_settings = str(config.get("streaming_settings_audio", "") or "").strip()
         audio_srt_suffix = f"&{audio_streaming_settings}" if audio_streaming_settings else ""
         escaped_device = gst_escape(playback_device)
+        try:
+            playback_pair = normalize_audio_channel_pair(
+                receiver_audio_cfg.get("playback_output_channels", [1, 2]),
+                "receiver_audio.playback_output_channels",
+            )
+            playback_hardware_channels = normalize_audio_hardware_channels(
+                receiver_audio_cfg.get("playback_hardware_channels"),
+                playback_pair,
+                "receiver_audio.playback_hardware_channels",
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        playback_mix_element = build_output_pair_mix_element(playback_pair, playback_hardware_channels)
+        playback_pair_segment = f"! {playback_mix_element}" if playback_mix_element else ""
+        playback_output_channels = playback_hardware_channels if playback_mix_element else channels
         receiver_l16_input_queue = build_queue_element(
             config,
             ("receiver", "l16_input"),
@@ -333,6 +356,10 @@ class VideoReceiver:
         )
 
         print(f"VideoReceiver: Using playback device '{playback_device}'.")
+        print(
+            f"VideoReceiver: Playback output pair {playback_pair[0]}/{playback_pair[1]} "
+            f"(requesting {playback_output_channels} hardware channels)."
+        )
 
         if audio_transport == "aac":
             return f"""
@@ -341,7 +368,9 @@ class VideoReceiver:
                     audioconvert !
                     audioresample !
                     audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
-                    {receiver_audio_output_queue} !
+                    {receiver_audio_output_queue}
+                    {playback_pair_segment}
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channels},rate={audio_rate} !
                     alsasink device="{escaped_device}" async=true
             """.strip()
 
@@ -356,7 +385,9 @@ class VideoReceiver:
                 audioconvert !
                 audioresample !
                 audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
-                {receiver_audio_output_queue} !
+                {receiver_audio_output_queue}
+                {playback_pair_segment}
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channels},rate={audio_rate} !
                 alsasink device="{escaped_device}" async=true
         """.strip()
 

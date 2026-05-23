@@ -61,12 +61,27 @@ const receiverVideoDelayValue = document.getElementById("receiver-video-delay-va
 const receiverVideoDelayMessage = document.getElementById("receiver-video-delay-message");
 const startRoleButton = document.getElementById("start-role");
 const dspSettingsButton = document.getElementById("dsp-settings-button");
+const audioSettingsButton = document.getElementById("audio-settings-button");
 const applyConfigButton = document.getElementById("apply-config");
 const showConfigButton = document.getElementById("show-config");
 const dspSettingsModal = document.getElementById("dsp-settings-modal");
 const dspSettingsCancelButton = document.getElementById("dsp-settings-cancel");
 const dspSettingsSaveButton = document.getElementById("dsp-settings-save");
 const dspSettingsMessage = document.getElementById("dsp-settings-message");
+const audioSettingsModal = document.getElementById("audio-settings-modal");
+const audioSettingsCancelButton = document.getElementById("audio-settings-cancel");
+const audioSettingsSaveButton = document.getElementById("audio-settings-save");
+const audioSettingsMessage = document.getElementById("audio-settings-message");
+const audioRateSelect = document.getElementById("audio-rate-select");
+const audioCaptureDeviceSelect = document.getElementById("audio-capture-device-select");
+const audioCapturePairSelect = document.getElementById("audio-capture-pair-select");
+const audioCaptureDetailMessage = document.getElementById("audio-capture-detail-message");
+const audioSenderPlaybackDeviceSelect = document.getElementById("audio-sender-playback-device-select");
+const audioSenderOutputPairSelect = document.getElementById("audio-sender-output-pair-select");
+const audioSenderOutputDetailMessage = document.getElementById("audio-sender-output-detail-message");
+const audioReceiverPlaybackDeviceSelect = document.getElementById("audio-receiver-playback-device-select");
+const audioReceiverOutputPairSelect = document.getElementById("audio-receiver-output-pair-select");
+const audioReceiverOutputDetailMessage = document.getElementById("audio-receiver-output-detail-message");
 const serverPanel = document.getElementById("server-panel");
 const senderPanel = document.getElementById("sender-panel");
 const receiverPanel = document.getElementById("receiver-panel");
@@ -98,6 +113,7 @@ let selectedArchiveName = null;
 let selectedArchiveRevision = null;
 let selectedArchiveFile = null;
 let lastConfigPanelRole = null;
+let currentAudioSettings = null;
 
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
@@ -446,6 +462,7 @@ function applyConfigPanelState() {
 
   configPanelTitle.textContent = editable ? "Config Editor" : "Server Config";
   dspSettingsButton.classList.toggle("hidden", !editable);
+  audioSettingsButton.classList.toggle("hidden", !editable);
   applyConfigButton.classList.toggle("hidden", !editable);
   showConfigButton.classList.toggle("hidden", editable);
   showConfigButton.textContent = configShown ? "Update config" : "Show Config";
@@ -1468,6 +1485,252 @@ function closeDspSettings() {
   dspSettingsMessage.textContent = "";
 }
 
+function formatPairValue(channels) {
+  const pair = Array.isArray(channels) ? channels : [1, 2];
+  return `${Number.parseInt(pair[0] || 1, 10)}/${Number.parseInt(pair[1] || 2, 10)}`;
+}
+
+function parsePairValue(value) {
+  const parts = String(value || "1/2").split("/");
+  return [
+    Number.parseInt(parts[0] || "1", 10),
+    Number.parseInt(parts[1] || "2", 10),
+  ];
+}
+
+function maxPairChannel(value) {
+  const pair = parsePairValue(value);
+  return Math.max(pair[0] || 1, pair[1] || 2);
+}
+
+function renderAudioRateOptions(settings) {
+  const configuredRate = String(settings?.rate || 48000);
+  const supportedRates = settings?.supported_rates?.length ? settings.supported_rates : [48000, 32000, 16000, 8000];
+  const labels = new Map([
+    ["48000", "48000 Hz (recommended)"],
+    ["32000", "32000 Hz"],
+    ["16000", "16000 Hz"],
+    ["8000", "8000 Hz"],
+  ]);
+  audioRateSelect.innerHTML = "";
+  const values = [...new Set([configuredRate, ...supportedRates.map((rate) => String(rate))])];
+  values
+    .sort((a, b) => Number.parseInt(b, 10) - Number.parseInt(a, 10))
+    .forEach((rate) => {
+      const option = document.createElement("option");
+      option.value = rate;
+      option.textContent = labels.get(rate) || `${rate} Hz`;
+      audioRateSelect.appendChild(option);
+    });
+  audioRateSelect.value = configuredRate;
+}
+
+function renderAudioSettingsDeviceSelect(select, devices, configuredValue, defaultLabel) {
+  const normalizedValue = configuredValue || "default";
+  select.innerHTML = "";
+
+  const defaultOption = document.createElement("option");
+  defaultOption.value = "default";
+  defaultOption.textContent = defaultLabel;
+  select.appendChild(defaultOption);
+
+  devices.forEach((device) => {
+    const option = document.createElement("option");
+    option.value = device.path;
+    option.textContent = `${device.label} (${device.path})`;
+    select.appendChild(option);
+  });
+
+  if (normalizedValue !== "default" && !devices.some((device) => device.path === normalizedValue)) {
+    const configuredOption = document.createElement("option");
+    configuredOption.value = normalizedValue;
+    configuredOption.textContent = `Configured: ${normalizedValue}`;
+    select.appendChild(configuredOption);
+  }
+
+  select.value = normalizedValue;
+}
+
+function renderAudioPairSelect(select, details, configuredChannels) {
+  const selectedValue = formatPairValue(configuredChannels);
+  const pairs = details?.pairs?.length ? details.pairs : [{ value: "1/2", label: "Channels 1/2", channels: [1, 2] }];
+  const maxChannels = Number.parseInt(details?.max_channels || 2, 10);
+  select.innerHTML = "";
+  pairs.forEach((pair) => {
+    const value = pair.value || formatPairValue(pair.channels);
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = pair.label || `Channels ${value}`;
+    option.dataset.hardwareChannels = String(Math.max(maxChannels, maxPairChannel(value)));
+    select.appendChild(option);
+  });
+
+  if (![...select.options].some((option) => option.value === selectedValue)) {
+    const option = document.createElement("option");
+    option.value = selectedValue;
+    option.textContent = `Configured channels ${selectedValue}`;
+    option.dataset.hardwareChannels = String(Math.max(maxChannels, maxPairChannel(selectedValue)));
+    select.appendChild(option);
+  }
+  select.value = selectedValue;
+  updatePairHardwareDataset(select);
+}
+
+function updatePairHardwareDataset(select) {
+  const selectedOption = select.selectedOptions?.[0];
+  select.dataset.hardwareChannels = selectedOption?.dataset.hardwareChannels || String(maxPairChannel(select.value));
+}
+
+function audioDetailMessage(details, fallback) {
+  const parts = [];
+  if (details?.max_channels) {
+    parts.push(`${details.max_channels} hardware channel${details.max_channels === 1 ? "" : "s"} detected`);
+  }
+  if (details?.rates?.length) {
+    parts.push(`reported rates: ${details.rates.join(", ")} Hz`);
+  }
+  const warning = details?.warnings?.length ? ` ${details.warnings.join(" ")}` : "";
+  return `${parts.length ? parts.join(" • ") : fallback}${warning}`;
+}
+
+async function refreshAudioPairDetails(kind, device, pairSelect, configuredChannels, messageElement, fallbackMessage) {
+  const normalizedDevice = device || "default";
+  pairSelect.disabled = true;
+  messageElement.textContent = "Probing device channel pairs…";
+  try {
+    const details = await api(`/api/devices/audio/${kind}/details?device=${encodeURIComponent(normalizedDevice)}`, {
+      method: "GET",
+    });
+    renderAudioPairSelect(pairSelect, details, configuredChannels);
+    messageElement.textContent = audioDetailMessage(details, fallbackMessage);
+  } catch (error) {
+    renderAudioPairSelect(pairSelect, null, configuredChannels);
+    messageElement.textContent = `${error.message} ${fallbackMessage}`;
+  } finally {
+    pairSelect.disabled = false;
+  }
+}
+
+async function setAudioSettings(settings) {
+  currentAudioSettings = settings || {};
+  renderAudioRateOptions(currentAudioSettings);
+  renderAudioSettingsDeviceSelect(
+    audioCaptureDeviceSelect,
+    audioDevices,
+    currentAudioSettings.capture_device,
+    "Default input from config"
+  );
+  renderAudioSettingsDeviceSelect(
+    audioSenderPlaybackDeviceSelect,
+    playbackDevices,
+    currentAudioSettings.sender_playback_device,
+    "Default sender output"
+  );
+  renderAudioSettingsDeviceSelect(
+    audioReceiverPlaybackDeviceSelect,
+    playbackDevices,
+    currentAudioSettings.receiver_playback_device,
+    "Default receiver output"
+  );
+
+  await Promise.all([
+    refreshAudioPairDetails(
+      "capture",
+      audioCaptureDeviceSelect.value,
+      audioCapturePairSelect,
+      currentAudioSettings.capture_input_channels,
+      audioCaptureDetailMessage,
+      "Choose which physical input pair becomes the outgoing stereo stream."
+    ),
+    refreshAudioPairDetails(
+      "playback",
+      audioSenderPlaybackDeviceSelect.value,
+      audioSenderOutputPairSelect,
+      currentAudioSettings.sender_playback_output_channels,
+      audioSenderOutputDetailMessage,
+      "Choose which physical output pair receives returned audio on the sender."
+    ),
+    refreshAudioPairDetails(
+      "playback",
+      audioReceiverPlaybackDeviceSelect.value,
+      audioReceiverOutputPairSelect,
+      currentAudioSettings.receiver_playback_output_channels,
+      audioReceiverOutputDetailMessage,
+      "Choose which physical output pair receives receiver playback."
+    ),
+  ]);
+}
+
+async function openAudioSettings() {
+  if (getConfigPanelRole() !== "server") {
+    return;
+  }
+  setBusy([audioSettingsButton], true);
+  configMessage.textContent = "Loading Audio I/O settings…";
+  try {
+    if (!audioDevices.length) {
+      await loadAudioDevices();
+    }
+    if (!playbackDevices.length) {
+      await loadPlaybackDevices();
+    }
+    const payload = await api("/api/config/audio-settings", { method: "GET" });
+    await setAudioSettings(payload.settings || {});
+    audioSettingsMessage.textContent = "";
+    audioSettingsModal.classList.remove("hidden");
+    configMessage.textContent = `Loaded Audio I/O settings from ${payload.path}.`;
+  } catch (error) {
+    configMessage.textContent = error.message;
+  } finally {
+    setBusy([audioSettingsButton], false);
+  }
+}
+
+function closeAudioSettings() {
+  audioSettingsModal.classList.add("hidden");
+  audioSettingsMessage.textContent = "";
+}
+
+function collectAudioSettings() {
+  updatePairHardwareDataset(audioCapturePairSelect);
+  updatePairHardwareDataset(audioSenderOutputPairSelect);
+  updatePairHardwareDataset(audioReceiverOutputPairSelect);
+  return {
+    rate: Number.parseInt(audioRateSelect.value, 10),
+    capture_device: audioCaptureDeviceSelect.value || "default",
+    capture_input_channels: parsePairValue(audioCapturePairSelect.value),
+    capture_hardware_channels: Number.parseInt(audioCapturePairSelect.dataset.hardwareChannels || maxPairChannel(audioCapturePairSelect.value), 10),
+    sender_playback_device: audioSenderPlaybackDeviceSelect.value || "default",
+    sender_playback_output_channels: parsePairValue(audioSenderOutputPairSelect.value),
+    sender_playback_hardware_channels: Number.parseInt(audioSenderOutputPairSelect.dataset.hardwareChannels || maxPairChannel(audioSenderOutputPairSelect.value), 10),
+    receiver_playback_device: audioReceiverPlaybackDeviceSelect.value || "default",
+    receiver_playback_output_channels: parsePairValue(audioReceiverOutputPairSelect.value),
+    receiver_playback_hardware_channels: Number.parseInt(audioReceiverOutputPairSelect.dataset.hardwareChannels || maxPairChannel(audioReceiverOutputPairSelect.value), 10),
+  };
+}
+
+async function saveAudioSettings() {
+  setBusy([audioSettingsSaveButton, audioSettingsCancelButton], true);
+  audioSettingsMessage.textContent = "Saving Audio I/O settings and relaunching active role…";
+  try {
+    const payload = await api("/api/config/audio-settings", {
+      method: "PUT",
+      body: JSON.stringify({
+        settings: collectAudioSettings(),
+      }),
+    });
+    currentAudioSettings = payload.settings || null;
+    closeAudioSettings();
+    configMessage.textContent = payload.message;
+    await refreshStatus();
+    await loadConfig({ reveal: true, sync: false });
+  } catch (error) {
+    audioSettingsMessage.textContent = error.message;
+  } finally {
+    setBusy([audioSettingsSaveButton, audioSettingsCancelButton], false);
+  }
+}
+
 async function saveDspSettings() {
   setBusy([dspSettingsSaveButton, dspSettingsCancelButton], true);
   dspSettingsMessage.textContent = "Saving DSP settings and relaunching active role…";
@@ -1495,7 +1758,7 @@ async function saveConfig(restart) {
     return;
   }
 
-  setBusy([applyConfigButton, dspSettingsButton], true);
+  setBusy([applyConfigButton, dspSettingsButton, audioSettingsButton], true);
   configMessage.textContent = restart ? "Saving config and relaunching active role…" : "Saving config…";
 
   try {
@@ -1512,7 +1775,7 @@ async function saveConfig(restart) {
   } catch (error) {
     configMessage.textContent = error.message;
   } finally {
-    setBusy([applyConfigButton, dspSettingsButton], false);
+    setBusy([applyConfigButton, dspSettingsButton, audioSettingsButton], false);
   }
 }
 
@@ -1551,8 +1814,11 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 recordToggleButton.addEventListener("click", toggleRecording);
 applyConfigButton.addEventListener("click", () => saveConfig(true));
 dspSettingsButton.addEventListener("click", openDspSettings);
+audioSettingsButton.addEventListener("click", openAudioSettings);
 dspSettingsCancelButton.addEventListener("click", closeDspSettings);
 dspSettingsSaveButton.addEventListener("click", saveDspSettings);
+audioSettingsCancelButton.addEventListener("click", closeAudioSettings);
+audioSettingsSaveButton.addEventListener("click", saveAudioSettings);
 dspSettingsModal.addEventListener("change", (event) => {
   if (event.target?.matches?.("[data-dsp-key]")) {
     updateDspDependentFields();
@@ -1561,6 +1827,44 @@ dspSettingsModal.addEventListener("change", (event) => {
 dspSettingsModal.addEventListener("click", (event) => {
   if (event.target === dspSettingsModal) {
     closeDspSettings();
+  }
+});
+audioCaptureDeviceSelect.addEventListener("change", () => {
+  refreshAudioPairDetails(
+    "capture",
+    audioCaptureDeviceSelect.value,
+    audioCapturePairSelect,
+    parsePairValue(audioCapturePairSelect.value),
+    audioCaptureDetailMessage,
+    "Choose which physical input pair becomes the outgoing stereo stream."
+  );
+});
+audioSenderPlaybackDeviceSelect.addEventListener("change", () => {
+  refreshAudioPairDetails(
+    "playback",
+    audioSenderPlaybackDeviceSelect.value,
+    audioSenderOutputPairSelect,
+    parsePairValue(audioSenderOutputPairSelect.value),
+    audioSenderOutputDetailMessage,
+    "Choose which physical output pair receives returned audio on the sender."
+  );
+});
+audioReceiverPlaybackDeviceSelect.addEventListener("change", () => {
+  refreshAudioPairDetails(
+    "playback",
+    audioReceiverPlaybackDeviceSelect.value,
+    audioReceiverOutputPairSelect,
+    parsePairValue(audioReceiverOutputPairSelect.value),
+    audioReceiverOutputDetailMessage,
+    "Choose which physical output pair receives receiver playback."
+  );
+});
+audioCapturePairSelect.addEventListener("change", () => updatePairHardwareDataset(audioCapturePairSelect));
+audioSenderOutputPairSelect.addEventListener("change", () => updatePairHardwareDataset(audioSenderOutputPairSelect));
+audioReceiverOutputPairSelect.addEventListener("change", () => updatePairHardwareDataset(audioReceiverOutputPairSelect));
+audioSettingsModal.addEventListener("click", (event) => {
+  if (event.target === audioSettingsModal) {
+    closeAudioSettings();
   }
 });
 showConfigButton.addEventListener("click", () => loadConfig({ reveal: true, showSuccess: true, sync: true }));

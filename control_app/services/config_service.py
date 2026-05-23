@@ -11,7 +11,14 @@ from urllib.request import Request, urlopen
 
 import yaml
 
-from production.audio_support import WEBRTC_DSP_PROPERTY_ORDER, build_webrtcdsp_properties
+from production.audio_support import (
+    SUPPORTED_WEBRTC_SAMPLE_RATES,
+    WEBRTC_DSP_PROPERTY_ORDER,
+    build_webrtcdsp_properties,
+    normalize_audio_channel_pair,
+    normalize_audio_hardware_channels,
+    validate_audio_rate,
+)
 
 
 class ConfigValidationError(ValueError):
@@ -51,6 +58,9 @@ class ConfigService:
     def read_dsp_settings(self) -> dict[str, Any]:
         config = self.read_data()
         return _normalize_dsp_settings(config.get("webrtcdsp_settings", {}))
+
+    def read_audio_settings(self) -> dict[str, Any]:
+        return _normalize_audio_settings(self.read_data())
 
     def ensure_exists(self, seed_path: Path) -> bool:
         if self._config_path.exists():
@@ -135,6 +145,41 @@ class ConfigService:
         self._write_normalized_text(next_text)
         return parsed
 
+    def write_audio_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        normalized_settings = _normalize_audio_settings_payload(settings)
+        current = self.read_data()
+        audio = current.get("audio", {})
+        receiver_audio = current.get("receiver_audio", {})
+        if not isinstance(audio, dict):
+            audio = {}
+        if not isinstance(receiver_audio, dict):
+            receiver_audio = {}
+
+        next_audio = {
+            **audio,
+            "device": normalized_settings["capture_device"],
+            "playback_device": normalized_settings["sender_playback_device"],
+            "rate": normalized_settings["rate"],
+            "channels": 2,
+            "capture_input_channels": normalized_settings["capture_input_channels"],
+            "capture_hardware_channels": normalized_settings["capture_hardware_channels"],
+            "playback_output_channels": normalized_settings["sender_playback_output_channels"],
+            "playback_hardware_channels": normalized_settings["sender_playback_hardware_channels"],
+        }
+        next_receiver_audio = {
+            **receiver_audio,
+            "playback_device": normalized_settings["receiver_playback_device"],
+            "playback_output_channels": normalized_settings["receiver_playback_output_channels"],
+            "playback_hardware_channels": normalized_settings["receiver_playback_hardware_channels"],
+        }
+
+        next_text = _replace_top_level_yaml_mapping(self.read_text(), "audio", next_audio)
+        next_text = _replace_top_level_yaml_mapping(next_text, "receiver_audio", next_receiver_audio)
+        parsed = self.validate_text(next_text)
+        _normalize_audio_settings(parsed)
+        self._write_normalized_text(next_text)
+        return parsed
+
     def _write_normalized_text(self, text: str) -> None:
         normalized = text.rstrip() + "\n"
         self._config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -185,6 +230,98 @@ def _normalize_dsp_settings(settings: Any) -> dict[str, Any]:
     except ValueError as exc:
         raise ConfigValidationError(str(exc)) from exc
     return {key: resolved[key] for key in WEBRTC_DSP_PROPERTY_ORDER}
+
+
+def _normalize_audio_settings(config: Any) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        raise ConfigValidationError("Config must be a top-level YAML mapping.")
+    audio = config.get("audio", {})
+    receiver_audio = config.get("receiver_audio", {})
+    if audio is None:
+        audio = {}
+    if receiver_audio is None:
+        receiver_audio = {}
+    if not isinstance(audio, dict):
+        raise ConfigValidationError("audio must be a YAML mapping.")
+    if not isinstance(receiver_audio, dict):
+        raise ConfigValidationError("receiver_audio must be a YAML mapping.")
+
+    payload = {
+        "rate": audio.get("rate", 48000),
+        "capture_device": audio.get("device", "default"),
+        "capture_input_channels": audio.get("capture_input_channels", [1, 2]),
+        "capture_hardware_channels": audio.get("capture_hardware_channels"),
+        "sender_playback_device": audio.get("playback_device", "default"),
+        "sender_playback_output_channels": audio.get("playback_output_channels", [1, 2]),
+        "sender_playback_hardware_channels": audio.get("playback_hardware_channels"),
+        "receiver_playback_device": receiver_audio.get("playback_device", "default"),
+        "receiver_playback_output_channels": receiver_audio.get("playback_output_channels", [1, 2]),
+        "receiver_playback_hardware_channels": receiver_audio.get("playback_hardware_channels"),
+    }
+    return _normalize_audio_settings_payload(payload)
+
+
+def _normalize_audio_settings_payload(settings: Any) -> dict[str, Any]:
+    if not isinstance(settings, dict):
+        raise ConfigValidationError("Audio settings payload is required.")
+
+    try:
+        rate = validate_audio_rate(settings.get("rate", 48000))
+        capture_pair = normalize_audio_channel_pair(
+            settings.get("capture_input_channels", [1, 2]),
+            "audio.capture_input_channels",
+        )
+        capture_hardware_channels = normalize_audio_hardware_channels(
+            settings.get("capture_hardware_channels"),
+            capture_pair,
+            "audio.capture_hardware_channels",
+        )
+        sender_output_pair = normalize_audio_channel_pair(
+            settings.get("sender_playback_output_channels", settings.get("playback_output_channels", [1, 2])),
+            "audio.playback_output_channels",
+        )
+        sender_hardware_channels = normalize_audio_hardware_channels(
+            settings.get("sender_playback_hardware_channels", settings.get("playback_hardware_channels")),
+            sender_output_pair,
+            "audio.playback_hardware_channels",
+        )
+        receiver_output_pair = normalize_audio_channel_pair(
+            settings.get("receiver_playback_output_channels", [1, 2]),
+            "receiver_audio.playback_output_channels",
+        )
+        receiver_hardware_channels = normalize_audio_hardware_channels(
+            settings.get("receiver_playback_hardware_channels"),
+            receiver_output_pair,
+            "receiver_audio.playback_hardware_channels",
+        )
+    except ValueError as exc:
+        raise ConfigValidationError(str(exc)) from exc
+
+    return {
+        "rate": rate,
+        "supported_rates": sorted(SUPPORTED_WEBRTC_SAMPLE_RATES),
+        "channels": 2,
+        "capture_device": _normalize_device_name(settings.get("capture_device", "default")),
+        "capture_input_channels": capture_pair,
+        "capture_hardware_channels": capture_hardware_channels,
+        "sender_playback_device": _normalize_device_name(settings.get("sender_playback_device", "default")),
+        "sender_playback_output_channels": sender_output_pair,
+        "sender_playback_hardware_channels": sender_hardware_channels,
+        "receiver_playback_device": _normalize_device_name(settings.get("receiver_playback_device", "default")),
+        "receiver_playback_output_channels": receiver_output_pair,
+        "receiver_playback_hardware_channels": receiver_hardware_channels,
+    }
+
+
+def _normalize_device_name(value: Any) -> str:
+    if value is None:
+        return "default"
+    normalized = str(value).strip()
+    if not normalized:
+        return "default"
+    if "\n" in normalized or "\r" in normalized:
+        raise ConfigValidationError("Audio device names must be single-line ALSA device strings.")
+    return normalized
 
 
 def _replace_top_level_yaml_mapping(
@@ -246,4 +383,6 @@ def _format_yaml_scalar(value: Any) -> str:
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
+    if isinstance(value, list):
+        return "[" + ", ".join(_format_yaml_scalar(item) for item in value) + "]"
     return str(value)

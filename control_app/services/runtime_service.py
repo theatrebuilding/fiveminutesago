@@ -31,6 +31,8 @@ from .sender_recovery import (
     sender_mode_for_request,
 )
 
+from production.audio_support import normalize_audio_channel_pair, normalize_audio_hardware_channels
+
 
 VALID_ROLES = {"server", "sender", "receiver"}
 VALID_COUNTRIES = {"tn", "dk"}
@@ -813,6 +815,10 @@ class RuntimeService:
             "rtpL16pay",
             "rtpL16depay",
         ]
+        config = self._read_config_for_preflight()
+        audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
+        if _audio_routes_require_mix_matrix(audio, include_capture=request.audio_source == "device"):
+            elements.append("audiomixmatrix")
         if request.audio_source == "device":
             elements.extend(["alsasrc", "webrtcdsp"])
         else:
@@ -821,8 +827,6 @@ class RuntimeService:
             if not self._gst_element_available(element):
                 errors.append(f"missing GStreamer element {element}")
 
-        config = self._read_config_for_preflight()
-        audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
         if request.audio_source == "device":
             capture_device = request.audio_device or str(audio.get("device", "default"))
             capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
@@ -919,3 +923,19 @@ def _sender_mode_label(mode: str | None) -> str:
     if mode == "video-only":
         return "video-only"
     return mode or "unknown"
+
+
+def _audio_routes_require_mix_matrix(audio: dict[str, Any], *, include_capture: bool) -> bool:
+    try:
+        playback_pair = normalize_audio_channel_pair(audio.get("playback_output_channels", [1, 2]), "audio.playback_output_channels")
+        playback_channels = normalize_audio_hardware_channels(audio.get("playback_hardware_channels"), playback_pair, "audio.playback_hardware_channels")
+        if playback_pair != [1, 2] or playback_channels != 2:
+            return True
+        if include_capture:
+            capture_pair = normalize_audio_channel_pair(audio.get("capture_input_channels", [1, 2]), "audio.capture_input_channels")
+            capture_channels = normalize_audio_hardware_channels(audio.get("capture_hardware_channels"), capture_pair, "audio.capture_hardware_channels")
+            if capture_pair != [1, 2] or capture_channels != 2:
+                return True
+    except ValueError:
+        return True
+    return False
