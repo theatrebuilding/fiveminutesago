@@ -153,6 +153,32 @@ class SenderRecoveryPolicy:
         self.state.active_mode = None
         return RecoveryAction("stop", reason=f"Sender exited with code {exit_code}.")
 
+    def degrade_playback_stall(self, now: float, reason: str) -> RecoveryAction:
+        active_request = self.state.active_request
+        desired_request = self.state.desired_request
+        if (
+            active_request is None
+            or desired_request is None
+            or self.state.desired_mode != PLAYBACK_DSP_MODE
+            or self.state.active_mode != PLAYBACK_DSP_MODE
+        ):
+            return RecoveryAction("noop", reason=reason)
+
+        uptime = (
+            max(0.0, now - self.state.active_started_at)
+            if self.state.active_started_at is not None
+            else 0.0
+        )
+        self.state.last_failure = {
+            "exit_code": None,
+            "mode": self.state.active_mode,
+            "uptime_seconds": round(uptime, 1),
+            "reason": "preview_watchdog",
+        }
+        fallback = fallback_for_playback_failure(desired_request)
+        self._degrade_to(fallback, now, reason, increment_retry=True)
+        return RecoveryAction("launch", fallback, reason)
+
     def due_for_retry(self, now: float) -> bool:
         return (
             self.state.desired_mode == PLAYBACK_DSP_MODE

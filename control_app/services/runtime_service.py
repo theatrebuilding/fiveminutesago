@@ -39,6 +39,8 @@ VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
 VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
 VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac", "l16"}
 MAX_SYNC_DELAY_MS = 3000
+SENDER_HEALTH_CHECK_INTERVAL_SECONDS = 5.0
+SENDER_PREVIEW_STALE_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -231,6 +233,7 @@ class RuntimeService:
         self._ignored_process_pids: set[int] = set()
         self._sender_retry_timer: threading.Timer | None = None
         self._sender_stable_timer: threading.Timer | None = None
+        self._sender_health_timer: threading.Timer | None = None
 
     def start(self, request: RuntimeLaunchRequest) -> dict[str, Any]:
         self.stop()
@@ -680,10 +683,18 @@ class RuntimeService:
         if self._sender_stable_timer is not None:
             self._sender_stable_timer.cancel()
             self._sender_stable_timer = None
+        if self._sender_health_timer is not None:
+            self._sender_health_timer.cancel()
+            self._sender_health_timer = None
 
     def _schedule_sender_timers_locked(self) -> None:
         self._cancel_sender_timers_locked()
         snapshot = self._sender_recovery.snapshot(time.time())
+        if sender_mode_for_request(self._active_process_request) == PLAYBACK_DSP_MODE:
+            timer = threading.Timer(SENDER_HEALTH_CHECK_INTERVAL_SECONDS, self._check_sender_health)
+            timer.daemon = True
+            self._sender_health_timer = timer
+            timer.start()
         if snapshot["phase"] == DEGRADED_PHASE and snapshot["next_retry_at"] is not None:
             delay = max(0.1, snapshot["next_retry_at"] - time.time())
             timer = threading.Timer(delay, self._attempt_sender_restore)
@@ -735,6 +746,59 @@ class RuntimeService:
             self._schedule_sender_timers_locked()
         if marked:
             self.record_event("Playback + DSP has been stable for 30s; degraded mode cleared.")
+
+    def _check_sender_health(self) -> None:
+        with self._lock:
+            process = self._process
+            request = self._current_request
+            active_request = self._active_process_request
+            active_started_at = self._sender_recovery.state.active_started_at
+
+        if (
+            process is None
+            or process.poll() is not None
+            or request is None
+            or request.role != "sender"
+            or active_request is None
+            or sender_mode_for_request(active_request) != PLAYBACK_DSP_MODE
+            or request.country is None
+        ):
+            return
+
+        preview_pattern = build_sender_preview_pattern(self._preview_dir, request.country)
+        preview = describe_latest_preview(self._preview_dir, preview_pattern)
+        now = time.time()
+        uptime = max(0.0, now - active_started_at) if active_started_at is not None else 0.0
+        unhealthy_reason = None
+        if not preview.get("available"):
+            if uptime >= SENDER_PREVIEW_STALE_SECONDS:
+                unhealthy_reason = (
+                    f"Playback + DSP has been online for {int(uptime)}s but has not produced sender preview frames."
+                )
+        else:
+            age_seconds = int(preview.get("age_seconds") or 0)
+            if age_seconds >= SENDER_PREVIEW_STALE_SECONDS:
+                unhealthy_reason = (
+                    f"Playback + DSP sender preview is stale for {age_seconds}s; falling back to capture-only."
+                )
+
+        if unhealthy_reason is None:
+            with self._lock:
+                if (
+                    self._process is process
+                    and sender_mode_for_request(self._active_process_request) == PLAYBACK_DSP_MODE
+                ):
+                    self._schedule_sender_timers_locked()
+            return
+
+        with self._lock:
+            if (
+                self._process is not process
+                or sender_mode_for_request(self._active_process_request) != PLAYBACK_DSP_MODE
+            ):
+                return
+            action = self._sender_recovery.degrade_playback_stall(now, unhealthy_reason)
+        self._handle_sender_recovery_action(action)
 
     def _sender_preflight_errors(self, request: RuntimeLaunchRequest) -> list[str]:
         if request.role != "sender" or sender_mode_for_request(request) != PLAYBACK_DSP_MODE:

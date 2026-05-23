@@ -74,6 +74,21 @@ class SenderRecoveryPolicyTests(unittest.TestCase):
         self.assertEqual(snapshot["active_mode"], VIDEO_ONLY_MODE)
         self.assertEqual(snapshot["phase"], DEGRADED_PHASE)
 
+    def test_playback_preview_watchdog_degrades_to_capture_only(self) -> None:
+        policy = SenderRecoveryPolicy()
+        request = Request()
+        policy.begin(request, 100.0)
+        policy.launched(request, 100.0)
+
+        action = policy.degrade_playback_stall(125.0, "Playback + DSP stopped producing preview frames.")
+
+        self.assertEqual(action.kind, "launch")
+        self.assertEqual(action.request.sender_audio_mode, "capture-only")
+        snapshot = policy.snapshot(125.0)
+        self.assertEqual(snapshot["phase"], DEGRADED_PHASE)
+        self.assertEqual(snapshot["active_mode"], CAPTURE_ONLY_MODE)
+        self.assertEqual(snapshot["last_failure"]["reason"], "preview_watchdog")
+
     def test_restore_attempt_clears_degraded_after_stable_window(self) -> None:
         policy = SenderRecoveryPolicy()
         request = Request()
