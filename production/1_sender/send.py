@@ -30,6 +30,7 @@ from audio_support import (
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
     validate_audio_rate,
+    validate_local_audio_rate,
 )
 from config_loader import load_config
 from live_queue_settings import build_queue_element
@@ -54,6 +55,14 @@ def parse_sync_delay_ms(value):
     return delay_ms
 
 
+def parse_channel_pair(value):
+    try:
+        pair = normalize_audio_channel_pair(value, "channel pair")
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+    return f"{pair[0]}/{pair[1]}"
+
+
 class SenderRuntime:
     def __init__(
         self,
@@ -64,6 +73,11 @@ class SenderRuntime:
         audio_enabled=False,
         audio_device=None,
         playback_device=None,
+        local_audio_rate=None,
+        capture_input_channels="1/2",
+        capture_hardware_channels=None,
+        playback_output_channels="1/2",
+        playback_hardware_channels=None,
         audio_source_mode="device",
         sender_audio_mode="aec",
         audio_delay_ms=0,
@@ -76,6 +90,11 @@ class SenderRuntime:
         self.audio_enabled = audio_enabled
         self.audio_device = audio_device
         self.playback_device = playback_device
+        self.local_audio_rate = local_audio_rate
+        self.capture_input_channels = capture_input_channels
+        self.capture_hardware_channels = capture_hardware_channels
+        self.playback_output_channels = playback_output_channels
+        self.playback_hardware_channels = playback_hardware_channels
         self.audio_source_mode = audio_source_mode
         self.sender_audio_mode = sender_audio_mode
         self.audio_delay_ms = audio_delay_ms
@@ -205,32 +224,33 @@ class SenderRuntime:
         streaming_settings_audio = cfg.get("streaming_settings_audio", "")
         audio_srt_suffix = f"&{streaming_settings_audio}" if streaming_settings_audio else ""
         audio_format = audio_opts.get("format", "S16BE")
-        audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
+        transport_audio_rate = self.parse_audio_rate(audio_opts.get("rate", 32000))
         channels = int(audio_opts.get("channels", 2))
         if channels != 2:
-            print("ERROR: audio.channels must be 2; hardware routing uses separate channel-pair settings.")
+            print("ERROR: audio.channels must be 2; sender hardware routing uses separate channel-pair settings.")
             sys.exit(1)
         encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = self.playback_device or audio_opts.get("playback_device", "default")
         playback_enabled = self.sender_audio_mode == "aec"
         try:
+            local_audio_rate = validate_local_audio_rate(self.local_audio_rate, fallback=transport_audio_rate)
             capture_pair = normalize_audio_channel_pair(
-                audio_opts.get("capture_input_channels", [1, 2]),
-                "audio.capture_input_channels",
+                self.capture_input_channels,
+                "sender capture input channels",
             )
             capture_hardware_channels = normalize_audio_hardware_channels(
-                audio_opts.get("capture_hardware_channels"),
+                self.capture_hardware_channels,
                 capture_pair,
-                "audio.capture_hardware_channels",
+                "sender capture hardware channels",
             )
             playback_pair = normalize_audio_channel_pair(
-                audio_opts.get("playback_output_channels", [1, 2]),
-                "audio.playback_output_channels",
+                self.playback_output_channels,
+                "sender playback output channels",
             )
             playback_hardware_channels = normalize_audio_hardware_channels(
-                audio_opts.get("playback_hardware_channels"),
+                self.playback_hardware_channels,
                 playback_pair,
-                "audio.playback_hardware_channels",
+                "sender playback hardware channels",
             )
         except ValueError as exc:
             print(f"ERROR: {exc}")
@@ -296,7 +316,7 @@ class SenderRuntime:
 
         if playback_enabled:
             try:
-                audio_rate = validate_audio_rate(audio_rate)
+                transport_audio_rate = validate_audio_rate(transport_audio_rate)
                 dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
             except ValueError as exc:
                 print(f"ERROR: {exc}")
@@ -305,31 +325,34 @@ class SenderRuntime:
             dsp_properties = ""
             resolved_dsp_cfg = {}
 
-        audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, audio_rate)
+        audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, local_audio_rate)
         aac_encoder = self.resolve_aac_encoder(audio_opts)
         enable_dsp = playback_enabled and uses_dsp
-        capture_input_channels = capture_hardware_channels if uses_dsp else channels
+        capture_input_channel_count = capture_hardware_channels if uses_dsp else channels
         capture_mix_element = build_input_pair_mix_element(capture_pair, capture_hardware_channels) if uses_dsp else ""
         capture_pair_segment = f"! {capture_mix_element}" if capture_mix_element else ""
         playback_mix_element = build_output_pair_mix_element(playback_pair, playback_hardware_channels)
         playback_pair_segment = f"! {playback_mix_element}" if playback_mix_element else ""
-        playback_output_channels = playback_hardware_channels if playback_mix_element else channels
+        playback_output_channel_count = playback_hardware_channels if playback_mix_element else channels
         playback_branch = ""
         if playback_enabled:
             audio_delay_ns = self.audio_delay_ms * 1_000_000
             playback_branch = f"""
                 srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                     {playback_input_queue}
-                    ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                    ! application/x-rtp,media=audio,clock-rate={transport_audio_rate},encoding-name={encoding_name},channels={channels}
                     ! rtpL16depay
                     ! audioconvert
                     ! audioresample
-                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     ! webrtcechoprobe name=playback_probe
                     ! {playback_output_queue}
+                    ! audioconvert
+                    ! audioresample
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
                     {playback_pair_segment}
-                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channels},rate={audio_rate}
+                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
                     ! alsasink device="{gst_escape(playback_device)}" async=true
             """
 
@@ -347,6 +370,11 @@ class SenderRuntime:
             )
 
         print(f"[Sender] Using audio source: {source_label}", flush=True)
+        print(
+            f"[Sender] Local audio hardware rate: {local_audio_rate} Hz "
+            f"(transport/DSP rate: {transport_audio_rate} Hz).",
+            flush=True,
+        )
         if uses_dsp:
             print(
                 f"[Sender] Capture input pair: {capture_pair[0]}/{capture_pair[1]} "
@@ -359,7 +387,7 @@ class SenderRuntime:
             print(f"[Sender] Using playback device: {playback_device}", flush=True)
             print(
                 f"[Sender] Playback output pair: {playback_pair[0]}/{playback_pair[1]} "
-                f"(requesting {playback_output_channels} hardware channels).",
+                f"(requesting {playback_output_channel_count} hardware channels).",
                 flush=True,
             )
             print(f"[Sender] Audio playback/probe delay: {self.audio_delay_ms} ms", flush=True)
@@ -375,16 +403,18 @@ class SenderRuntime:
                 ! {audio_capture_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channels},rate={audio_rate}
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={local_audio_rate}
                 {capture_pair_segment}
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
+                ! audioresample
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 {dsp_segment}
                 ! tee name=audio_capture_tee
 
             audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate}
+                ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! rtpL16pay
                 ! srtsink wait-for-connection=false
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
@@ -392,7 +422,7 @@ class SenderRuntime:
             audio_capture_tee. ! {audio_aac_output_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}
+                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! {aac_encoder}
                 ! aacparse
                 ! {audio_mux_queue}
@@ -673,6 +703,11 @@ def main():
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio capture device name (for example hw:1,0).")
     parser.add_argument("--playback-device", help="ALSA audio playback device name (for example hw:0,0).")
+    parser.add_argument("--audio-rate", type=int, help="Local sender ALSA hardware sample rate. Audio is resampled to the configured transport/DSP rate after capture and before playback.")
+    parser.add_argument("--capture-input-channels", type=parse_channel_pair, default="1/2", help="1-based sender hardware capture stereo pair, for example 1/2 or 3/4.")
+    parser.add_argument("--capture-hardware-channels", type=int, help="Sender capture channel count to request from ALSA before pair mapping.")
+    parser.add_argument("--playback-output-channels", type=parse_channel_pair, default="1/2", help="1-based sender hardware playback stereo pair, for example 1/2 or 5/6.")
+    parser.add_argument("--playback-hardware-channels", type=int, help="Sender playback channel count to request from ALSA before output pair mapping.")
     parser.add_argument("--audio-source", choices=["device", "test"], default="device", help="Audio source mode. Use 'test' for audiotestsrc instead of a capture device.")
     parser.add_argument("--sender-audio-mode", choices=["aec", "capture-only"], default="aec", help="Sender audio mode. Use 'capture-only' to disable remote playback and WebRTC DSP on the sender.")
     parser.add_argument("--audio-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial sender remote-audio playback/probe delay in milliseconds for A/V sync calibration.")
@@ -711,6 +746,11 @@ def main():
         audio_enabled=run_audio,
         audio_device=audio_device,
         playback_device=args.playback_device,
+        local_audio_rate=args.audio_rate,
+        capture_input_channels=args.capture_input_channels,
+        capture_hardware_channels=args.capture_hardware_channels,
+        playback_output_channels=args.playback_output_channels,
+        playback_hardware_channels=args.playback_hardware_channels,
         audio_source_mode=audio_source_mode,
         sender_audio_mode=sender_audio_mode,
         audio_delay_ms=args.audio_delay_ms,

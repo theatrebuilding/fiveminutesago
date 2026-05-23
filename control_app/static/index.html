@@ -58,6 +58,27 @@
               <p id="audio-device-message" class="field-help">If nothing is selected, sender audio stays disabled.</p>
             </label>
 
+            <label id="sender-audio-rate-field" class="field hidden">
+              <span class="field-label">Audio Rate</span>
+              <select id="sender-audio-rate-select">
+                <option value="48000">48000 Hz (recommended)</option>
+                <option value="44100">44100 Hz</option>
+                <option value="96000">96000 Hz</option>
+                <option value="32000">32000 Hz</option>
+                <option value="16000">16000 Hz</option>
+                <option value="8000">8000 Hz</option>
+              </select>
+              <p id="sender-audio-rate-message" class="field-help">Sets the sender Pi's local ALSA hardware rate. The stream is still resampled to the configured transport rate.</p>
+            </label>
+
+            <label id="sender-capture-pair-field" class="field hidden">
+              <span class="field-label">Input Channels</span>
+              <select id="sender-capture-pair-select">
+                <option value="1/2">Channels 1/2</option>
+              </select>
+              <p id="sender-capture-pair-message" class="field-help">Choose which physical input pair from the selected local soundcard becomes sender stereo audio.</p>
+            </label>
+
             <label id="sender-audio-mode-field" class="field">
               <span class="field-label">Sender Audio Mode</span>
               <select id="sender-audio-mode-select">
@@ -73,6 +94,14 @@
                 <option value="__audio_playback_default__">Default output from config</option>
               </select>
               <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender Playback + DSP mode.</p>
+            </label>
+
+            <label id="sender-playback-output-pair-field" class="field hidden">
+              <span class="field-label">Output Channels</span>
+              <select id="sender-playback-output-pair-select">
+                <option value="1/2">Channels 1/2</option>
+              </select>
+              <p id="sender-playback-output-pair-message" class="field-help">Choose which physical output pair on the selected local soundcard receives returned audio.</p>
             </label>
 
             <label id="sender-audio-delay-field" class="field hidden">
@@ -158,7 +187,6 @@
           </div>
           <div id="config-editor-actions" class="button-row">
             <button id="dsp-settings-button" class="button-muted">DSP Settings</button>
-            <button id="audio-settings-button" class="button-muted">Audio I/O</button>
             <button id="apply-config" class="button-accent">Save</button>
             <button id="show-config" class="button-muted hidden">Show Config</button>
           </div>
@@ -278,76 +306,6 @@
               </article>
             </div>
             <p id="dsp-settings-message" class="action-message"></p>
-          </section>
-        </div>
-
-        <div id="audio-settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="audio-settings-title">
-          <section class="modal-card audio-settings-card">
-            <div class="modal-heading">
-              <div>
-                <p class="field-label">ALSA hardware routing</p>
-                <h2 id="audio-settings-title">Audio I/O Settings</h2>
-              </div>
-              <div class="button-row modal-actions modal-actions-top">
-                <button id="audio-settings-save" class="button-accent" type="button">Save</button>
-                <button id="audio-settings-cancel" class="button-muted" type="button">Cancel</button>
-              </div>
-            </div>
-            <div class="audio-settings-grid">
-              <article class="dsp-card">
-                <h3>Shared stream</h3>
-                <label class="field">
-                  <span class="field-label">Sample rate</span>
-                  <select id="audio-rate-select">
-                    <option value="48000">48000 Hz (recommended)</option>
-                    <option value="32000">32000 Hz</option>
-                    <option value="16000">16000 Hz</option>
-                    <option value="8000">8000 Hz</option>
-                  </select>
-                  <p class="field-help">The current Playback + DSP path supports WebRTC-compatible rates. Keep this at 48000 Hz for the Scarlett unless you have a reason to change it.</p>
-                </label>
-              </article>
-
-              <article class="dsp-card">
-                <h3>Sender capture input</h3>
-                <label class="field">
-                  <span class="field-label">Input device</span>
-                  <select id="audio-capture-device-select"></select>
-                </label>
-                <label class="field">
-                  <span class="field-label">Input pair</span>
-                  <select id="audio-capture-pair-select"></select>
-                  <p id="audio-capture-detail-message" class="field-help">Choose which physical Scarlett input pair becomes the outgoing stereo stream.</p>
-                </label>
-              </article>
-
-              <article class="dsp-card">
-                <h3>Sender Playback + DSP output</h3>
-                <label class="field">
-                  <span class="field-label">Output device</span>
-                  <select id="audio-sender-playback-device-select"></select>
-                </label>
-                <label class="field">
-                  <span class="field-label">Output pair</span>
-                  <select id="audio-sender-output-pair-select"></select>
-                  <p id="audio-sender-output-detail-message" class="field-help">Choose which physical output pair receives returned audio on the sender.</p>
-                </label>
-              </article>
-
-              <article class="dsp-card">
-                <h3>Receiver output</h3>
-                <label class="field">
-                  <span class="field-label">Output device</span>
-                  <select id="audio-receiver-playback-device-select"></select>
-                </label>
-                <label class="field">
-                  <span class="field-label">Output pair</span>
-                  <select id="audio-receiver-output-pair-select"></select>
-                  <p id="audio-receiver-output-detail-message" class="field-help">Choose which physical output pair receives receiver playback.</p>
-                </label>
-              </article>
-            </div>
-            <p id="audio-settings-message" class="action-message"></p>
           </section>
         </div>
 

@@ -5,14 +5,14 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from production.audio_support import SUPPORTED_WEBRTC_SAMPLE_RATES, channel_pairs_for_count
+from production.audio_support import COMMON_AUDIO_HARDWARE_RATES, channel_pairs_for_count
 
 
 ALSA_CARD_PATTERN = re.compile(
     r"^card\s+(?P<card>\d+):\s+(?P<card_id>[^\s]+)\s+\[(?P<card_name>.+?)\],\s+device\s+(?P<device>\d+):\s+(?P<device_name>.+?)\s+\[(?P<device_label>.+?)\]$"
 )
 ALSA_HW_PATTERN = re.compile(r"^hw:(?P<card>\d+),(?P<device>\d+)$")
-COMMON_AUDIO_RATES = [8000, 16000, 32000, 44100, 48000, 88200, 96000]
+COMMON_AUDIO_RATES = COMMON_AUDIO_HARDWARE_RATES
 
 
 class AudioDeviceService:
@@ -58,22 +58,18 @@ class AudioDeviceService:
             )
         else:
             max_channels = 2
-        app_supported_rates = sorted(SUPPORTED_WEBRTC_SAMPLE_RATES)
+        supported_rates = sorted(rates) if rates else list(COMMON_AUDIO_HARDWARE_RATES)
         if rates:
-            app_supported_rates = sorted(rate for rate in app_supported_rates if rate in rates)
-            if not app_supported_rates:
-                warnings.append(
-                    "This device did not report any rates supported by the current Playback + DSP path."
-                )
-                app_supported_rates = sorted(SUPPORTED_WEBRTC_SAMPLE_RATES)
+            if 48000 not in rates:
+                warnings.append("This device did not report 48000 Hz.")
         else:
-            warnings.append("Could not detect hardware rates; showing app-supported rates.")
+            warnings.append("Could not detect hardware rates; showing common hardware rates.")
 
         return {
             "device": normalized_device,
             "direction": direction,
             "rates": sorted(rates),
-            "supported_rates": app_supported_rates,
+            "supported_rates": supported_rates,
             "channel_counts": sorted(channel_counts),
             "max_channels": max_channels,
             "pairs": channel_pairs_for_count(max_channels),

@@ -186,24 +186,6 @@ async def get_dsp_settings(request: Request) -> dict[str, Any]:
     }
 
 
-@app.get("/api/config/audio-settings")
-async def get_audio_settings(request: Request) -> dict[str, Any]:
-    services = _services(request)
-    try:
-        settings_data = services.config_service.read_audio_settings()
-    except ConfigValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Server config file is not available at {services.config_service.config_path}.",
-        ) from exc
-    return {
-        "path": str(services.config_service.config_path),
-        "settings": settings_data,
-    }
-
-
 @app.put("/api/config/dsp-settings")
 async def update_dsp_settings(request: Request) -> dict[str, Any]:
     payload = await request.json()
@@ -233,38 +215,6 @@ async def update_dsp_settings(request: Request) -> dict[str, Any]:
         "runtime": runtime_status,
         "summary": services.dashboard_service.build_config_summary(parsed, runtime_status),
         "settings": services.config_service.read_dsp_settings(),
-    }
-
-
-@app.put("/api/config/audio-settings")
-async def update_audio_settings(request: Request) -> dict[str, Any]:
-    payload = await request.json()
-    settings_payload = payload.get("settings")
-    if not isinstance(settings_payload, dict):
-        raise HTTPException(status_code=400, detail="Audio settings payload is required.")
-
-    services = _services(request)
-    try:
-        parsed = services.config_service.write_audio_settings(settings_payload)
-    except ConfigValidationError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Could not write config at {services.config_service.config_path}: {exc}",
-        ) from exc
-
-    services.runtime_service.record_event("Audio I/O settings updated from dashboard.")
-    runtime_status = services.runtime_service.relaunch_active()
-    return {
-        "message": (
-            "Audio I/O settings saved and active role relaunched."
-            if runtime_status.get("running")
-            else "Audio I/O settings saved."
-        ),
-        "runtime": runtime_status,
-        "summary": services.dashboard_service.build_config_summary(parsed, runtime_status),
-        "settings": services.config_service.read_audio_settings(),
     }
 
 

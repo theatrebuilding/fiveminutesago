@@ -30,8 +30,11 @@ from .sender_recovery import (
     SenderRecoveryPolicy,
     sender_mode_for_request,
 )
-
-from production.audio_support import normalize_audio_channel_pair, normalize_audio_hardware_channels
+from production.audio_support import (
+    normalize_audio_channel_pair,
+    normalize_audio_hardware_channels,
+    validate_local_audio_rate,
+)
 
 
 VALID_ROLES = {"server", "sender", "receiver"}
@@ -53,6 +56,11 @@ class RuntimeLaunchRequest:
     sender_audio_mode: str = "aec"
     audio_device: str | None = None
     sender_playback_device: str | None = None
+    sender_audio_rate: int | None = None
+    sender_capture_input_channels: tuple[int, int] = (1, 2)
+    sender_capture_hardware_channels: int = 2
+    sender_playback_output_channels: tuple[int, int] = (1, 2)
+    sender_playback_hardware_channels: int = 2
     video_source: str = "test"
     video_device: str | None = None
     sender_audio_delay_ms: int = 0
@@ -74,6 +82,11 @@ class RuntimeLaunchRequest:
             "sender_audio_mode": self.sender_audio_mode,
             "audio_device": self.audio_device,
             "sender_playback_device": self.sender_playback_device,
+            "sender_audio_rate": self.sender_audio_rate,
+            "sender_capture_input_channels": list(self.sender_capture_input_channels),
+            "sender_capture_hardware_channels": self.sender_capture_hardware_channels,
+            "sender_playback_output_channels": list(self.sender_playback_output_channels),
+            "sender_playback_hardware_channels": self.sender_playback_hardware_channels,
             "video_source": self.video_source,
             "video_device": self.video_device,
             "sender_audio_delay_ms": self.sender_audio_delay_ms,
@@ -117,6 +130,25 @@ class RuntimeLaunchRequest:
             str(sender_playback_device_raw).strip() or None
             if sender_playback_device_raw is not None
             else None
+        )
+        sender_audio_rate = _parse_optional_audio_rate(payload.get("sender_audio_rate"))
+        sender_capture_input_channels = _parse_channel_pair(
+            payload.get("sender_capture_input_channels", [1, 2]),
+            "sender_capture_input_channels",
+        )
+        sender_capture_hardware_channels = _parse_hardware_channels(
+            payload.get("sender_capture_hardware_channels"),
+            sender_capture_input_channels,
+            "sender_capture_hardware_channels",
+        )
+        sender_playback_output_channels = _parse_channel_pair(
+            payload.get("sender_playback_output_channels", [1, 2]),
+            "sender_playback_output_channels",
+        )
+        sender_playback_hardware_channels = _parse_hardware_channels(
+            payload.get("sender_playback_hardware_channels"),
+            sender_playback_output_channels,
+            "sender_playback_hardware_channels",
         )
         video_device_raw = payload.get("video_device")
         video_device = str(video_device_raw).strip() or None if video_device_raw is not None else None
@@ -164,15 +196,26 @@ class RuntimeLaunchRequest:
             sender_audio_mode = "aec"
             audio_device = None
             sender_playback_device = None
+            sender_audio_rate = None
+            sender_capture_input_channels = (1, 2)
+            sender_capture_hardware_channels = 2
+            sender_playback_output_channels = (1, 2)
+            sender_playback_hardware_channels = 2
             video_source = "config"
             video_device = None
             sender_audio_delay_ms = 0
         else:
             if audio_source != "device":
                 audio_device = None
+                sender_capture_input_channels = (1, 2)
+                sender_capture_hardware_channels = 2
             if sender_audio_mode != "aec" or audio_source == "off":
                 sender_playback_device = None
                 sender_audio_delay_ms = 0
+                sender_playback_output_channels = (1, 2)
+                sender_playback_hardware_channels = 2
+            if audio_source == "off":
+                sender_audio_rate = None
             if video_source != "device":
                 video_device = None
             elif video_device is None:
@@ -191,6 +234,11 @@ class RuntimeLaunchRequest:
             sender_audio_mode=sender_audio_mode,
             audio_device=audio_device,
             sender_playback_device=sender_playback_device,
+            sender_audio_rate=sender_audio_rate,
+            sender_capture_input_channels=sender_capture_input_channels,
+            sender_capture_hardware_channels=sender_capture_hardware_channels,
+            sender_playback_output_channels=sender_playback_output_channels,
+            sender_playback_hardware_channels=sender_playback_hardware_channels,
             video_source=video_source,
             video_device=video_device,
             sender_audio_delay_ms=sender_audio_delay_ms,
@@ -474,8 +522,28 @@ class RuntimeService:
                 command.append("--no-audio")
             if request.audio_source == "device" and request.audio_device:
                 command.extend(["--device", request.audio_device])
+            if request.audio_enabled and request.sender_audio_rate:
+                command.extend(["--audio-rate", str(request.sender_audio_rate)])
+            if request.audio_source == "device":
+                command.extend(
+                    [
+                        "--capture-input-channels",
+                        _format_channel_pair(request.sender_capture_input_channels),
+                        "--capture-hardware-channels",
+                        str(request.sender_capture_hardware_channels),
+                    ]
+                )
             if request.sender_audio_mode == "aec" and request.sender_playback_device:
                 command.extend(["--playback-device", request.sender_playback_device])
+            if request.sender_audio_mode == "aec" and request.audio_enabled:
+                command.extend(
+                    [
+                        "--playback-output-channels",
+                        _format_channel_pair(request.sender_playback_output_channels),
+                        "--playback-hardware-channels",
+                        str(request.sender_playback_hardware_channels),
+                    ]
+                )
             if request.sender_audio_mode == "aec" and request.audio_enabled:
                 command.extend(
                     [
@@ -815,9 +883,7 @@ class RuntimeService:
             "rtpL16pay",
             "rtpL16depay",
         ]
-        config = self._read_config_for_preflight()
-        audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
-        if _audio_routes_require_mix_matrix(audio, include_capture=request.audio_source == "device"):
+        if _sender_routes_require_mix_matrix(request):
             elements.append("audiomixmatrix")
         if request.audio_source == "device":
             elements.extend(["alsasrc", "webrtcdsp"])
@@ -827,6 +893,8 @@ class RuntimeService:
             if not self._gst_element_available(element):
                 errors.append(f"missing GStreamer element {element}")
 
+        config = self._read_config_for_preflight()
+        audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
         if request.audio_source == "device":
             capture_device = request.audio_device or str(audio.get("device", "default"))
             capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
@@ -915,6 +983,48 @@ def _parse_sync_delay_ms(value: Any, field_name: str) -> int:
     return delay_ms
 
 
+def _parse_optional_audio_rate(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return validate_local_audio_rate(value)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _parse_channel_pair(value: Any, field_name: str) -> tuple[int, int]:
+    try:
+        pair = normalize_audio_channel_pair(value, field_name)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+    return (pair[0], pair[1])
+
+
+def _parse_hardware_channels(value: Any, pair: tuple[int, int], field_name: str) -> int:
+    try:
+        return normalize_audio_hardware_channels(value, list(pair), field_name)
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def _format_channel_pair(pair: tuple[int, int]) -> str:
+    return f"{pair[0]}/{pair[1]}"
+
+
+def _sender_routes_require_mix_matrix(request: RuntimeLaunchRequest) -> bool:
+    if request.audio_source == "device" and (
+        request.sender_capture_input_channels != (1, 2)
+        or request.sender_capture_hardware_channels != 2
+    ):
+        return True
+    if request.sender_audio_mode == "aec" and request.audio_enabled and (
+        request.sender_playback_output_channels != (1, 2)
+        or request.sender_playback_hardware_channels != 2
+    ):
+        return True
+    return False
+
+
 def _sender_mode_label(mode: str | None) -> str:
     if mode == PLAYBACK_DSP_MODE:
         return "Playback + DSP"
@@ -923,19 +1033,3 @@ def _sender_mode_label(mode: str | None) -> str:
     if mode == "video-only":
         return "video-only"
     return mode or "unknown"
-
-
-def _audio_routes_require_mix_matrix(audio: dict[str, Any], *, include_capture: bool) -> bool:
-    try:
-        playback_pair = normalize_audio_channel_pair(audio.get("playback_output_channels", [1, 2]), "audio.playback_output_channels")
-        playback_channels = normalize_audio_hardware_channels(audio.get("playback_hardware_channels"), playback_pair, "audio.playback_hardware_channels")
-        if playback_pair != [1, 2] or playback_channels != 2:
-            return True
-        if include_capture:
-            capture_pair = normalize_audio_channel_pair(audio.get("capture_input_channels", [1, 2]), "audio.capture_input_channels")
-            capture_channels = normalize_audio_hardware_channels(audio.get("capture_hardware_channels"), capture_pair, "audio.capture_hardware_channels")
-            if capture_pair != [1, 2] or capture_channels != 2:
-                return True
-    except ValueError:
-        return True
-    return False

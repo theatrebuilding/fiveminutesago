@@ -4,6 +4,7 @@ from typing import Any
 
 
 SUPPORTED_WEBRTC_SAMPLE_RATES = {8000, 16000, 32000, 48000}
+COMMON_AUDIO_HARDWARE_RATES = [8000, 16000, 32000, 44100, 48000, 88200, 96000]
 DEFAULT_AUDIO_CHANNEL_PAIR = [1, 2]
 MAX_AUDIO_HARDWARE_CHANNELS = 64
 SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES = {48000, 96000}
@@ -94,22 +95,29 @@ def validate_audio_rate(audio_rate: Any) -> int:
     return rate
 
 
+def validate_local_audio_rate(audio_rate: Any, *, fallback: int = 48000) -> int:
+    if audio_rate is None or audio_rate == "":
+        return fallback
+    if isinstance(audio_rate, bool):
+        raise ValueError("sender audio rate must be an integer sample rate.")
+    try:
+        rate = int(audio_rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("sender audio rate must be an integer sample rate.") from exc
+    if rate <= 0 or rate > 384000:
+        raise ValueError("sender audio rate must be between 1 and 384000 Hz.")
+    return rate
+
+
 def normalize_audio_channel_pair(value: Any, field_name: str) -> list[int]:
-    """Normalize a 1-based stereo hardware channel pair.
-
-    The app transports audio as stereo. Multichannel hardware routing is expressed
-    as a physical stereo pair such as [1, 2], [3, 4], or [5, 6].
-    """
-
     if value is None or value == "":
         return list(DEFAULT_AUDIO_CHANNEL_PAIR)
-
     if isinstance(value, str):
         cleaned = value.strip().replace("/", ",")
         try:
             parts = [int(part.strip()) for part in cleaned.split(",") if part.strip()]
         except ValueError as exc:
-            raise ValueError(f"{field_name} must be a stereo channel pair like [1, 2] or '1/2'.") from exc
+            raise ValueError(f"{field_name} must be a stereo channel pair like 1/2.") from exc
     elif isinstance(value, (list, tuple)):
         try:
             parts = [int(part) for part in value]
@@ -120,7 +128,6 @@ def normalize_audio_channel_pair(value: Any, field_name: str) -> list[int]:
 
     if len(parts) != 2:
         raise ValueError(f"{field_name} must contain exactly two channels.")
-
     left, right = parts
     if left < 1 or right < 1:
         raise ValueError(f"{field_name} channels are 1-based and must be positive.")
@@ -130,7 +137,6 @@ def normalize_audio_channel_pair(value: Any, field_name: str) -> list[int]:
         raise ValueError(f"{field_name} must start on an odd channel: 1/2, 3/4, 5/6, ...")
     if right > MAX_AUDIO_HARDWARE_CHANNELS:
         raise ValueError(f"{field_name} cannot exceed channel {MAX_AUDIO_HARDWARE_CHANNELS}.")
-
     return [left, right]
 
 
@@ -172,14 +178,9 @@ def channel_pairs_for_count(channel_count: Any) -> list[dict[str, Any]]:
 
 def build_input_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> str:
     pair = normalize_audio_channel_pair(channel_pair, "input channel pair")
-    input_channels = normalize_audio_hardware_channels(
-        hardware_channels,
-        pair,
-        "input hardware_channels",
-    )
+    input_channels = normalize_audio_hardware_channels(hardware_channels, pair, "input hardware_channels")
     if pair == DEFAULT_AUDIO_CHANNEL_PAIR and input_channels == 2:
         return ""
-
     rows = [[0.0 for _ in range(input_channels)] for _ in range(2)]
     rows[0][pair[0] - 1] = 1.0
     rows[1][pair[1] - 1] = 1.0
@@ -191,14 +192,9 @@ def build_input_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> s
 
 def build_output_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> str:
     pair = normalize_audio_channel_pair(channel_pair, "output channel pair")
-    output_channels = normalize_audio_hardware_channels(
-        hardware_channels,
-        pair,
-        "output hardware_channels",
-    )
+    output_channels = normalize_audio_hardware_channels(hardware_channels, pair, "output hardware_channels")
     if pair == DEFAULT_AUDIO_CHANNEL_PAIR and output_channels == 2:
         return ""
-
     rows = [[0.0, 0.0] for _ in range(output_channels)]
     rows[pair[0] - 1][0] = 1.0
     rows[pair[1] - 1][1] = 1.0
@@ -211,9 +207,7 @@ def build_output_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> 
 def format_gst_mix_matrix(rows: list[list[float]]) -> str:
     formatted_rows = []
     for row in rows:
-        formatted_rows.append(
-            "<" + ", ".join(f"(double){float(value):.1f}" for value in row) + ">"
-        )
+        formatted_rows.append("<" + ", ".join(f"(double){float(value):.1f}" for value in row) + ">")
     return "<" + ", ".join(formatted_rows) + ">"
 
 

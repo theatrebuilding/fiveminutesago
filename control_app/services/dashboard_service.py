@@ -58,7 +58,6 @@ class DashboardService:
             "server_ip": config_data.get("server_ip"),
             "ports": config_data.get("ports", {}),
             "audio": config_data.get("audio", {}),
-            "receiver_audio": config_data.get("receiver_audio", {}),
             "video": config_data.get("video", {}),
             "streaming_settings_audio": config_data.get("streaming_settings_audio"),
             "streaming_settings_video": config_data.get("streaming_settings_video"),

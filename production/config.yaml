@@ -16,11 +16,7 @@ ports:
 audio:
   source: "alsasrc"              # Sender audio source element
   device: "default"              # Sender Pi microphone capture device when audio_source=device
-  capture_input_channels: [1, 2] # 1-based hardware input stereo pair mapped into the outgoing stereo stream.
-  capture_hardware_channels: 2   # Hardware capture channel count to request before pair mapping.
   playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
-  playback_output_channels: [1, 2] # 1-based hardware output stereo pair for sender Playback + DSP.
-  playback_hardware_channels: 2  # Hardware playback channel count to request before output pair mapping.
   format: "S16BE"                # Separate RTP L16 transport sample format. The current path requires S16BE.
   rate: 48000                    # Shared sender/receiver audio sample rate. 48000 is recommended for DSP and AAC playback.
   channels: 2
@@ -33,8 +29,6 @@ audio:
 receiver_audio:
   transport: "aac"               # Receiver playback options: aac, l16, off
   playback_device: "default"     # Receiver Pi speaker output device
-  playback_output_channels: [1, 2] # 1-based hardware output stereo pair for receiver playback.
-  playback_hardware_channels: 2  # Hardware playback channel count to request before output pair mapping.
 
 recording:
   video:
