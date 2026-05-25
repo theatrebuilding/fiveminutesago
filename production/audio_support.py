@@ -78,6 +78,21 @@ def gst_escape(value: Any) -> str:
     return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
+def alsa_runtime_device(value: Any) -> str:
+    """Return an ALSA device string suitable for app-managed rate/channel routing.
+
+    Direct `hw:*` devices reject many otherwise convertible formats. The UI still
+    displays the real `hw:*` device names discovered by ALSA, but runtime paths
+    use `plughw:*` so ALSA can adapt sample format/rate/channel layout for USB
+    interfaces such as Focusrite Scarlett devices.
+    """
+
+    normalized = str(value or "default").strip() or "default"
+    if normalized.startswith("hw:"):
+        return f"plughw:{normalized.removeprefix('hw:')}"
+    return normalized
+
+
 def validate_audio_rate(audio_rate: Any) -> int:
     try:
         rate = int(audio_rate)
@@ -158,7 +173,24 @@ def normalize_audio_hardware_channels(value: Any, channel_pair: Any, field_name:
     return channels
 
 
-def channel_pairs_for_count(channel_count: Any) -> list[dict[str, Any]]:
+def choose_audio_hardware_channels(channel_pair: Any, supported_counts: Any = None) -> int:
+    pair = normalize_audio_channel_pair(channel_pair, "channel pair")
+    minimum = max(pair)
+    if supported_counts:
+        candidates: list[int] = []
+        for value in supported_counts:
+            try:
+                channels = int(value)
+            except (TypeError, ValueError):
+                continue
+            if minimum <= channels <= MAX_AUDIO_HARDWARE_CHANNELS:
+                candidates.append(channels)
+        if candidates:
+            return min(candidates)
+    return minimum
+
+
+def channel_pairs_for_count(channel_count: Any, supported_counts: Any = None) -> list[dict[str, Any]]:
     try:
         count = int(channel_count)
     except (TypeError, ValueError):
@@ -171,6 +203,7 @@ def channel_pairs_for_count(channel_count: Any) -> list[dict[str, Any]]:
             "value": f"{channel}/{channel + 1}",
             "label": f"Channels {channel}/{channel + 1}",
             "channels": [channel, channel + 1],
+            "hardware_channels": choose_audio_hardware_channels([channel, channel + 1], supported_counts),
         }
         for channel in range(1, count + 1, 2)
     ]

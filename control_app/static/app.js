@@ -43,6 +43,13 @@ const senderAudioRateMessage = document.getElementById("sender-audio-rate-messag
 const senderCapturePairField = document.getElementById("sender-capture-pair-field");
 const senderCapturePairSelect = document.getElementById("sender-capture-pair-select");
 const senderCapturePairMessage = document.getElementById("sender-capture-pair-message");
+const senderMicTestField = document.getElementById("sender-mic-test-field");
+const senderMicTestButton = document.getElementById("sender-mic-test-button");
+const senderMicLeftBar = document.getElementById("sender-mic-left-bar");
+const senderMicRightBar = document.getElementById("sender-mic-right-bar");
+const senderMicLeftValue = document.getElementById("sender-mic-left-value");
+const senderMicRightValue = document.getElementById("sender-mic-right-value");
+const senderMicTestMessage = document.getElementById("sender-mic-test-message");
 const senderAudioModeField = document.getElementById("sender-audio-mode-field");
 const senderAudioModeSelect = document.getElementById("sender-audio-mode-select");
 const senderPlaybackDeviceField = document.getElementById("sender-playback-device-field");
@@ -51,6 +58,9 @@ const senderPlaybackDeviceMessage = document.getElementById("sender-playback-dev
 const senderPlaybackOutputPairField = document.getElementById("sender-playback-output-pair-field");
 const senderPlaybackOutputPairSelect = document.getElementById("sender-playback-output-pair-select");
 const senderPlaybackOutputPairMessage = document.getElementById("sender-playback-output-pair-message");
+const senderOutputTestField = document.getElementById("sender-output-test-field");
+const senderOutputTestButton = document.getElementById("sender-output-test-button");
+const senderOutputTestMessage = document.getElementById("sender-output-test-message");
 const senderAudioDelayField = document.getElementById("sender-audio-delay-field");
 const senderAudioDelayInput = document.getElementById("sender-audio-delay-input");
 const senderAudioDelayValue = document.getElementById("sender-audio-delay-value");
@@ -109,6 +119,9 @@ let selectedArchiveName = null;
 let selectedArchiveRevision = null;
 let selectedArchiveFile = null;
 let lastConfigPanelRole = null;
+let micLevelPollTimer = null;
+let micLevelTestRunning = false;
+let outputTestRunning = false;
 
 const AUDIO_OFF_VALUE = "__audio_off__";
 const AUDIO_TEST_VALUE = "__audio_test__";
@@ -332,17 +345,32 @@ function updatePairHardwareDataset(select) {
   select.dataset.hardwareChannels = selectedOption?.dataset.hardwareChannels || String(maxPairChannel(select.value));
 }
 
+function setSelectedPairHardwareChannels(select, hardwareChannels) {
+  const parsed = Number.parseInt(hardwareChannels, 10);
+  if (!Number.isFinite(parsed)) {
+    updatePairHardwareDataset(select);
+    return;
+  }
+  const normalized = String(parsed);
+  const selectedOption = select.selectedOptions?.[0];
+  if (selectedOption) {
+    selectedOption.dataset.hardwareChannels = normalized;
+  }
+  select.dataset.hardwareChannels = normalized;
+}
+
 function renderPairOptions(select, details, selectedChannels) {
   const selectedValue = formatAudioPair(selectedChannels);
   const pairs = details?.pairs?.length ? details.pairs : [{ value: "1/2", label: "Channels 1/2", channels: [1, 2] }];
-  const maxChannels = Number.parseInt(details?.max_channels || 2, 10);
   select.innerHTML = "";
   pairs.forEach((pair) => {
     const value = pair.value || formatAudioPair(pair.channels);
     const option = document.createElement("option");
     option.value = value;
     option.textContent = pair.label || `Channels ${value}`;
-    option.dataset.hardwareChannels = String(Math.max(maxChannels, maxPairChannel(value)));
+    option.dataset.hardwareChannels = String(
+      Number.parseInt(pair.hardware_channels || maxPairChannel(value), 10)
+    );
     select.appendChild(option);
   });
   setPairSelectValue(select, selectedValue);
@@ -378,6 +406,89 @@ function deviceDetailsMessage(details, fallback) {
   }
   const warning = details?.warnings?.length ? ` ${details.warnings.join(" ")}` : "";
   return `${parts.length ? parts.join(" • ") : fallback}${warning}`;
+}
+
+function senderRuntimeIsActive() {
+  return Boolean(latestStatus?.runtime?.running && latestStatus.runtime.role === "sender");
+}
+
+function selectedSenderCaptureDevice() {
+  const value = audioDeviceSelect.value || AUDIO_OFF_VALUE;
+  if (value === AUDIO_OFF_VALUE || value === AUDIO_TEST_VALUE) {
+    return null;
+  }
+  return value === AUDIO_DEFAULT_DEVICE_VALUE ? "default" : value;
+}
+
+function selectedSenderPlaybackDevice() {
+  const value = senderPlaybackDeviceSelect.value || AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
+  return value === AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE ? "default" : value;
+}
+
+function selectedAudioRate() {
+  const parsed = Number.parseInt(senderAudioRateSelect.value || "48000", 10);
+  return Number.isFinite(parsed) ? parsed : 48000;
+}
+
+function selectedPairHardwareChannels(select) {
+  updatePairHardwareDataset(select);
+  const parsed = Number.parseInt(select.dataset.hardwareChannels || maxPairChannel(select.value), 10);
+  return Number.isFinite(parsed) ? parsed : maxPairChannel(select.value);
+}
+
+function setMicLevelBars(levels = {}) {
+  const left = Math.max(0, Math.min(1, Number(levels.left?.peak || 0)));
+  const right = Math.max(0, Math.min(1, Number(levels.right?.peak || 0)));
+  senderMicLeftBar.style.width = `${Math.round(left * 100)}%`;
+  senderMicRightBar.style.width = `${Math.round(right * 100)}%`;
+  senderMicLeftValue.textContent = `${Math.round(left * 100)}%`;
+  senderMicRightValue.textContent = `${Math.round(right * 100)}%`;
+}
+
+function buildSenderMicTestPayload() {
+  const device = selectedSenderCaptureDevice();
+  if (!device) {
+    throw new Error("Choose a hardware audio input first.");
+  }
+  return {
+    device,
+    rate: selectedAudioRate(),
+    input_channels: parseAudioPair(senderCapturePairSelect.value),
+    hardware_channels: selectedPairHardwareChannels(senderCapturePairSelect),
+    supported_channel_counts: senderCaptureDetails?.channel_counts || [],
+    duration_seconds: 10,
+  };
+}
+
+function buildSenderOutputTestPayload() {
+  return {
+    device: selectedSenderPlaybackDevice(),
+    rate: selectedAudioRate(),
+    output_channels: parseAudioPair(senderPlaybackOutputPairSelect.value),
+    hardware_channels: selectedPairHardwareChannels(senderPlaybackOutputPairSelect),
+    supported_channel_counts: senderPlaybackDetails?.channel_counts || [],
+  };
+}
+
+function applyAudioTestButtonState() {
+  const senderActive = senderRuntimeIsActive();
+  if (senderMicTestButton) {
+    senderMicTestButton.disabled = senderActive || micLevelTestRunning || !selectedSenderCaptureDevice();
+  }
+  if (senderOutputTestButton) {
+    senderOutputTestButton.disabled = senderActive || outputTestRunning || !shouldShowSenderPlaybackOutputPairField();
+  }
+  if (senderActive) {
+    senderMicTestMessage.textContent = "Stop the sender before running a mic test so the soundcard is not already in use.";
+    senderOutputTestMessage.textContent = "Stop the sender before running an output test so the soundcard is not already in use.";
+  } else {
+    if (senderMicTestMessage.textContent.startsWith("Stop the sender")) {
+      senderMicTestMessage.textContent = "Tap the mic after starting; levels update for 10 seconds.";
+    }
+    if (senderOutputTestMessage.textContent.startsWith("Stop the sender")) {
+      senderOutputTestMessage.textContent = "Plays a short test tone on the selected left/right output channels.";
+    }
+  }
 }
 
 function getLaunchVideoSource(launch) {
@@ -603,9 +714,11 @@ function applyRoleFormState() {
   audioDeviceField.classList.toggle("hidden", !sender);
   senderAudioRateField.classList.toggle("hidden", !shouldShowSenderAudioRateField());
   senderCapturePairField.classList.toggle("hidden", !shouldShowSenderCapturePairField());
+  senderMicTestField.classList.toggle("hidden", !shouldShowSenderCapturePairField());
   senderAudioModeField.classList.toggle("hidden", !sender);
   senderPlaybackDeviceField.classList.toggle("hidden", !shouldShowSenderPlaybackField());
   senderPlaybackOutputPairField.classList.toggle("hidden", !shouldShowSenderPlaybackOutputPairField());
+  senderOutputTestField.classList.toggle("hidden", !shouldShowSenderPlaybackOutputPairField());
   senderAudioDelayField.classList.toggle("hidden", !shouldShowSenderAudioDelayField());
   receiverAudioField.classList.toggle("hidden", !receiver);
   receiverPlaybackDeviceField.classList.toggle("hidden", !receiver);
@@ -614,6 +727,7 @@ function applyRoleFormState() {
   recordingMetric.classList.toggle("hidden", !serverContext);
   archivePanel.classList.toggle("hidden", !serverContext);
   updateSyncDelayLabels();
+  applyAudioTestButtonState();
   applyConfigPanelState();
 }
 
@@ -660,9 +774,11 @@ function syncFormFromRuntime(runtime) {
       senderAudioRateSelect.value = String(launch.sender_audio_rate);
     }
     setPairSelectValue(senderCapturePairSelect, launch.sender_capture_input_channels || [1, 2]);
+    setSelectedPairHardwareChannels(senderCapturePairSelect, launch.sender_capture_hardware_channels);
     ensurePlaybackDeviceOption(launch.sender_playback_device);
     senderPlaybackDeviceSelect.value = launch.sender_playback_device || AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE;
     setPairSelectValue(senderPlaybackOutputPairSelect, launch.sender_playback_output_channels || [1, 2]);
+    setSelectedPairHardwareChannels(senderPlaybackOutputPairSelect, launch.sender_playback_hardware_channels);
     senderAudioDelayInput.value = normalizeSyncDelayMs(launch.sender_audio_delay_ms);
   }
 
@@ -830,6 +946,7 @@ async function updateSenderCaptureDetails(selectedChannels = null) {
   }
   const device = selectedDevice === AUDIO_DEFAULT_DEVICE_VALUE ? "default" : selectedDevice;
   senderCapturePairSelect.disabled = true;
+  senderMicTestButton.disabled = true;
   senderCapturePairMessage.textContent = "Probing local sender input channels…";
   try {
     senderCaptureDetails = await api(`/api/devices/audio/capture/details?device=${encodeURIComponent(device)}`, {
@@ -847,6 +964,7 @@ async function updateSenderCaptureDetails(selectedChannels = null) {
   } finally {
     senderCapturePairSelect.disabled = false;
     renderSenderRateOptions([senderCaptureDetails, senderPlaybackDetails]);
+    applyAudioTestButtonState();
   }
 }
 
@@ -854,6 +972,7 @@ async function updateSenderPlaybackDetails(selectedChannels = null) {
   const selectedDevice = senderPlaybackDeviceSelect.value;
   const device = selectedDevice === AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE ? "default" : selectedDevice;
   senderPlaybackOutputPairSelect.disabled = true;
+  senderOutputTestButton.disabled = true;
   senderPlaybackOutputPairMessage.textContent = "Probing local sender output channels…";
   try {
     senderPlaybackDetails = await api(`/api/devices/audio/playback/details?device=${encodeURIComponent(device)}`, {
@@ -871,6 +990,7 @@ async function updateSenderPlaybackDetails(selectedChannels = null) {
   } finally {
     senderPlaybackOutputPairSelect.disabled = false;
     renderSenderRateOptions([senderCaptureDetails, senderPlaybackDetails]);
+    applyAudioTestButtonState();
   }
 }
 
@@ -1421,6 +1541,98 @@ function buildLaunchPayload() {
   return payload;
 }
 
+async function runSenderOutputTest() {
+  if (senderRuntimeIsActive()) {
+    senderOutputTestMessage.textContent = "Stop the sender before running the output test.";
+    applyAudioTestButtonState();
+    return;
+  }
+  outputTestRunning = true;
+  setBusy([senderOutputTestButton], true);
+  senderOutputTestMessage.textContent = "Playing test tone on the selected output pair…";
+  try {
+    const payload = await api("/api/devices/audio/playback/test", {
+      method: "POST",
+      body: JSON.stringify(buildSenderOutputTestPayload()),
+    });
+    senderOutputTestMessage.textContent = payload.message || "Output test completed.";
+  } catch (error) {
+    senderOutputTestMessage.textContent = error.message;
+  } finally {
+    outputTestRunning = false;
+    setBusy([senderOutputTestButton], false);
+    applyAudioTestButtonState();
+  }
+}
+
+function stopMicLevelPolling() {
+  if (micLevelPollTimer) {
+    window.clearTimeout(micLevelPollTimer);
+    micLevelPollTimer = null;
+  }
+}
+
+function renderMicLevelTestSnapshot(snapshot) {
+  setMicLevelBars(snapshot?.levels || {});
+  if (!snapshot) {
+    return;
+  }
+  if (snapshot.status === "running") {
+    senderMicTestMessage.textContent = `Listening for mic signal… ${Math.ceil(snapshot.remaining_seconds || 0)}s left`;
+    return;
+  }
+  if (snapshot.status === "completed") {
+    senderMicTestMessage.textContent = "Mic test completed.";
+    return;
+  }
+  senderMicTestMessage.textContent = snapshot.error || "Mic test failed.";
+}
+
+async function pollMicLevelTest(testId) {
+  try {
+    const snapshot = await api(`/api/devices/audio/capture/level-test/${encodeURIComponent(testId)}`, {
+      method: "GET",
+    });
+    renderMicLevelTestSnapshot(snapshot);
+    if (snapshot.status === "running" && (snapshot.remaining_seconds || 0) > 0) {
+      micLevelPollTimer = window.setTimeout(() => pollMicLevelTest(testId), 250);
+      return;
+    }
+  } catch (error) {
+    senderMicTestMessage.textContent = error.message;
+  }
+  micLevelTestRunning = false;
+  stopMicLevelPolling();
+  setBusy([senderMicTestButton], false);
+  applyAudioTestButtonState();
+}
+
+async function startSenderMicTest() {
+  if (senderRuntimeIsActive()) {
+    senderMicTestMessage.textContent = "Stop the sender before running the mic test.";
+    applyAudioTestButtonState();
+    return;
+  }
+  stopMicLevelPolling();
+  micLevelTestRunning = true;
+  setBusy([senderMicTestButton], true);
+  setMicLevelBars();
+  senderMicTestMessage.textContent = "Starting 10 second mic input test…";
+  try {
+    const snapshot = await api("/api/devices/audio/capture/level-test", {
+      method: "POST",
+      body: JSON.stringify(buildSenderMicTestPayload()),
+    });
+    renderMicLevelTestSnapshot(snapshot);
+    micLevelPollTimer = window.setTimeout(() => pollMicLevelTest(snapshot.id), 250);
+  } catch (error) {
+    senderMicTestMessage.textContent = error.message;
+    micLevelTestRunning = false;
+    setBusy([senderMicTestButton], false);
+    applyAudioTestButtonState();
+  }
+}
+
 async function startRole() {
   setBusy([startRoleButton], true);
   actionMessage.textContent = "Starting selected role…";
@@ -1748,6 +1960,7 @@ senderAudioRateSelect.addEventListener("change", markLaunchFormDirty);
 senderCapturePairSelect.addEventListener("change", () => {
   markLaunchFormDirty();
   updatePairHardwareDataset(senderCapturePairSelect);
+  applyAudioTestButtonState();
 });
 senderAudioModeSelect.addEventListener("change", () => {
   markLaunchFormDirty();
@@ -1761,6 +1974,7 @@ senderPlaybackDeviceSelect.addEventListener("change", () => {
 senderPlaybackOutputPairSelect.addEventListener("change", () => {
   markLaunchFormDirty();
   updatePairHardwareDataset(senderPlaybackOutputPairSelect);
+  applyAudioTestButtonState();
 });
 senderAudioDelayInput.addEventListener("input", handleSenderAudioDelayInput);
 receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
@@ -1768,6 +1982,8 @@ receiverPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoOutputSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoDelayInput.addEventListener("input", handleReceiverVideoDelayInput);
 startRoleButton.addEventListener("click", toggleRoleAction);
+senderMicTestButton.addEventListener("click", startSenderMicTest);
+senderOutputTestButton.addEventListener("click", runSenderOutputTest);
 recordToggleButton.addEventListener("click", toggleRecording);
 applyConfigButton.addEventListener("click", () => saveConfig(true));
 dspSettingsButton.addEventListener("click", openDspSettings);

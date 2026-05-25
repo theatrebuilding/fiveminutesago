@@ -61,15 +61,12 @@ class SenderRecoveryPolicy:
 
         if desired_mode == PLAYBACK_DSP_MODE and preflight_errors:
             fallback = fallback_for_playback_failure(request)
-            self.state.active_request = fallback
-            self.state.active_mode = sender_mode_for_request(fallback)
-            self.state.phase = DEGRADED_PHASE
-            self.state.degraded_reason = "Playback + DSP preflight failed: " + "; ".join(preflight_errors)
-            self.state.retry_count = 1
-            self.state.next_retry_at = now + backoff_seconds(self.state.retry_count)
-            self.state.active_started_at = now
-            self.state.stable_after = None
-            return fallback
+            return self.begin_degraded(
+                request,
+                fallback,
+                now,
+                "Playback + DSP preflight failed: " + "; ".join(preflight_errors),
+            )
 
         self.state.active_request = request
         self.state.active_mode = desired_mode
@@ -79,6 +76,24 @@ class SenderRecoveryPolicy:
             now + HEALTHY_UPTIME_SECONDS if desired_mode == PLAYBACK_DSP_MODE else None
         )
         return request
+
+    def begin_degraded(self, request: Any, fallback: Any, now: float, reason: str) -> Any:
+        self.reset()
+        self.state.desired_request = request
+        self.state.desired_mode = sender_mode_for_request(request)
+        self.state.active_request = fallback
+        self.state.active_mode = sender_mode_for_request(fallback)
+        self.state.phase = DEGRADED_PHASE
+        self.state.degraded_reason = reason
+        if self.state.desired_mode == PLAYBACK_DSP_MODE:
+            self.state.retry_count = 1
+            self.state.next_retry_at = now + backoff_seconds(self.state.retry_count)
+        else:
+            self.state.retry_count = 0
+            self.state.next_retry_at = None
+        self.state.active_started_at = now
+        self.state.stable_after = None
+        return fallback
 
     def launched(self, request: Any, now: float) -> None:
         self.state.active_request = request

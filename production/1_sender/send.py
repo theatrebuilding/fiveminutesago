@@ -23,6 +23,7 @@ if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
 from audio_support import (
+    alsa_runtime_device,
     build_input_pair_mix_element,
     build_output_pair_mix_element,
     build_webrtcdsp_properties,
@@ -231,6 +232,7 @@ class SenderRuntime:
             sys.exit(1)
         encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = self.playback_device or audio_opts.get("playback_device", "default")
+        runtime_playback_device = alsa_runtime_device(playback_device)
         playback_enabled = self.sender_audio_mode == "aec"
         try:
             local_audio_rate = validate_local_audio_rate(self.local_audio_rate, fallback=transport_audio_rate)
@@ -350,10 +352,10 @@ class SenderRuntime:
                     ! {playback_output_queue}
                     ! audioconvert
                     ! audioresample
-                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
+                    ! audio/x-raw,layout=interleaved,channels={channels},rate={local_audio_rate}
                     {playback_pair_segment}
-                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
-                    ! alsasink device="{gst_escape(playback_device)}" async=true
+                    ! audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
+                    ! alsasink device="{gst_escape(runtime_playback_device)}" async=true
             """
 
         dsp_segment = f"! webrtcdsp probe=playback_probe {dsp_properties}" if enable_dsp else ""
@@ -385,6 +387,8 @@ class SenderRuntime:
         print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
         if playback_enabled:
             print(f"[Sender] Using playback device: {playback_device}", flush=True)
+            if runtime_playback_device != playback_device:
+                print(f"[Sender] Runtime ALSA playback device: {runtime_playback_device}", flush=True)
             print(
                 f"[Sender] Playback output pair: {playback_pair[0]}/{playback_pair[1]} "
                 f"(requesting {playback_output_channel_count} hardware channels).",
@@ -459,9 +463,13 @@ class SenderRuntime:
             )
 
         device = self.audio_device or audio_opts.get("device", "default")
+        runtime_device = alsa_runtime_device(device)
+        label = f"capture device {device} at {audio_rate} Hz"
+        if runtime_device != device:
+            label += f" (runtime ALSA device {runtime_device})"
         return (
-            f'alsasrc device="{gst_escape(device)}" do-timestamp=true',
-            f"capture device {device} at {audio_rate} Hz",
+            f'alsasrc device="{gst_escape(runtime_device)}" do-timestamp=true',
+            label,
             True,
         )
 

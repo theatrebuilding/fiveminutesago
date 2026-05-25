@@ -318,6 +318,37 @@ button:disabled {
   gap: 8px;
 }
 
+.signal-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.signal-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 44px;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.signal-bar {
+  position: relative;
+  height: 12px;
+  overflow: hidden;
+  background: var(--bg-soft);
+  border: 1px solid var(--bg-strong);
+}
+
+.signal-bar-fill {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: var(--accent-dim);
+  transition: width 120ms linear;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

@@ -241,6 +241,29 @@ async def get_audio_capture_device_details(request: Request, device: str = "defa
     return services.audio_device_service.capture_device_details(device)
 
 
+@app.post("/api/devices/audio/capture/level-test")
+async def start_audio_capture_level_test(request: Request) -> dict[str, Any]:
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Audio capture test payload must be an object.")
+    services = _services(request)
+    try:
+        return await asyncio.to_thread(services.audio_device_service.start_capture_level_test, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/devices/audio/capture/level-test/{test_id}")
+async def get_audio_capture_level_test(request: Request, test_id: str) -> dict[str, Any]:
+    services = _services(request)
+    try:
+        return services.audio_device_service.get_capture_level_test(test_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Audio capture level test not found.") from exc
+
+
 @app.get("/api/devices/audio/playback")
 async def get_audio_playback_devices(request: Request) -> dict[str, Any]:
     services = _services(request)
@@ -253,6 +276,20 @@ async def get_audio_playback_devices(request: Request) -> dict[str, Any]:
 async def get_audio_playback_device_details(request: Request, device: str = "default") -> dict[str, Any]:
     services = _services(request)
     return services.audio_device_service.playback_device_details(device)
+
+
+@app.post("/api/devices/audio/playback/test")
+async def run_audio_playback_test(request: Request) -> dict[str, Any]:
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Audio playback test payload must be an object.")
+    services = _services(request)
+    try:
+        return await asyncio.to_thread(services.audio_device_service.run_playback_test, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/api/devices/display")

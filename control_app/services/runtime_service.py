@@ -28,9 +28,13 @@ from .sender_recovery import (
     RESTORING_PHASE,
     RecoveryAction,
     SenderRecoveryPolicy,
+    VIDEO_ONLY_MODE,
     sender_mode_for_request,
+    video_only_request,
 )
 from production.audio_support import (
+    alsa_runtime_device,
+    build_output_pair_mix_element,
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
     validate_local_audio_rate,
@@ -311,6 +315,7 @@ class RuntimeService:
         else:
             active_request = self._prepare_process_request(request)
             process = self._launch_process(active_request)
+            start_watchers = False
             with self._lock:
                 self._process = process
                 self._current_request = request
@@ -318,9 +323,12 @@ class RuntimeService:
                 self._started_at = time.time()
                 self._stopped_at = None
                 self._last_exit_code = None
+                start_watchers = True
                 if request.role == "sender":
                     self._sender_recovery.launched(active_request, self._started_at)
                     self._schedule_sender_timers_locked()
+            if start_watchers:
+                self._start_process_watchers(process)
 
         self.record_event(f"{request.role.title()} role started.")
         return self.snapshot()
@@ -462,6 +470,27 @@ class RuntimeService:
 
         now = time.time()
         preflight_errors = self._sender_preflight_errors(request)
+        capture_errors = _sender_preflight_errors_for(preflight_errors, "capture")
+        if capture_errors and request.audio_source == "device":
+            fallback = video_only_request(request)
+            active_request = self._sender_recovery.begin_degraded(
+                request,
+                fallback,
+                now,
+                "Sender capture preflight failed: " + "; ".join(capture_errors),
+            )
+            self._write_initial_sync_delay(active_request)
+            retry_note = (
+                " while retrying in the background"
+                if sender_mode_for_request(request) == PLAYBACK_DSP_MODE
+                else ""
+            )
+            self.record_event(
+                f"Sender capture preflight failed; starting video-only{retry_note}. "
+                + " ".join(capture_errors)
+            )
+            return active_request
+
         active_request = self._sender_recovery.begin(request, now, preflight_errors)
         self._write_initial_sync_delay(active_request)
         if active_request is not request:
@@ -488,6 +517,9 @@ class RuntimeService:
             bufsize=1,
             start_new_session=True,
         )
+        return process
+
+    def _start_process_watchers(self, process: subprocess.Popen[str]) -> None:
         threading.Thread(
             target=self._drain_output,
             args=(process,),
@@ -500,7 +532,6 @@ class RuntimeService:
             daemon=True,
             name="runtime-process-watcher",
         ).start()
-        return process
 
     def _build_process_command(self, request: RuntimeLaunchRequest) -> tuple[list[str], Path]:
         if request.role == "sender":
@@ -730,6 +761,7 @@ class RuntimeService:
             self._last_exit_code = None
             self._sender_recovery.launched(request, now)
             self._schedule_sender_timers_locked()
+        self._start_process_watchers(process)
 
     def _terminate_process(self, process: subprocess.Popen[str], timeout: float = 10.0) -> int:
         try:
@@ -871,41 +903,111 @@ class RuntimeService:
         self._handle_sender_recovery_action(action)
 
     def _sender_preflight_errors(self, request: RuntimeLaunchRequest) -> list[str]:
-        if request.role != "sender" or sender_mode_for_request(request) != PLAYBACK_DSP_MODE:
+        if request.role != "sender" or sender_mode_for_request(request) == VIDEO_ONLY_MODE:
             return []
 
         errors: list[str] = []
         elements = [
-            "alsasink",
-            "srtsrc",
             "srtsink",
-            "webrtcechoprobe",
             "rtpL16pay",
-            "rtpL16depay",
         ]
+        if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
+            elements.extend(["alsasink", "srtsrc", "webrtcechoprobe", "rtpL16depay"])
         if _sender_routes_require_mix_matrix(request):
             elements.append("audiomixmatrix")
         if request.audio_source == "device":
-            elements.extend(["alsasrc", "webrtcdsp"])
+            elements.append("alsasrc")
+            if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
+                elements.append("webrtcdsp")
         else:
             elements.append("audiotestsrc")
-        for element in elements:
+        for element in sorted(set(elements)):
             if not self._gst_element_available(element):
                 errors.append(f"missing GStreamer element {element}")
 
         config = self._read_config_for_preflight()
         audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
+        local_rate = request.sender_audio_rate or _safe_int(audio.get("rate"), 48000)
         if request.audio_source == "device":
             capture_device = request.audio_device or str(audio.get("device", "default"))
             capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
             if capture_error:
                 errors.append(capture_error)
-        playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
-        playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")
-        if playback_error:
-            errors.append(playback_error)
+            capture_open_error = self._gst_capture_open_error(request, capture_device, local_rate)
+            if capture_open_error:
+                errors.append(capture_open_error)
+        if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
+            playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
+            playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")
+            if playback_error:
+                errors.append(playback_error)
+            playback_open_error = self._gst_playback_open_error(request, playback_device, local_rate)
+            if playback_open_error:
+                errors.append(playback_open_error)
 
         return errors
+
+    def _gst_capture_open_error(
+        self,
+        request: RuntimeLaunchRequest,
+        capture_device: str,
+        local_rate: int,
+    ) -> str | None:
+        if shutil.which("gst-launch-1.0") is None:
+            return "capture preflight failed: gst-launch-1.0 unavailable"
+        device = alsa_runtime_device(capture_device)
+        channels = request.sender_capture_hardware_channels
+        pipeline = (
+            f'gst-launch-1.0 -q alsasrc device="{device}" num-buffers=5 ! '
+            f'audio/x-raw,channels={channels},rate={local_rate} ! '
+            "fakesink sync=false"
+        )
+        return self._run_gst_preflight(pipeline, "capture")
+
+    def _gst_playback_open_error(
+        self,
+        request: RuntimeLaunchRequest,
+        playback_device: str,
+        local_rate: int,
+    ) -> str | None:
+        if shutil.which("gst-launch-1.0") is None:
+            return "playback preflight failed: gst-launch-1.0 unavailable"
+        device = alsa_runtime_device(playback_device)
+        output_channels = request.sender_playback_hardware_channels
+        mix = build_output_pair_mix_element(
+            request.sender_playback_output_channels,
+            request.sender_playback_hardware_channels,
+        )
+        mix_segment = f"! {mix} " if mix else ""
+        pipeline = (
+            "gst-launch-1.0 -q audiotestsrc wave=silence num-buffers=5 ! "
+            "audioconvert ! audioresample ! "
+            f"audio/x-raw,channels=2,rate={local_rate} "
+            f"{mix_segment}! "
+            f"audio/x-raw,channels={output_channels},rate={local_rate} ! "
+            f'alsasink device="{device}" sync=false async=false'
+        )
+        return self._run_gst_preflight(pipeline, "playback")
+
+    def _run_gst_preflight(self, pipeline: str, label: str) -> str | None:
+        import shlex
+
+        try:
+            result = subprocess.run(
+                shlex.split(pipeline),
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=4,
+            )
+        except subprocess.TimeoutExpired:
+            return f"{label} preflight failed: GStreamer open check timed out"
+        except subprocess.SubprocessError as exc:
+            return f"{label} preflight failed: {exc}"
+        if result.returncode == 0:
+            return None
+        detail = (result.stderr or result.stdout or "").strip()
+        return f"{label} preflight failed: {detail or f'gst-launch exited with code {result.returncode}'}"
 
     def _gst_element_available(self, element: str) -> bool:
         if shutil.which("gst-inspect-1.0") is None:
@@ -1030,6 +1132,23 @@ def _sender_mode_label(mode: str | None) -> str:
         return "Playback + DSP"
     if mode == CAPTURE_ONLY_MODE:
         return "capture-only"
-    if mode == "video-only":
+    if mode == VIDEO_ONLY_MODE:
         return "video-only"
     return mode or "unknown"
+
+
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _sender_preflight_errors_for(errors: list[str], prefix: str) -> list[str]:
+    normalized_prefix = prefix.strip().lower()
+    return [
+        error
+        for error in errors
+        if error.lower().startswith(f"{normalized_prefix} preflight failed")
+        or error.lower().startswith(f"{normalized_prefix} device")
+    ]

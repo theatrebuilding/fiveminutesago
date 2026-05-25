@@ -74,6 +74,32 @@ class SenderRecoveryPolicyTests(unittest.TestCase):
         self.assertEqual(snapshot["active_mode"], VIDEO_ONLY_MODE)
         self.assertEqual(snapshot["phase"], DEGRADED_PHASE)
 
+    def test_begin_degraded_can_start_video_only_for_capture_preflight_failure(self) -> None:
+        policy = SenderRecoveryPolicy()
+        request = Request()
+        fallback = Request(audio_source="off", sender_audio_mode="capture-only", audio_device=None, sender_playback_device=None)
+
+        active = policy.begin_degraded(request, fallback, 100.0, "Sender capture preflight failed")
+
+        self.assertEqual(active.audio_source, "off")
+        snapshot = policy.snapshot(100.0)
+        self.assertEqual(snapshot["phase"], DEGRADED_PHASE)
+        self.assertEqual(snapshot["desired_mode"], PLAYBACK_DSP_MODE)
+        self.assertEqual(snapshot["active_mode"], VIDEO_ONLY_MODE)
+        self.assertEqual(snapshot["next_retry_in_seconds"], 10)
+
+    def test_begin_degraded_does_not_schedule_restore_when_desired_capture_only(self) -> None:
+        policy = SenderRecoveryPolicy()
+        request = Request(sender_audio_mode="capture-only", sender_playback_device=None)
+        fallback = Request(audio_source="off", sender_audio_mode="capture-only", audio_device=None, sender_playback_device=None)
+
+        policy.begin_degraded(request, fallback, 100.0, "Sender capture preflight failed")
+
+        snapshot = policy.snapshot(100.0)
+        self.assertEqual(snapshot["desired_mode"], CAPTURE_ONLY_MODE)
+        self.assertEqual(snapshot["active_mode"], VIDEO_ONLY_MODE)
+        self.assertIsNone(snapshot["next_retry_at"])
+
     def test_playback_preview_watchdog_degrades_to_capture_only(self) -> None:
         policy = SenderRecoveryPolicy()
         request = Request()
