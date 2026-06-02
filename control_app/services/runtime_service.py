@@ -965,7 +965,8 @@ class RuntimeService:
             f"device={device}",
             "num-buffers=5",
             "!",
-            f"audio/x-raw,channels={channels},rate={local_rate}",
+            "capsfilter",
+            f"caps=audio/x-raw,channels={channels},rate={local_rate}",
             "!",
             "fakesink",
             "sync=false",
@@ -997,7 +998,8 @@ class RuntimeService:
             "!",
             "audioresample",
             "!",
-            f"audio/x-raw,channels=2,rate={local_rate}",
+            "capsfilter",
+            f"caps=audio/x-raw,channels=2,rate={local_rate}",
         ]
         if mix:
             command.append("!")
@@ -1005,7 +1007,8 @@ class RuntimeService:
         command.extend(
             [
                 "!",
-                f"audio/x-raw,channels={output_channels},rate={local_rate}",
+                "capsfilter",
+                f"caps=audio/x-raw,channels={output_channels},rate={local_rate}",
                 "!",
                 "alsasink",
                 f"device={device}",
@@ -1145,7 +1148,10 @@ def _format_channel_pair(pair: tuple[int, int]) -> str:
 
 
 def _format_command_for_log(command: list[str]) -> str:
-    return shlex.join(command)
+    # Keep GStreamer link markers visually unquoted in control logs; they are
+    # direct argv tokens, not shell syntax, and quoting them in diagnostics made
+    # the preflight command look different from the user-run gst-launch command.
+    return " ".join("!" if token == "!" else shlex.quote(token) for token in command)
 
 
 def _sender_routes_require_mix_matrix(request: RuntimeLaunchRequest) -> bool:

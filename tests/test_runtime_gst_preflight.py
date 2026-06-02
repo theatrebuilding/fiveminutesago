@@ -54,7 +54,8 @@ class RuntimeGstPreflightTests(unittest.TestCase):
 
         self.assertIsNone(error)
         command = run.call_args.args[0]
-        self.assertIn("audio/x-raw,channels=2,rate=48000", command)
+        self.assertIn("capsfilter", command)
+        self.assertIn("caps=audio/x-raw,channels=2,rate=48000", command)
         self.assertNotIn("audio", command)
         self.assertIn("device=plughw:3,0", command)
 
@@ -81,7 +82,7 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         matrix_args = [arg for arg in command if arg.startswith("matrix=")]
         self.assertEqual(len(matrix_args), 1)
         self.assertIn("<(double)1.0, (double)0.0>", matrix_args[0])
-        self.assertIn("audio/x-raw,channels=10,rate=48000", command)
+        self.assertIn("caps=audio/x-raw,channels=10,rate=48000", command)
 
     def test_preflight_failure_includes_exact_command_for_diagnostics(self) -> None:
         service = _runtime_service()
@@ -104,7 +105,9 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         assert error is not None
         self.assertIn('WARNING: erroneous pipeline: no element "audio"', error)
         self.assertIn("[command: gst-launch-1.0", error)
-        self.assertIn("audio/x-raw,channels=2,rate=48000", error)
+        self.assertIn("capsfilter caps=audio/x-raw,channels=2,rate=48000", error)
+        self.assertIn(" ! ", error)
+        self.assertNotIn("'!'", error)
         self.assertIn("device=plughw:3,0", error)
 
 
