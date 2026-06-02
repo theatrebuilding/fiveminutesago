@@ -470,8 +470,21 @@ class RuntimeService:
             return request
 
         now = time.time()
+        self.record_event("Sender requested: " + _sender_request_summary(request, self._read_config_for_preflight()))
         preflight_errors = self._sender_preflight_errors(request)
+        if preflight_errors:
+            self.record_event("Sender preflight errors: " + _format_error_list(preflight_errors))
+        else:
+            self.record_event(
+                "Sender preflight passed for "
+                f"{_sender_mode_label(sender_mode_for_request(request))}; starting requested mode."
+            )
         capture_errors = _sender_preflight_errors_for(preflight_errors, "capture")
+        playback_errors = _sender_preflight_errors_for(preflight_errors, "playback")
+        if capture_errors:
+            self.record_event("Sender capture preflight classification: " + _format_error_list(capture_errors))
+        if playback_errors:
+            self.record_event("Sender playback preflight classification: " + _format_error_list(playback_errors))
         if capture_errors and request.audio_source == "device":
             fallback = video_only_request(request)
             active_request = self._sender_recovery.begin_degraded(
@@ -490,6 +503,7 @@ class RuntimeService:
                 f"Sender capture preflight failed; starting video-only{retry_note}. "
                 + " ".join(capture_errors)
             )
+            self.record_event("Sender fallback selected: " + _sender_request_summary(active_request, self._read_config_for_preflight()))
             return active_request
 
         active_request = self._sender_recovery.begin(request, now, preflight_errors)
@@ -500,10 +514,17 @@ class RuntimeService:
                 f"{_sender_mode_label(sender_mode_for_request(active_request))} while retrying in the background. "
                 + " ".join(preflight_errors)
             )
+            self.record_event("Sender fallback selected: " + _sender_request_summary(active_request, self._read_config_for_preflight()))
         return active_request
 
     def _launch_process(self, request: RuntimeLaunchRequest) -> subprocess.Popen[str]:
         command, working_dir = self._build_process_command(request)
+        if request.role == "sender":
+            self.record_event(
+                "Launching sender "
+                f"{_sender_mode_label(sender_mode_for_request(request))}: "
+                f"{_format_command_for_log(command)}"
+            )
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
         env["CONFIG_PATH"] = str(self._config_path)
@@ -821,8 +842,15 @@ class RuntimeService:
         if desired_request is None:
             return
 
+        self.record_event("Playback + DSP retry preflight requested: " + _sender_request_summary(desired_request, self._read_config_for_preflight()))
         preflight_errors = self._sender_preflight_errors(desired_request)
         if preflight_errors:
+            capture_errors = _sender_preflight_errors_for(preflight_errors, "capture")
+            playback_errors = _sender_preflight_errors_for(preflight_errors, "playback")
+            if capture_errors:
+                self.record_event("Playback + DSP retry capture classification: " + _format_error_list(capture_errors))
+            if playback_errors:
+                self.record_event("Playback + DSP retry playback classification: " + _format_error_list(playback_errors))
             reason = "Playback + DSP retry preflight still failing: " + "; ".join(preflight_errors)
             with self._lock:
                 if not self._sender_recovery.due_for_retry(time.time()):
@@ -838,6 +866,7 @@ class RuntimeService:
         if restore_request is None:
             return
 
+        self.record_event("Playback + DSP retry preflight passed; restoring requested DSP mode now.")
         self.record_event("Retrying Playback + DSP now; video may briefly reconnect.")
         self._replace_active_process(restore_request)
 
@@ -1141,6 +1170,48 @@ def _parse_hardware_channels(value: Any, pair: tuple[int, int], field_name: str)
         return normalize_audio_hardware_channels(value, list(pair), field_name)
     except ValueError as exc:
         raise ValueError(str(exc)) from exc
+
+
+def _format_error_list(errors: list[str]) -> str:
+    return " | ".join(errors) if errors else "none"
+
+
+def _sender_request_summary(request: RuntimeLaunchRequest, config: dict[str, Any] | None = None) -> str:
+    audio = config.get("audio", {}) if isinstance(config, dict) and isinstance(config.get("audio"), dict) else {}
+    mode = sender_mode_for_request(request)
+    fields = [
+        f"mode={_sender_mode_label(mode)}",
+        f"country={request.country or 'default'}",
+        f"video_source={request.video_source}",
+        f"audio_source={request.audio_source}",
+    ]
+    if request.video_device:
+        fields.append(f"video_device={request.video_device}")
+    if request.audio_enabled:
+        local_rate = request.sender_audio_rate or _safe_int(audio.get("rate"), 48000)
+        fields.append(f"audio_rate={local_rate}")
+        if request.audio_source == "device":
+            capture_device = request.audio_device or str(audio.get("device", "default"))
+            fields.extend(
+                [
+                    f"capture_device={capture_device}",
+                    f"capture_runtime_device={alsa_runtime_device(capture_device)}",
+                    f"capture_pair={_format_channel_pair(request.sender_capture_input_channels)}",
+                    f"capture_hardware_channels={request.sender_capture_hardware_channels}",
+                ]
+            )
+        if request.sender_audio_mode == "aec":
+            playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
+            fields.extend(
+                [
+                    f"playback_device={playback_device}",
+                    f"playback_runtime_device={alsa_runtime_device(playback_device)}",
+                    f"playback_pair={_format_channel_pair(request.sender_playback_output_channels)}",
+                    f"playback_hardware_channels={request.sender_playback_hardware_channels}",
+                    f"audio_delay_ms={request.sender_audio_delay_ms}",
+                ]
+            )
+    return "; ".join(fields)
 
 
 def _format_channel_pair(pair: tuple[int, int]) -> str:
