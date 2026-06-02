@@ -40,6 +40,13 @@ from live_queue_settings import build_queue_element
 MAX_SYNC_DELAY_MS = 3000
 DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
 SYNC_DELAY_POLL_MS = 500
+AUDIO_DIAGNOSTIC_LOG_SECONDS = 5
+AUDIO_DIAGNOSTIC_ELEMENTS = {
+    "capture_after_dsp": "mic/DSP outbound",
+    "l16_outbound": "L16 send to server",
+    "remote_inbound": "remote L16 from server",
+    "playback_probe_reference": "playback/probe reference",
+}
 
 
 def parse_sync_delay_ms(value):
@@ -109,6 +116,9 @@ class SenderRuntime:
         self.audio_send_port = None
         self.audio_recv_port = None
         self.exit_code = 0
+        self.audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
+        self.last_audio_diagnostic_counts = dict(self.audio_diagnostic_counts)
+        self.audio_diagnostic_active_elements = []
 
     def set_clock(self, clock):
         self.clock = clock
@@ -358,8 +368,10 @@ class SenderRuntime:
                     ! audioconvert
                     ! audioresample
                     ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                    ! identity name=remote_inbound signal-handoffs=true silent=true
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     ! webrtcechoprobe name=playback_probe
+                    ! identity name=playback_probe_reference signal-handoffs=true silent=true
                     ! {playback_output_queue}
                     ! audioconvert
                     ! audioresample
@@ -396,6 +408,11 @@ class SenderRuntime:
             )
         print("[Sender] Live muxed audio transport: AAC in MPEG-TS.", flush=True)
         print("[Sender] Live separate audio transport: RTP L16 over SRT.", flush=True)
+        print(
+            f"[Sender] L16 audio ports: send={self.audio_send_port}; "
+            f"receive={self.audio_recv_port if playback_enabled else 'disabled'}.",
+            flush=True,
+        )
         if playback_enabled:
             print(f"[Sender] Using playback device: {playback_device}", flush=True)
             if runtime_playback_device != playback_device:
@@ -424,12 +441,14 @@ class SenderRuntime:
                 ! audioresample
                 ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 {dsp_segment}
+                ! identity name=capture_after_dsp signal-handoffs=true silent=true
                 ! tee name=audio_capture_tee
 
             audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
                 ! audioresample
                 ! capsfilter caps=audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! identity name=l16_outbound signal-handoffs=true silent=true
                 ! rtpL16pay
                 ! srtsink wait-for-connection=false
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
@@ -614,6 +633,37 @@ class SenderRuntime:
         self.audio_delay_ms = delay_ms
         print(f"[Sender] Audio playback/probe delay updated to {delay_ms} ms.", flush=True)
 
+    def connect_audio_diagnostics(self):
+        if self.pipeline is None or not self.audio_enabled:
+            return
+        self.audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
+        self.last_audio_diagnostic_counts = dict(self.audio_diagnostic_counts)
+        self.audio_diagnostic_active_elements = []
+        for element_name in AUDIO_DIAGNOSTIC_ELEMENTS:
+            element = self.pipeline.get_by_name(element_name)
+            if element is None:
+                continue
+            element.connect("handoff", self.on_audio_diagnostic_handoff, element_name)
+            self.audio_diagnostic_active_elements.append(element_name)
+
+    def on_audio_diagnostic_handoff(self, _identity, _buffer, element_name):
+        self.audio_diagnostic_counts[element_name] = self.audio_diagnostic_counts.get(element_name, 0) + 1
+
+    def log_audio_diagnostics(self):
+        if self.pipeline is None or not self.audio_enabled:
+            return False
+        parts = []
+        for element_name in self.audio_diagnostic_active_elements:
+            label = AUDIO_DIAGNOSTIC_ELEMENTS[element_name]
+            current = self.audio_diagnostic_counts.get(element_name, 0)
+            previous = self.last_audio_diagnostic_counts.get(element_name, 0)
+            delta = current - previous
+            state = "active" if delta > 0 else "inactive"
+            parts.append(f"{label}: {state} (+{delta}, total={current})")
+        self.last_audio_diagnostic_counts = dict(self.audio_diagnostic_counts)
+        print("[Sender] Audio path health: " + "; ".join(parts), flush=True)
+        return True
+
     def run(self):
         self.exit_code = 0
         pipeline_str = self.build_pipeline()
@@ -621,6 +671,7 @@ class SenderRuntime:
         if self.preview_pattern:
             os.makedirs(os.path.dirname(os.path.abspath(self.preview_pattern)), exist_ok=True)
         self.pipeline = Gst.parse_launch(pipeline_str)
+        self.connect_audio_diagnostics()
 
         if self.clock:
             self.pipeline.use_clock(self.clock)
@@ -634,6 +685,8 @@ class SenderRuntime:
         bus.connect("message", self.on_message)
         if self.sender_audio_mode == "aec" and self.audio_enabled and self.sync_delay_file:
             GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
+        if self.audio_enabled:
+            GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self.log_audio_diagnostics)
 
         print("[Sender] Setting state to PLAYING...")
         self._set_pipeline_state(Gst.State.PLAYING, timeout_seconds=5.0, allow_pending=True)

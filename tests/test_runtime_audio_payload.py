@@ -82,6 +82,30 @@ class RuntimeAudioPayloadTests(unittest.TestCase):
                 }
             )
 
+    def test_receiver_defaults_to_video_only_audio_off(self) -> None:
+        request = RuntimeLaunchRequest.from_payload(
+            {
+                "role": "receiver",
+                "country": "dk",
+            }
+        )
+
+        self.assertEqual(request.receiver_audio_transport, "off")
+        self.assertIsNone(request.receiver_playback_device)
+
+    def test_receiver_debug_l16_audio_can_still_be_requested_explicitly(self) -> None:
+        request = RuntimeLaunchRequest.from_payload(
+            {
+                "role": "receiver",
+                "country": "dk",
+                "receiver_audio_transport": "l16",
+                "receiver_playback_device": "hw:2,0",
+            }
+        )
+
+        self.assertEqual(request.receiver_audio_transport, "l16")
+        self.assertEqual(request.receiver_playback_device, "hw:2,0")
+
 
 if __name__ == "__main__":
     unittest.main()

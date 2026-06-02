@@ -27,7 +27,7 @@ audio:
   test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
 
 receiver_audio:
-  transport: "aac"               # Receiver playback options: aac, l16, off
+  transport: "off"               # Receiver Pi is video-only in normal operation. Debug options: aac, l16, off
   playback_device: "default"     # Receiver Pi speaker output device
 
 recording:

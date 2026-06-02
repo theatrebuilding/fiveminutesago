@@ -508,6 +508,9 @@ function describeSenderVideoChoice(launch) {
 
 function describeReceiverAudioChoice(launch) {
   const transport = normalizeReceiverAudioTransport(launch?.receiver_audio_transport).toUpperCase();
+  if (transport === "OFF") {
+    return "video-only receiver";
+  }
   if (transport === "CONFIG") {
     return "audio from config";
   }
@@ -521,14 +524,14 @@ function describeReceiverAudioChoice(launch) {
 }
 
 function normalizeReceiverAudioTransport(value) {
-  const normalized = String(value || "config").trim().toLowerCase();
+  const normalized = String(value || "off").trim().toLowerCase();
   if (normalized === "muxed") {
     return "aac";
   }
   if (normalized === "pcm" || normalized === "uncompressed") {
     return "l16";
   }
-  return normalized || "config";
+  return normalized || "off";
 }
 
 function describeReceiverVideoChoice(launch) {
@@ -721,7 +724,7 @@ function applyRoleFormState() {
   senderOutputTestField.classList.toggle("hidden", !shouldShowSenderPlaybackOutputPairField());
   senderAudioDelayField.classList.toggle("hidden", !shouldShowSenderAudioDelayField());
   receiverAudioField.classList.toggle("hidden", !receiver);
-  receiverPlaybackDeviceField.classList.toggle("hidden", !receiver);
+  receiverPlaybackDeviceField.classList.toggle("hidden", !receiver || normalizeReceiverAudioTransport(receiverAudioSelect.value) === "off");
   receiverVideoOutputField.classList.toggle("hidden", !receiver);
   receiverVideoDelayField.classList.toggle("hidden", !receiver);
   recordingMetric.classList.toggle("hidden", !serverContext);
@@ -1526,9 +1529,11 @@ function buildLaunchPayload() {
   }
 
   if (payload.role === "receiver") {
-    payload.receiver_audio_transport = receiverAudioSelect.value;
+    payload.receiver_audio_transport = "off";
     payload.receiver_playback_device =
-      receiverPlaybackDeviceSelect.value && receiverPlaybackDeviceSelect.value !== RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
+      payload.receiver_audio_transport !== "off" &&
+      receiverPlaybackDeviceSelect.value &&
+      receiverPlaybackDeviceSelect.value !== RECEIVER_AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
         ? receiverPlaybackDeviceSelect.value
         : null;
     payload.receiver_video_output =
@@ -1977,7 +1982,10 @@ senderPlaybackOutputPairSelect.addEventListener("change", () => {
   applyAudioTestButtonState();
 });
 senderAudioDelayInput.addEventListener("input", handleSenderAudioDelayInput);
-receiverAudioSelect.addEventListener("change", markLaunchFormDirty);
+receiverAudioSelect.addEventListener("change", () => {
+  markLaunchFormDirty();
+  applyRoleFormState();
+});
 receiverPlaybackDeviceSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoOutputSelect.addEventListener("change", markLaunchFormDirty);
 receiverVideoDelayInput.addEventListener("input", handleReceiverVideoDelayInput);

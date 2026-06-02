@@ -69,7 +69,7 @@ class RuntimeLaunchRequest:
     video_source: str = "test"
     video_device: str | None = None
     sender_audio_delay_ms: int = 0
-    receiver_audio_transport: str = "config"
+    receiver_audio_transport: str = "off"
     receiver_playback_device: str | None = None
     receiver_video_output: str | None = None
     receiver_video_delay_ms: int = 0
@@ -167,7 +167,7 @@ class RuntimeLaunchRequest:
         receiver_audio_transport = (
             str(receiver_audio_transport_raw).strip().lower()
             if receiver_audio_transport_raw is not None
-            else "config"
+            else "off"
         )
         if receiver_audio_transport in {"pcm", "uncompressed"}:
             receiver_audio_transport = "l16"
@@ -227,10 +227,12 @@ class RuntimeLaunchRequest:
                 raise ValueError("Sender video source 'device' requires a video device path.")
 
         if role != "receiver":
-            receiver_audio_transport = "config"
+            receiver_audio_transport = "off"
             receiver_playback_device = None
             receiver_video_output = None
             receiver_video_delay_ms = 0
+        elif receiver_audio_transport == "off":
+            receiver_playback_device = None
 
         return cls(
             role=role,
