@@ -13,15 +13,26 @@ try:
 except ModuleNotFoundError:
     sys.modules["yaml"] = types.SimpleNamespace(safe_load=lambda _file: {})
 
+
+class _FakeElement:
+    def find_property(self, name):
+        return object() if name == "ignore-inactive-pads" else None
+
+
+class _FakeElementFactory:
+    @staticmethod
+    def find(name):
+        return object() if name == "voaacenc" else None
+
+    @staticmethod
+    def make(name):
+        return _FakeElement() if name == "mpegtsmux" else None
+
+
 if "gi" not in sys.modules:
     gi = types.ModuleType("gi")
     gi.require_version = lambda *_args, **_kwargs: None
     repository = types.ModuleType("gi.repository")
-
-    class _FakeElementFactory:
-        @staticmethod
-        def find(name):
-            return object() if name == "voaacenc" else None
 
     class _FakeSystemClock:
         @staticmethod
@@ -51,6 +62,7 @@ _SPEC = importlib.util.spec_from_file_location("sender_send_for_tests", _MODULE_
 assert _SPEC is not None and _SPEC.loader is not None
 sender_send = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(sender_send)
+sender_send.Gst.ElementFactory = _FakeElementFactory
 
 
 class SenderPipelineCapsTests(unittest.TestCase):
@@ -70,6 +82,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertIn("webrtcdsp probe=playback_probe", pipeline)
+        self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
@@ -89,6 +102,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertNotIn("webrtcdsp probe=playback_probe", pipeline)
+        self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
 

@@ -113,6 +113,16 @@ class SenderRuntime:
     def set_clock(self, clock):
         self.clock = clock
 
+    def build_mpegtsmux_properties(self, alignment):
+        properties = [f"alignment={alignment}"]
+        element_factory = getattr(Gst, "ElementFactory", None)
+        factory_make = getattr(element_factory, "make", None)
+        if callable(factory_make):
+            mux = factory_make("mpegtsmux")
+            if mux is not None and mux.find_property("ignore-inactive-pads") is not None:
+                properties.append("ignore-inactive-pads=true")
+        return " ".join(properties)
+
     def build_pipeline(self):
         cfg = load_config()
         self.server_ip = cfg.get("server_ip", "127.0.0.1")
@@ -138,6 +148,7 @@ class SenderRuntime:
         streaming_settings_video = cfg.get("streaming_settings_video", "")
         video_encoder = video_opts.get("encoder", "x264enc")
         alignment = video_opts.get("alignment", "nal")
+        mux_properties = self.build_mpegtsmux_properties(alignment)
         config_interval = video_opts.get("config_interval", 1)
         video_width = video_opts.get("width", 1920)
         video_height = video_opts.get("height", 1080)
@@ -213,7 +224,7 @@ class SenderRuntime:
 
             {preview_branch}
 
-            mpegtsmux name=av_mux alignment={alignment} !
+            mpegtsmux name=av_mux {mux_properties} !
             srtsink wait-for-connection=false
                 uri="srt://{self.server_ip}:{self.video_send_port}?mode=caller&{streaming_settings_video}"
         """
