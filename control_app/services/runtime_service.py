@@ -6,6 +6,7 @@ import datetime as dt
 import os
 from pathlib import Path
 import signal
+import shlex
 import shutil
 import subprocess
 import threading
@@ -957,12 +958,19 @@ class RuntimeService:
             return "capture preflight failed: gst-launch-1.0 unavailable"
         device = alsa_runtime_device(capture_device)
         channels = request.sender_capture_hardware_channels
-        pipeline = (
-            f'gst-launch-1.0 -q alsasrc device="{device}" num-buffers=5 ! '
-            f'audio/x-raw,channels={channels},rate={local_rate} ! '
-            "fakesink sync=false"
-        )
-        return self._run_gst_preflight(pipeline, "capture")
+        command = [
+            "gst-launch-1.0",
+            "-q",
+            "alsasrc",
+            f"device={device}",
+            "num-buffers=5",
+            "!",
+            f"audio/x-raw,channels={channels},rate={local_rate}",
+            "!",
+            "fakesink",
+            "sync=false",
+        ]
+        return self._run_gst_preflight(command, "capture")
 
     def _gst_playback_open_error(
         self,
@@ -978,36 +986,59 @@ class RuntimeService:
             request.sender_playback_output_channels,
             request.sender_playback_hardware_channels,
         )
-        mix_segment = f"! {mix} " if mix else ""
-        pipeline = (
-            "gst-launch-1.0 -q audiotestsrc wave=silence num-buffers=5 ! "
-            "audioconvert ! audioresample ! "
-            f"audio/x-raw,channels=2,rate={local_rate} "
-            f"{mix_segment}! "
-            f"audio/x-raw,channels={output_channels},rate={local_rate} ! "
-            f'alsasink device="{device}" sync=false async=false'
+        command = [
+            "gst-launch-1.0",
+            "-q",
+            "audiotestsrc",
+            "wave=silence",
+            "num-buffers=5",
+            "!",
+            "audioconvert",
+            "!",
+            "audioresample",
+            "!",
+            f"audio/x-raw,channels=2,rate={local_rate}",
+        ]
+        if mix:
+            command.append("!")
+            command.extend(shlex.split(mix))
+        command.extend(
+            [
+                "!",
+                f"audio/x-raw,channels={output_channels},rate={local_rate}",
+                "!",
+                "alsasink",
+                f"device={device}",
+                "sync=false",
+                "async=false",
+            ]
         )
-        return self._run_gst_preflight(pipeline, "playback")
+        return self._run_gst_preflight(command, "playback")
 
-    def _run_gst_preflight(self, pipeline: str, label: str) -> str | None:
-        import shlex
-
+    def _run_gst_preflight(self, command: list[str], label: str) -> str | None:
         try:
             result = subprocess.run(
-                shlex.split(pipeline),
+                command,
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=4,
             )
         except subprocess.TimeoutExpired:
-            return f"{label} preflight failed: GStreamer open check timed out"
-        except subprocess.SubprocessError as exc:
-            return f"{label} preflight failed: {exc}"
+            return (
+                f"{label} preflight failed: GStreamer open check timed out "
+                f"[command: {_format_command_for_log(command)}]"
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"{label} preflight failed: {exc} [command: {_format_command_for_log(command)}]"
         if result.returncode == 0:
             return None
         detail = (result.stderr or result.stdout or "").strip()
-        return f"{label} preflight failed: {detail or f'gst-launch exited with code {result.returncode}'}"
+        return (
+            f"{label} preflight failed: "
+            f"{detail or f'gst-launch exited with code {result.returncode}'} "
+            f"[command: {_format_command_for_log(command)}]"
+        )
 
     def _gst_element_available(self, element: str) -> bool:
         if shutil.which("gst-inspect-1.0") is None:
@@ -1111,6 +1142,10 @@ def _parse_hardware_channels(value: Any, pair: tuple[int, int], field_name: str)
 
 def _format_channel_pair(pair: tuple[int, int]) -> str:
     return f"{pair[0]}/{pair[1]}"
+
+
+def _format_command_for_log(command: list[str]) -> str:
+    return shlex.join(command)
 
 
 def _sender_routes_require_mix_matrix(request: RuntimeLaunchRequest) -> bool:
