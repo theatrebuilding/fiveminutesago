@@ -31,7 +31,10 @@ if "gi" not in sys.modules:
     sys.modules["gi"] = gi
     sys.modules["gi.repository"] = repository
 
-from control_app.services.server_runtime import build_audio_relay_pipeline_string
+from control_app.services.server_runtime import (
+    build_audio_relay_pipeline_string,
+    build_audio_relay_pipeline_strings,
+)
 
 
 class ServerAudioRelayPipelineTests(unittest.TestCase):
@@ -46,6 +49,19 @@ class ServerAudioRelayPipelineTests(unittest.TestCase):
         self.assertIn("identity name=audio_diag_dk_uplink signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_tn_to_dk_return signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_dk_to_tn_return signal-handoffs=true silent=true", pipeline)
+
+    def test_relay_directions_are_isolated_into_separate_pipelines(self) -> None:
+        pipelines = build_audio_relay_pipeline_strings(_config())
+
+        self.assertEqual(set(pipelines), {"audio-tn-to-dk", "audio-dk-to-tn"})
+        self.assertIn("uri=srt://:8805?mode=listener", pipelines["audio-tn-to-dk"])
+        self.assertIn("srtsink name=a_recv_dk uri=srt://:8807?mode=listener", pipelines["audio-tn-to-dk"])
+        self.assertNotIn("8806", pipelines["audio-tn-to-dk"])
+        self.assertNotIn("8808", pipelines["audio-tn-to-dk"])
+        self.assertIn("uri=srt://:8806?mode=listener", pipelines["audio-dk-to-tn"])
+        self.assertIn("srtsink name=a_recv_tn uri=srt://:8808?mode=listener", pipelines["audio-dk-to-tn"])
+        self.assertNotIn("8805", pipelines["audio-dk-to-tn"])
+        self.assertNotIn("8807", pipelines["audio-dk-to-tn"])
 
 
 def _config() -> dict:

@@ -69,7 +69,7 @@ class ServerRuntime:
         self._lock = threading.Lock()
         self._main_loop: GLib.MainLoop | None = None
         self._loop_thread: threading.Thread | None = None
-        self._audio_pipeline: Gst.Pipeline | None = None
+        self._audio_pipelines: dict[str, Gst.Pipeline] = {}
         self._packet_monitor: UdpPacketMonitor | None = None
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
@@ -240,10 +240,17 @@ class ServerRuntime:
             )
             self._packet_monitor.start()
 
-            self._audio_pipeline = self._build_audio_pipeline(config)
-            self._configure_audio_diagnostics(self._audio_pipeline)
-            self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-            self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio", allow_pending=True)
+            self._audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
+            self._last_audio_diagnostic_counts = dict(self._audio_diagnostic_counts)
+            self._audio_pipelines = self._build_audio_pipelines(config)
+            for label, pipeline in self._audio_pipelines.items():
+                self._configure_audio_diagnostics(pipeline)
+                self._configure_bus(
+                    pipeline,
+                    label,
+                    lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
+                )
+                self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
             GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self._log_audio_diagnostics)
 
             self._last_preview_log_at = {}
@@ -269,15 +276,15 @@ class ServerRuntime:
                     feed_state.pipeline = None
                     feed_state.tee = None
                     feed_state.recording_session = None
-            if self._audio_pipeline is not None:
+            for label, pipeline in list(self._audio_pipelines.items()):
                 self._set_pipeline_state(
-                    self._audio_pipeline,
+                    pipeline,
                     Gst.State.NULL,
-                    "audio",
+                    label,
                     timeout_seconds=5,
                     suppress_errors=True,
                 )
-                self._audio_pipeline = None
+            self._audio_pipelines = {}
             if self._packet_monitor is not None:
                 self._packet_monitor.stop()
                 self._packet_monitor = None
@@ -307,9 +314,9 @@ class ServerRuntime:
                 feed_state.tee = None
                 feed_state.recording_session = None
 
-        if self._audio_pipeline is not None:
-            self._set_pipeline_state(self._audio_pipeline, Gst.State.NULL, "audio", timeout_seconds=10)
-            self._audio_pipeline = None
+        for label, pipeline in list(self._audio_pipelines.items()):
+            self._set_pipeline_state(pipeline, Gst.State.NULL, label, timeout_seconds=10)
+        self._audio_pipelines = {}
 
         if self._packet_monitor is not None:
             self._packet_monitor.stop()
@@ -370,29 +377,35 @@ class ServerRuntime:
         self._start_video_feed(feed_state)
         return False
 
-    def _restart_audio_pipeline(self) -> bool:
+    def _restart_audio_pipeline(self, label: str) -> bool:
         if not self._running:
             return False
         config = _load_config(self._config_path)
-        self._log("[audio] Restarting audio pipeline.")
+        self._log(f"[{label}] Restarting audio relay pipeline.")
 
-        if self._audio_pipeline is not None:
-            self._set_pipeline_state(self._audio_pipeline, Gst.State.NULL, "audio", timeout_seconds=10)
+        existing = self._audio_pipelines.get(label)
+        if existing is not None:
+            self._set_pipeline_state(existing, Gst.State.NULL, label, timeout_seconds=10)
 
-        self._audio_pipeline = self._build_audio_pipeline(config)
-        self._configure_audio_diagnostics(self._audio_pipeline)
-        self._configure_bus(self._audio_pipeline, "audio", self._on_audio_message)
-        self._set_pipeline_state(self._audio_pipeline, Gst.State.PLAYING, "audio", allow_pending=True)
+        pipeline = self._build_audio_pipeline(config, label)
+        self._audio_pipelines[label] = pipeline
+        self._configure_audio_diagnostics(pipeline)
+        self._configure_bus(
+            pipeline,
+            label,
+            lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
+        )
+        self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
         return False
 
-    def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message) -> bool:
+    def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message, label: str) -> bool:
         if message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
-            self._log(f"[audio] ERROR: {err}. {debug or ''}".strip())
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
+            self._log(f"[{label}] ERROR: {err}. {debug or ''}".strip())
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         elif message.type == Gst.MessageType.EOS:
-            self._log("[audio] End of stream detected.")
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline)
+            self._log(f"[{label}] End of stream detected.")
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         return True
 
     def _on_video_message(self, bus: Gst.Bus, message: Gst.Message, feed: str) -> bool:
@@ -698,8 +711,6 @@ class ServerRuntime:
         return preview
 
     def _configure_audio_diagnostics(self, pipeline: Gst.Pipeline) -> None:
-        self._audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
-        self._last_audio_diagnostic_counts = dict(self._audio_diagnostic_counts)
         for element_name in AUDIO_DIAGNOSTIC_ELEMENTS:
             element = pipeline.get_by_name(element_name)
             if element is None:
@@ -710,7 +721,7 @@ class ServerRuntime:
         self._audio_diagnostic_counts[element_name] = self._audio_diagnostic_counts.get(element_name, 0) + 1
 
     def _log_audio_diagnostics(self) -> bool:
-        if not self._running or self._audio_pipeline is None:
+        if not self._running or not self._audio_pipelines:
             return False
         parts = []
         for element_name, label in AUDIO_DIAGNOSTIC_ELEMENTS.items():
@@ -723,8 +734,17 @@ class ServerRuntime:
         self._log("[audio] Path health: " + "; ".join(parts))
         return True
 
-    def _build_audio_pipeline(self, config: dict[str, Any]) -> Gst.Pipeline:
-        return Gst.parse_launch(build_audio_relay_pipeline_string(config))
+    def _build_audio_pipelines(self, config: dict[str, Any]) -> dict[str, Gst.Pipeline]:
+        return {
+            label: Gst.parse_launch(pipeline_str)
+            for label, pipeline_str in build_audio_relay_pipeline_strings(config).items()
+        }
+
+    def _build_audio_pipeline(self, config: dict[str, Any], label: str) -> Gst.Pipeline:
+        pipeline_strings = build_audio_relay_pipeline_strings(config)
+        if label not in pipeline_strings:
+            raise RuntimeError(f"Unknown audio relay pipeline: {label}")
+        return Gst.parse_launch(pipeline_strings[label])
 
     def _build_video_pipeline(self, feed_state: VideoFeedState) -> Gst.Pipeline:
         config = _load_config(self._config_path)
@@ -855,7 +875,7 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     return data
 
 
-def build_audio_relay_pipeline_string(config: dict[str, Any]) -> str:
+def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]:
     ports = config.get("ports", {})
     audio = config.get("audio", {})
     audio_rate = int(audio.get("rate", 48000))
@@ -885,36 +905,41 @@ def build_audio_relay_pipeline_string(config: dict[str, Any]) -> str:
         },
     )
 
-    pipeline_str = f"""
+    tn_to_dk = f"""
         srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
           {audio_input_queue} !
           application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
           rtpL16depay !
           identity name=audio_diag_tn_uplink signal-handoffs=true silent=true !
-          tee name=tee_tn
-
-        srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
-          {audio_input_queue} !
-          application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
-          rtpL16depay !
-          identity name=audio_diag_dk_uplink signal-handoffs=true silent=true !
-          tee name=tee_dk
-
-        tee_tn. ! {audio_output_queue} !
+          {audio_output_queue} !
           audioconvert ! audioresample !
           audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
           identity name=audio_diag_tn_to_dk_return signal-handoffs=true silent=true !
           rtpL16pay !
           srtsink name=a_recv_dk uri=srt://:{ports["audio_receive_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false
+    """
 
-        tee_dk. ! {audio_output_queue} !
+    dk_to_tn = f"""
+        srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
+          {audio_input_queue} !
+          application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+          rtpL16depay !
+          identity name=audio_diag_dk_uplink signal-handoffs=true silent=true !
+          {audio_output_queue} !
           audioconvert ! audioresample !
           audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
           identity name=audio_diag_dk_to_tn_return signal-handoffs=true silent=true !
           rtpL16pay !
           srtsink name=a_recv_tn uri=srt://:{ports["audio_receive_tn"]}?mode=listener{audio_srt_suffix} wait-for-connection=false
     """
-    return pipeline_str.strip()
+    return {
+        "audio-tn-to-dk": tn_to_dk.strip(),
+        "audio-dk-to-tn": dk_to_tn.strip(),
+    }
+
+
+def build_audio_relay_pipeline_string(config: dict[str, Any]) -> str:
+    return "\n\n".join(build_audio_relay_pipeline_strings(config).values())
 
 
 def _resolve_recording_config(config: dict[str, Any]) -> dict[str, Any]:
