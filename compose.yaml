@@ -1,9 +1,9 @@
 services:
-  ldn-sender:
+  teateroen-server:
     build:
       context: .
       dockerfile: Dockerfile
-    hostname: ldn-sender
+    hostname: teateroen-server
     userns_mode: "host"
     dns:
       - 100.100.100.100
@@ -14,22 +14,24 @@ services:
       TS_CLIENT_ID: ${TS_CLIENT_ID}
       TS_CLIENT_SECRET: ${TS_CLIENT_SECRET}
       TS_AUTH_ONCE: "true"
-      TS_HOSTNAME: ldn-sender
+      TS_HOSTNAME: teateroen-server
       TS_EXTRA_ARGS: --advertise-tags=tag:container
       TS_SERVE_CONFIG: /config/generated/control-app-funnel.json
       TS_SERVE_TEMPLATE: /config/control-app-funnel.template.json
       CONFIG_PATH: /config/config.yaml
-      CENTRAL_CONFIG_URL: https://teateroen-server.tail84ebbf.ts.net/api/config
+      CENTRAL_CONFIG_URL: ${CENTRAL_CONFIG_URL:-}
       CONFIG_SYNC_TIMEOUT_SECONDS: ${CONFIG_SYNC_TIMEOUT_SECONDS:-5}
       TS_STATE_DIR: /var/lib/tailscale
       TS_USERSPACE: "false"
       TS_ENABLE_HEALTH_CHECK: "true"
       DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
       DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      TBDRIVE_ROOT: /mnt/tbdrive
     volumes:
       - ./tailscale/config:/config
       - ./tailscale/state:/var/lib/tailscale
       - /dev:/host-dev
+      - ${TBDRIVE_HOST_PATH:-/mnt/tbdrive}:/mnt/tbdrive
     devices:
       - /dev/net/tun:/dev/net/tun
     device_cgroup_rules:
