@@ -346,15 +346,15 @@ class SenderRuntime:
                     ! rtpL16depay
                     ! audioconvert
                     ! audioresample
-                    ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                    ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     ! webrtcechoprobe name=playback_probe
                     ! {playback_output_queue}
                     ! audioconvert
                     ! audioresample
-                    ! audio/x-raw,layout=interleaved,channels={channels},rate={local_audio_rate}
+                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={channels},rate={local_audio_rate}
                     {playback_pair_segment}
-                    ! audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
+                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
                     ! alsasink device="{gst_escape(runtime_playback_device)}" async=true
             """
 
@@ -407,18 +407,18 @@ class SenderRuntime:
                 ! {audio_capture_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={local_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={local_audio_rate}
                 {capture_pair_segment}
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 {dsp_segment}
                 ! tee name=audio_capture_tee
 
             audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! rtpL16pay
                 ! srtsink wait-for-connection=false
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
@@ -426,7 +426,7 @@ class SenderRuntime:
             audio_capture_tee. ! {audio_aac_output_queue}
                 ! audioconvert
                 ! audioresample
-                ! audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! {aac_encoder}
                 ! aacparse
                 ! {audio_mux_queue}
