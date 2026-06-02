@@ -366,7 +366,7 @@ class SenderRuntime:
                     ! capsfilter caps=audio/x-raw,layout=interleaved,channels={channels},rate={local_audio_rate}
                     {playback_pair_segment}
                     ! capsfilter caps=audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
-                    ! alsasink device="{gst_escape(runtime_playback_device)}" async=true
+                    ! alsasink device="{gst_escape(runtime_playback_device)}" async=false
             """
 
         dsp_segment = f"! webrtcdsp probe=playback_probe {dsp_properties}" if enable_dsp else ""

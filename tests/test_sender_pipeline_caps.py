@@ -82,6 +82,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertIn("webrtcdsp probe=playback_probe", pipeline)
+        self.assertIn('alsasink device="plughw:3,0" async=false', pipeline)
         self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
