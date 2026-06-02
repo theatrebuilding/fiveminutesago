@@ -289,12 +289,14 @@ class RuntimeService:
         self._sender_retry_timer: threading.Timer | None = None
         self._sender_stable_timer: threading.Timer | None = None
         self._sender_health_timer: threading.Timer | None = None
+        self._last_sender_health_warning_at: float | None = None
 
     def start(self, request: RuntimeLaunchRequest) -> dict[str, Any]:
         self.stop()
         with self._lock:
             self._log_lines.clear()
             self._sender_recovery.reset()
+            self._last_sender_health_warning_at = None
             self._cancel_sender_timers_locked()
 
         if request.role == "server":
@@ -337,6 +339,7 @@ class RuntimeService:
     def stop(self, timeout: float = 10.0) -> dict[str, Any]:
         with self._lock:
             self._cancel_sender_timers_locked()
+            self._last_sender_health_warning_at = None
             self._sender_recovery.reset()
             self._sync_state_locked()
             process = self._process
@@ -838,12 +841,19 @@ class RuntimeService:
             if not self._sender_recovery.due_for_retry(now):
                 return
             desired_request = self._sender_recovery.state.desired_request
+            active_mode = self._sender_recovery.state.active_mode
 
         if desired_request is None:
             return
 
+        skip_capture_open = active_mode == CAPTURE_ONLY_MODE
         self.record_event("Playback + DSP retry preflight requested: " + _sender_request_summary(desired_request, self._read_config_for_preflight()))
-        preflight_errors = self._sender_preflight_errors(desired_request)
+        if skip_capture_open:
+            self.record_event(
+                "Playback + DSP retry preflight: skipping capture open check because "
+                "capture-only fallback is currently using the microphone."
+            )
+        preflight_errors = self._sender_preflight_errors(desired_request, skip_capture_open=skip_capture_open)
         if preflight_errors:
             capture_errors = _sender_preflight_errors_for(preflight_errors, "capture")
             playback_errors = _sender_preflight_errors_for(preflight_errors, "playback")
@@ -923,16 +933,29 @@ class RuntimeService:
                     self._schedule_sender_timers_locked()
             return
 
+        should_log_warning = False
         with self._lock:
             if (
                 self._process is not process
                 or sender_mode_for_request(self._active_process_request) != PLAYBACK_DSP_MODE
             ):
                 return
-            action = self._sender_recovery.degrade_playback_stall(now, unhealthy_reason)
-        self._handle_sender_recovery_action(action)
+            if (
+                self._last_sender_health_warning_at is None
+                or now - self._last_sender_health_warning_at >= SENDER_PREVIEW_STALE_SECONDS
+            ):
+                self._last_sender_health_warning_at = now
+                should_log_warning = True
+            self._schedule_sender_timers_locked()
 
-    def _sender_preflight_errors(self, request: RuntimeLaunchRequest) -> list[str]:
+        if should_log_warning:
+            self.record_event(
+                "Sender health warning: "
+                + unhealthy_reason
+                + " Keeping Playback + DSP active; preview freshness alone is not treated as a DSP failure."
+            )
+
+    def _sender_preflight_errors(self, request: RuntimeLaunchRequest, *, skip_capture_open: bool = False) -> list[str]:
         if request.role != "sender" or sender_mode_for_request(request) == VIDEO_ONLY_MODE:
             return []
 
@@ -963,9 +986,10 @@ class RuntimeService:
             capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
             if capture_error:
                 errors.append(capture_error)
-            capture_open_error = self._gst_capture_open_error(request, capture_device, local_rate)
-            if capture_open_error:
-                errors.append(capture_open_error)
+            if not skip_capture_open:
+                capture_open_error = self._gst_capture_open_error(request, capture_device, local_rate)
+                if capture_open_error:
+                    errors.append(capture_open_error)
         if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
             playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
             playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")

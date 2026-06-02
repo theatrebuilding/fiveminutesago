@@ -110,6 +110,51 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         self.assertNotIn("'!'", error)
         self.assertIn("device=plughw:3,0", error)
 
+    def test_restore_preflight_can_skip_capture_open_when_fallback_owns_mic(self) -> None:
+        service = _runtime_service()
+        request = RuntimeLaunchRequest(
+            role="sender",
+            country="tn",
+            audio_source="device",
+            sender_audio_mode="aec",
+            audio_device="hw:3,0",
+            sender_playback_device="hw:3,0",
+            sender_audio_rate=48000,
+        )
+
+        with (
+            patch.object(service, "_gst_element_available", return_value=True),
+            patch.object(service, "_alsa_device_error", return_value=None),
+            patch.object(service, "_gst_capture_open_error", return_value="capture preflight failed: device busy") as capture_open,
+            patch.object(service, "_gst_playback_open_error", return_value=None),
+        ):
+            errors = service._sender_preflight_errors(request, skip_capture_open=True)
+
+        self.assertEqual(errors, [])
+        capture_open.assert_not_called()
+
+    def test_restore_preflight_reports_capture_open_when_not_skipped(self) -> None:
+        service = _runtime_service()
+        request = RuntimeLaunchRequest(
+            role="sender",
+            country="tn",
+            audio_source="device",
+            sender_audio_mode="aec",
+            audio_device="hw:3,0",
+            sender_playback_device="hw:3,0",
+            sender_audio_rate=48000,
+        )
+
+        with (
+            patch.object(service, "_gst_element_available", return_value=True),
+            patch.object(service, "_alsa_device_error", return_value=None),
+            patch.object(service, "_gst_capture_open_error", return_value="capture preflight failed: device busy"),
+            patch.object(service, "_gst_playback_open_error", return_value=None),
+        ):
+            errors = service._sender_preflight_errors(request)
+
+        self.assertEqual(errors, ["capture preflight failed: device busy"])
+
 
 def _runtime_service() -> RuntimeService:
     return RuntimeService(
