@@ -54,7 +54,9 @@ Capture:
             }
         )
 
-        self.assertEqual(commands[0][:3], ["speaker-test", "-D", "plughw:2,0"])
+        self.assertEqual(commands[0][:3], ["speaker-test", "-D", "hw:2,0"])
+        self.assertNotIn("-r", commands[0])
+        self.assertNotIn("-r", commands[1])
         self.assertIn("-c", commands[0])
         self.assertEqual(commands[0][commands[0].index("-c") + 1], "10")
         self.assertEqual(commands[0][commands[0].index("-s") + 1], "5")
@@ -104,7 +106,7 @@ Capture:
                     }
                 )
 
-    def test_capture_level_command_uses_plughw_and_caps_duration(self) -> None:
+    def test_capture_level_command_uses_hw_device_and_duration(self) -> None:
         service = AudioDeviceService()
 
         command, metadata = service.build_capture_level_command(
@@ -117,9 +119,9 @@ Capture:
             }
         )
 
-        self.assertEqual(command[:4], ["arecord", "-q", "-D", "plughw:2,0"])
+        self.assertEqual(command[:4], ["arecord", "-q", "-D", "hw:2,0"])
         self.assertIn("S16_LE", command)
-        self.assertEqual(command[command.index("-r") + 1], "96000")
+        self.assertNotIn("-r", command)
         self.assertEqual(command[command.index("-c") + 1], "12")
         self.assertEqual(command[command.index("-d") + 1], "10")
         self.assertEqual(metadata["input_channels"], [3, 4])

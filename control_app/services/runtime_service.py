@@ -38,7 +38,6 @@ from production.audio_support import (
     build_output_pair_mix_element,
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
-    validate_local_audio_rate,
 )
 
 
@@ -136,7 +135,11 @@ class RuntimeLaunchRequest:
             if sender_playback_device_raw is not None
             else None
         )
-        sender_audio_rate = _parse_optional_audio_rate(payload.get("sender_audio_rate"))
+        # The dashboard no longer controls the sender hardware rate. Keep this
+        # field in the request shape for backward compatibility, but ignore any
+        # stale client payload so runtime opens the selected hw device directly
+        # at the config transport rate without an extra local-rate conversion.
+        sender_audio_rate = None
         sender_capture_input_channels = _parse_channel_pair(
             payload.get("sender_capture_input_channels", [1, 2]),
             "sender_capture_input_channels",
@@ -592,8 +595,6 @@ class RuntimeService:
                 command.append("--no-audio")
             if request.audio_source == "device" and request.audio_device:
                 command.extend(["--device", request.audio_device])
-            if request.audio_enabled and request.sender_audio_rate:
-                command.extend(["--audio-rate", str(request.sender_audio_rate)])
             if request.audio_source == "device":
                 command.extend(
                     [
@@ -994,14 +995,14 @@ class RuntimeService:
 
         config = self._read_config_for_preflight()
         audio = config.get("audio", {}) if isinstance(config.get("audio"), dict) else {}
-        local_rate = request.sender_audio_rate or _safe_int(audio.get("rate"), 48000)
+        audio_rate = _safe_int(audio.get("rate"), 48000)
         if request.audio_source == "device":
             capture_device = request.audio_device or str(audio.get("device", "default"))
             capture_error = self._alsa_device_error(["arecord", "-l"], capture_device, "capture")
             if capture_error:
                 errors.append(capture_error)
             if not skip_capture_open:
-                capture_open_error = self._gst_capture_open_error(request, capture_device, local_rate)
+                capture_open_error = self._gst_capture_open_error(request, capture_device, audio_rate)
                 if capture_open_error:
                     errors.append(capture_open_error)
         if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
@@ -1009,7 +1010,7 @@ class RuntimeService:
             playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")
             if playback_error:
                 errors.append(playback_error)
-            playback_open_error = self._gst_playback_open_error(request, playback_device, local_rate)
+            playback_open_error = self._gst_playback_open_error(request, playback_device, audio_rate)
             if playback_open_error:
                 errors.append(playback_open_error)
 
@@ -1019,7 +1020,7 @@ class RuntimeService:
         self,
         request: RuntimeLaunchRequest,
         capture_device: str,
-        local_rate: int,
+        audio_rate: int,
     ) -> str | None:
         if shutil.which("gst-launch-1.0") is None:
             return "capture preflight failed: gst-launch-1.0 unavailable"
@@ -1033,7 +1034,7 @@ class RuntimeService:
             "num-buffers=5",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,channels={channels},rate={local_rate}",
+            f"caps=audio/x-raw,channels={channels},rate={audio_rate}",
             "!",
             "fakesink",
             "sync=false",
@@ -1044,7 +1045,7 @@ class RuntimeService:
         self,
         request: RuntimeLaunchRequest,
         playback_device: str,
-        local_rate: int,
+        audio_rate: int,
     ) -> str | None:
         if shutil.which("gst-launch-1.0") is None:
             return "playback preflight failed: gst-launch-1.0 unavailable"
@@ -1063,10 +1064,8 @@ class RuntimeService:
             "!",
             "audioconvert",
             "!",
-            "audioresample",
-            "!",
             "capsfilter",
-            f"caps=audio/x-raw,channels=2,rate={local_rate}",
+            f"caps=audio/x-raw,channels=2,rate={audio_rate}",
         ]
         if mix:
             command.append("!")
@@ -1075,7 +1074,7 @@ class RuntimeService:
             [
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,channels={output_channels},rate={local_rate}",
+                f"caps=audio/x-raw,channels={output_channels},rate={audio_rate}",
                 "!",
                 "alsasink",
                 f"device={device}",
@@ -1186,15 +1185,6 @@ def _parse_sync_delay_ms(value: Any, field_name: str) -> int:
     return delay_ms
 
 
-def _parse_optional_audio_rate(value: Any) -> int | None:
-    if value is None or value == "":
-        return None
-    try:
-        return validate_local_audio_rate(value)
-    except ValueError as exc:
-        raise ValueError(str(exc)) from exc
-
-
 def _parse_channel_pair(value: Any, field_name: str) -> tuple[int, int]:
     try:
         pair = normalize_audio_channel_pair(value, field_name)
@@ -1226,8 +1216,8 @@ def _sender_request_summary(request: RuntimeLaunchRequest, config: dict[str, Any
     if request.video_device:
         fields.append(f"video_device={request.video_device}")
     if request.audio_enabled:
-        local_rate = request.sender_audio_rate or _safe_int(audio.get("rate"), 48000)
-        fields.append(f"audio_rate={local_rate}")
+        audio_rate = _safe_int(audio.get("rate"), 48000)
+        fields.append(f"audio_rate={audio_rate}")
         if request.audio_source == "device":
             capture_device = request.audio_device or str(audio.get("device", "default"))
             fields.extend(

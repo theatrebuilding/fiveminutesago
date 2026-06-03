@@ -339,7 +339,6 @@ class VideoReceiver:
                 demux. ! {receiver_aac_input_queue} !
                     decodebin !
                     audioconvert !
-                    audioresample !
                     audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
                     {receiver_audio_output_queue} !
                     alsasink device="{escaped_device}" async=true
@@ -354,7 +353,6 @@ class VideoReceiver:
                 application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
                 rtpL16depay !
                 audioconvert !
-                audioresample !
                 audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
                 {receiver_audio_output_queue} !
                 alsasink device="{escaped_device}" async=true

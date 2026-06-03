@@ -82,7 +82,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertIn("webrtcdsp probe=playback_probe", pipeline)
-        self.assertIn('alsasink device="plughw:3,0" async=false', pipeline)
+        self.assertIn('alsasink device="hw:3,0" async=false', pipeline)
         self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("identity name=capture_after_dsp signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=l16_outbound signal-handoffs=true silent=true", pipeline)
@@ -92,6 +92,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
         self.assertIn("max-size-time=500000000", pipeline)
         self.assertIn("rbuf=1048576&wbuf=1048576&tsbpdDelay=500", pipeline)
+        self.assertNotIn("audioresample", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
 
     def test_audio_caps_use_explicit_capsfilters_in_capture_only_pipeline(self) -> None:
@@ -111,6 +112,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertNotIn("webrtcdsp probe=playback_probe", pipeline)
         self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
+        self.assertNotIn("audioresample", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
 
 

@@ -18,7 +18,7 @@ audio:
   device: "default"              # Sender Pi microphone capture device when audio_source=device
   playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
   format: "S16BE"                # Separate RTP L16 transport sample format. The current path requires S16BE.
-  rate: 48000                    # Shared sender/receiver audio sample rate. 48000 is recommended for DSP and AAC playback.
+  rate: 48000                    # Shared exact hw/transport rate. Match the ALSA device rate; the UI no longer overrides/resamples this.
   channels: 2
   encoding_name: "L16"           # Separate RTP L16 transport encoding name.
   aac_bitrate: 320000            # AAC bitrate for the sender's muxed MPEG-TS audio stream.

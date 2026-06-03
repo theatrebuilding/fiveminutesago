@@ -37,9 +37,6 @@ const videoDeviceMessage = document.getElementById("video-device-message");
 const audioDeviceField = document.getElementById("audio-device-field");
 const audioDeviceSelect = document.getElementById("audio-device-select");
 const audioDeviceMessage = document.getElementById("audio-device-message");
-const senderAudioRateField = document.getElementById("sender-audio-rate-field");
-const senderAudioRateSelect = document.getElementById("sender-audio-rate-select");
-const senderAudioRateMessage = document.getElementById("sender-audio-rate-message");
 const senderCapturePairField = document.getElementById("sender-capture-pair-field");
 const senderCapturePairSelect = document.getElementById("sender-capture-pair-select");
 const senderCapturePairMessage = document.getElementById("sender-capture-pair-message");
@@ -133,7 +130,6 @@ const VIDEO_CONFIG_SOURCE_VALUE = "__video_config__";
 const VIDEO_TEST_SOURCE_VALUE = "__video_test__";
 const MAX_SYNC_DELAY_MS = 3000;
 const SYNC_DELAY_DEBOUNCE_MS = 250;
-const COMMON_AUDIO_RATES = [48000, 44100, 96000, 32000, 16000, 8000];
 const DSP_INT_KEYS = new Set([
   "compression-gain-db",
   "startup-min-volume",
@@ -285,9 +281,6 @@ function shouldShowSenderAudioDelayField() {
   return shouldShowSenderPlaybackField();
 }
 
-function shouldShowSenderAudioRateField() {
-  return roleSelect.value === "sender" && (audioDeviceSelect.value || AUDIO_OFF_VALUE) !== AUDIO_OFF_VALUE;
-}
 
 function shouldShowSenderCapturePairField() {
   if (roleSelect.value !== "sender") {
@@ -376,26 +369,6 @@ function renderPairOptions(select, details, selectedChannels) {
   setPairSelectValue(select, selectedValue);
 }
 
-function renderSenderRateOptions(detailsList = []) {
-  const currentValue = senderAudioRateSelect.value || "48000";
-  const rates = new Set(COMMON_AUDIO_RATES.map((rate) => String(rate)));
-  detailsList.forEach((details) => {
-    (details?.supported_rates || details?.rates || []).forEach((rate) => rates.add(String(rate)));
-  });
-  senderAudioRateSelect.innerHTML = "";
-  [...rates]
-    .sort((a, b) => Number.parseInt(b, 10) - Number.parseInt(a, 10))
-    .forEach((rate) => {
-      const option = document.createElement("option");
-      option.value = rate;
-      option.textContent = rate === "48000" ? "48000 Hz (recommended)" : `${rate} Hz`;
-      senderAudioRateSelect.appendChild(option);
-    });
-  senderAudioRateSelect.value = [...senderAudioRateSelect.options].some((option) => option.value === currentValue)
-    ? currentValue
-    : "48000";
-}
-
 function deviceDetailsMessage(details, fallback) {
   const parts = [];
   if (details?.max_channels) {
@@ -425,11 +398,6 @@ function selectedSenderPlaybackDevice() {
   return value === AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE ? "default" : value;
 }
 
-function selectedAudioRate() {
-  const parsed = Number.parseInt(senderAudioRateSelect.value || "48000", 10);
-  return Number.isFinite(parsed) ? parsed : 48000;
-}
-
 function selectedPairHardwareChannels(select) {
   updatePairHardwareDataset(select);
   const parsed = Number.parseInt(select.dataset.hardwareChannels || maxPairChannel(select.value), 10);
@@ -452,7 +420,6 @@ function buildSenderMicTestPayload() {
   }
   return {
     device,
-    rate: selectedAudioRate(),
     input_channels: parseAudioPair(senderCapturePairSelect.value),
     hardware_channels: selectedPairHardwareChannels(senderCapturePairSelect),
     supported_channel_counts: senderCaptureDetails?.channel_counts || [],
@@ -463,7 +430,6 @@ function buildSenderMicTestPayload() {
 function buildSenderOutputTestPayload() {
   return {
     device: selectedSenderPlaybackDevice(),
-    rate: selectedAudioRate(),
     output_channels: parseAudioPair(senderPlaybackOutputPairSelect.value),
     hardware_channels: selectedPairHardwareChannels(senderPlaybackOutputPairSelect),
     supported_channel_counts: senderPlaybackDetails?.channel_counts || [],
@@ -715,7 +681,6 @@ function applyRoleFormState() {
   countryField.classList.toggle("hidden", !(sender || receiver));
   videoDeviceField.classList.toggle("hidden", !sender);
   audioDeviceField.classList.toggle("hidden", !sender);
-  senderAudioRateField.classList.toggle("hidden", !shouldShowSenderAudioRateField());
   senderCapturePairField.classList.toggle("hidden", !shouldShowSenderCapturePairField());
   senderMicTestField.classList.toggle("hidden", !shouldShowSenderCapturePairField());
   senderAudioModeField.classList.toggle("hidden", !sender);
@@ -772,9 +737,6 @@ function syncFormFromRuntime(runtime) {
       audioDeviceSelect.value = launch.audio_device || AUDIO_DEFAULT_DEVICE_VALUE;
     } else {
       audioDeviceSelect.value = AUDIO_OFF_VALUE;
-    }
-    if (launch.sender_audio_rate) {
-      senderAudioRateSelect.value = String(launch.sender_audio_rate);
     }
     setPairSelectValue(senderCapturePairSelect, launch.sender_capture_input_channels || [1, 2]);
     setSelectedPairHardwareChannels(senderCapturePairSelect, launch.sender_capture_hardware_channels);
@@ -943,7 +905,6 @@ async function updateSenderCaptureDetails(selectedChannels = null) {
   if (selectedDevice === AUDIO_OFF_VALUE || selectedDevice === AUDIO_TEST_VALUE) {
     senderCaptureDetails = null;
     renderPairOptions(senderCapturePairSelect, null, selectedChannels || [1, 2]);
-    renderSenderRateOptions([senderPlaybackDetails]);
     senderCapturePairMessage.textContent = "Choose a local hardware audio input to select physical input channels.";
     return;
   }
@@ -966,7 +927,6 @@ async function updateSenderCaptureDetails(selectedChannels = null) {
     senderCapturePairMessage.textContent = `${error.message} Showing stereo fallback.`;
   } finally {
     senderCapturePairSelect.disabled = false;
-    renderSenderRateOptions([senderCaptureDetails, senderPlaybackDetails]);
     applyAudioTestButtonState();
   }
 }
@@ -992,7 +952,6 @@ async function updateSenderPlaybackDetails(selectedChannels = null) {
     senderPlaybackOutputPairMessage.textContent = `${error.message} Showing stereo fallback.`;
   } finally {
     senderPlaybackOutputPairSelect.disabled = false;
-    renderSenderRateOptions([senderCaptureDetails, senderPlaybackDetails]);
     applyAudioTestButtonState();
   }
 }
@@ -1497,11 +1456,6 @@ function buildLaunchPayload() {
       payload.audio_device = null;
     }
     payload.audio_enabled = payload.audio_source !== "off";
-    if (payload.audio_enabled) {
-      payload.sender_audio_rate = Number.parseInt(senderAudioRateSelect.value || "48000", 10);
-    } else {
-      payload.sender_audio_rate = null;
-    }
     if (payload.audio_source === "device") {
       updatePairHardwareDataset(senderCapturePairSelect);
       payload.sender_capture_input_channels = parseAudioPair(senderCapturePairSelect.value);
@@ -1962,7 +1916,6 @@ audioDeviceSelect.addEventListener("change", () => {
   applyRoleFormState();
   updateSenderCaptureDetails();
 });
-senderAudioRateSelect.addEventListener("change", markLaunchFormDirty);
 senderCapturePairSelect.addEventListener("change", () => {
   markLaunchFormDirty();
   updatePairHardwareDataset(senderCapturePairSelect);

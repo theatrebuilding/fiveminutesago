@@ -79,18 +79,14 @@ def gst_escape(value: Any) -> str:
 
 
 def alsa_runtime_device(value: Any) -> str:
-    """Return an ALSA device string suitable for app-managed rate/channel routing.
+    """Return the exact ALSA device string to open at runtime.
 
-    Direct `hw:*` devices reject many otherwise convertible formats. The UI still
-    displays the real `hw:*` device names discovered by ALSA, but runtime paths
-    use `plughw:*` so ALSA can adapt sample format/rate/channel layout for USB
-    interfaces such as Focusrite Scarlett devices.
+    Keep `hw:*` devices as `hw:*` so ALSA cannot silently insert a plug-layer
+    sample-rate, channel, or format conversion. If a selected hardware device
+    cannot open with the requested caps, the runtime should fail loudly.
     """
 
-    normalized = str(value or "default").strip() or "default"
-    if normalized.startswith("hw:"):
-        return f"plughw:{normalized.removeprefix('hw:')}"
-    return normalized
+    return str(value or "default").strip() or "default"
 
 
 def validate_audio_rate(audio_rate: Any) -> int:
@@ -107,20 +103,6 @@ def validate_audio_rate(audio_rate: Any) -> int:
             f"audio.rate={rate} is not supported by webrtcdsp. Use one of: {supported}."
         )
 
-    return rate
-
-
-def validate_local_audio_rate(audio_rate: Any, *, fallback: int = 48000) -> int:
-    if audio_rate is None or audio_rate == "":
-        return fallback
-    if isinstance(audio_rate, bool):
-        raise ValueError("sender audio rate must be an integer sample rate.")
-    try:
-        rate = int(audio_rate)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("sender audio rate must be an integer sample rate.") from exc
-    if rate <= 0 or rate > 384000:
-        raise ValueError("sender audio rate must be between 1 and 384000 Hz.")
     return rate
 
 

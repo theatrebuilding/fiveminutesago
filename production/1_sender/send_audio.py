@@ -92,7 +92,6 @@ class AudioSender:
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
                 ! rtpL16depay
                 ! audioconvert
-                ! audioresample
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcechoprobe name=playback_probe
                 ! queue
@@ -101,12 +100,10 @@ class AudioSender:
             alsasrc device="{gst_escape(self.capture_device)}"
                 ! queue
                 ! audioconvert
-                ! audioresample
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}
                 ! webrtcdsp probe=playback_probe {dsp_properties}
                 ! queue
                 ! audioconvert
-                ! audioresample
                 ! audio/x-raw,format={audio_format},channels={channels},rate={audio_rate}
                 ! rtpL16pay
                 ! srtsink wait-for-connection=true

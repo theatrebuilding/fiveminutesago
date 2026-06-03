@@ -5,6 +5,11 @@ import sys
 import types
 
 
+try:
+    import yaml  # noqa: F401
+except ModuleNotFoundError:
+    sys.modules["yaml"] = types.SimpleNamespace(safe_load=lambda _file: {})
+
 if "gi" not in sys.modules:
     gi = types.ModuleType("gi")
     gi.require_version = lambda *_args, **_kwargs: None
@@ -28,7 +33,7 @@ from control_app.services.runtime_service import RuntimeLaunchRequest
 
 
 class RuntimeAudioPayloadTests(unittest.TestCase):
-    def test_sender_local_audio_routing_payload_is_preserved(self) -> None:
+    def test_sender_local_audio_routing_payload_ignores_sample_rate(self) -> None:
         request = RuntimeLaunchRequest.from_payload(
             {
                 "role": "sender",
@@ -46,7 +51,7 @@ class RuntimeAudioPayloadTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(request.sender_audio_rate, 48000)
+        self.assertIsNone(request.sender_audio_rate)
         self.assertEqual(request.sender_capture_input_channels, (3, 4))
         self.assertEqual(request.sender_capture_hardware_channels, 8)
         self.assertEqual(request.sender_playback_output_channels, (5, 6))

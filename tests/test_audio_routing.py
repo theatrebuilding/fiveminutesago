@@ -38,8 +38,8 @@ class AudioRoutingTests(unittest.TestCase):
         self.assertEqual(choose_audio_hardware_channels([3, 4], [2, 10, 12]), 10)
         self.assertEqual(channel_pairs_for_count(6, [2, 6])[1]["hardware_channels"], 6)
 
-    def test_hw_devices_are_opened_through_plughw(self) -> None:
-        self.assertEqual(alsa_runtime_device("hw:2,0"), "plughw:2,0")
+    def test_hw_devices_are_opened_exactly(self) -> None:
+        self.assertEqual(alsa_runtime_device("hw:2,0"), "hw:2,0")
         self.assertEqual(alsa_runtime_device("default"), "default")
 
     def test_input_pair_matrix_maps_hardware_pair_to_stereo(self) -> None:

@@ -976,7 +976,6 @@ def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]
           rtpL16depay !
           identity name=audio_diag_tn_uplink signal-handoffs=true silent=true !
           {audio_output_queue} !
-          audioconvert ! audioresample !
           audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
           identity name=audio_diag_tn_to_dk_return signal-handoffs=true silent=true !
           rtpL16pay !
@@ -990,7 +989,6 @@ def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]
           rtpL16depay !
           identity name=audio_diag_dk_uplink signal-handoffs=true silent=true !
           {audio_output_queue} !
-          audioconvert ! audioresample !
           audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
           identity name=audio_diag_dk_to_tn_return signal-handoffs=true silent=true !
           rtpL16pay !

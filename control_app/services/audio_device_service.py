@@ -16,7 +16,6 @@ from production.audio_support import (
     choose_audio_hardware_channels,
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
-    validate_local_audio_rate,
 )
 
 
@@ -146,7 +145,6 @@ class AudioDeviceService:
         return output
 
     def build_speaker_test_commands(self, settings: dict[str, Any]) -> list[list[str]]:
-        rate = validate_local_audio_rate(settings.get("rate"), fallback=48000)
         pair = normalize_audio_channel_pair(settings.get("output_channels", [1, 2]), "output_channels")
         default_hardware_channels = choose_audio_hardware_channels(
             pair,
@@ -169,8 +167,6 @@ class AudioDeviceService:
                     "sine",
                     "-f",
                     "880",
-                    "-r",
-                    str(rate),
                     "-c",
                     str(hardware_channels),
                     "-s",
@@ -195,7 +191,7 @@ class AudioDeviceService:
             "command": command,
             "device": metadata["device"],
             "runtime_device": metadata["runtime_device"],
-            "rate": metadata["rate"],
+            "rate": metadata.get("rate"),
             "hardware_channels": metadata["hardware_channels"],
             "input_channels": metadata["input_channels"],
             "levels": {
@@ -223,7 +219,6 @@ class AudioDeviceService:
             return _public_level_test_snapshot(dict(session))
 
     def build_capture_level_command(self, settings: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
-        rate = validate_local_audio_rate(settings.get("rate"), fallback=48000)
         pair = normalize_audio_channel_pair(settings.get("input_channels", [1, 2]), "input_channels")
         supported_counts = settings.get("supported_channel_counts")
         default_hardware_channels = choose_audio_hardware_channels(pair, supported_counts)
@@ -243,8 +238,6 @@ class AudioDeviceService:
             runtime_device,
             "-f",
             "S16_LE",
-            "-r",
-            str(rate),
             "-c",
             str(hardware_channels),
             "-t",
@@ -256,7 +249,7 @@ class AudioDeviceService:
         return command, {
             "device": source_device,
             "runtime_device": runtime_device,
-            "rate": rate,
+            "rate": None,
             "hardware_channels": hardware_channels,
             "input_channels": pair,
             "duration_seconds": duration_seconds,

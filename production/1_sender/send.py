@@ -31,7 +31,6 @@ from audio_support import (
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
     validate_audio_rate,
-    validate_local_audio_rate,
 )
 from config_loader import load_config
 from live_queue_settings import build_queue_element
@@ -98,6 +97,9 @@ class SenderRuntime:
         self.audio_enabled = audio_enabled
         self.audio_device = audio_device
         self.playback_device = playback_device
+        # Backward-compatible CLI slot only. The runtime intentionally does
+        # not use a separate hardware sample-rate override anymore; selected
+        # hw ALSA devices are opened at the configured transport/DSP rate.
         self.local_audio_rate = local_audio_rate
         self.capture_input_channels = capture_input_channels
         self.capture_hardware_channels = capture_hardware_channels
@@ -256,7 +258,6 @@ class SenderRuntime:
         runtime_playback_device = alsa_runtime_device(playback_device)
         playback_enabled = self.sender_audio_mode == "aec"
         try:
-            local_audio_rate = validate_local_audio_rate(self.local_audio_rate, fallback=transport_audio_rate)
             capture_pair = normalize_audio_channel_pair(
                 self.capture_input_channels,
                 "sender capture input channels",
@@ -348,7 +349,8 @@ class SenderRuntime:
             dsp_properties = ""
             resolved_dsp_cfg = {}
 
-        audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, local_audio_rate)
+        device_audio_rate = transport_audio_rate
+        audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, device_audio_rate)
         aac_encoder = self.resolve_aac_encoder(audio_opts)
         enable_dsp = playback_enabled and uses_dsp
         capture_input_channel_count = capture_hardware_channels if uses_dsp else channels
@@ -366,7 +368,6 @@ class SenderRuntime:
                     ! application/x-rtp,media=audio,clock-rate={transport_audio_rate},encoding-name={encoding_name},channels={channels}
                     ! rtpL16depay
                     ! audioconvert
-                    ! audioresample
                     ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                     ! identity name=remote_inbound signal-handoffs=true silent=true
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
@@ -374,10 +375,9 @@ class SenderRuntime:
                     ! identity name=playback_probe_reference signal-handoffs=true silent=true
                     ! {playback_output_queue}
                     ! audioconvert
-                    ! audioresample
-                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={channels},rate={local_audio_rate}
+                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={channels},rate={device_audio_rate}
                     {playback_pair_segment}
-                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={local_audio_rate}
+                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={device_audio_rate}
                     ! alsasink device="{gst_escape(runtime_playback_device)}" async=false
             """
 
@@ -396,8 +396,8 @@ class SenderRuntime:
 
         print(f"[Sender] Using audio source: {source_label}", flush=True)
         print(
-            f"[Sender] Local audio hardware rate: {local_audio_rate} Hz "
-            f"(transport/DSP rate: {transport_audio_rate} Hz).",
+            f"[Sender] Audio device/transport rate: {device_audio_rate} Hz "
+            "(no ALSA plug or audioresample rate conversion).",
             flush=True,
         )
         if uses_dsp:
@@ -434,11 +434,8 @@ class SenderRuntime:
             {audio_source}
                 ! {audio_capture_queue}
                 ! audioconvert
-                ! audioresample
-                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={local_audio_rate}
+                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={device_audio_rate}
                 {capture_pair_segment}
-                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={local_audio_rate}
-                ! audioresample
                 ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 {dsp_segment}
                 ! identity name=capture_after_dsp signal-handoffs=true silent=true
@@ -446,7 +443,6 @@ class SenderRuntime:
 
             audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
-                ! audioresample
                 ! capsfilter caps=audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! identity name=l16_outbound signal-handoffs=true silent=true
                 ! rtpL16pay
@@ -455,7 +451,6 @@ class SenderRuntime:
 
             audio_capture_tee. ! {audio_aac_output_queue}
                 ! audioconvert
-                ! audioresample
                 ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! {aac_encoder}
                 ! aacparse
@@ -775,7 +770,7 @@ def main():
     parser.set_defaults(with_audio=None)
     parser.add_argument("--device", help="ALSA audio capture device name (for example hw:1,0).")
     parser.add_argument("--playback-device", help="ALSA audio playback device name (for example hw:0,0).")
-    parser.add_argument("--audio-rate", type=int, help="Local sender ALSA hardware sample rate. Audio is resampled to the configured transport/DSP rate after capture and before playback.")
+    parser.add_argument("--audio-rate", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--capture-input-channels", type=parse_channel_pair, default="1/2", help="1-based sender hardware capture stereo pair, for example 1/2 or 3/4.")
     parser.add_argument("--capture-hardware-channels", type=int, help="Sender capture channel count to request from ALSA before pair mapping.")
     parser.add_argument("--playback-output-channels", type=parse_channel_pair, default="1/2", help="1-based sender hardware playback stereo pair, for example 1/2 or 5/6.")
