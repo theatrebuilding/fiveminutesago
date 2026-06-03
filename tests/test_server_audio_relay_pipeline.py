@@ -53,6 +53,8 @@ class ServerAudioRelayPipelineTests(unittest.TestCase):
         self.assertIn("identity name=audio_diag_dk_uplink signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_tn_to_dk_return signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_dk_to_tn_return signal-handoffs=true silent=true", pipeline)
+        self.assertIn("rbuf=1048576&wbuf=1048576&tsbpdDelay=500", pipeline)
+        self.assertIn("max-size-time=500000000", pipeline)
 
     def test_relay_directions_are_isolated_into_separate_pipelines(self) -> None:
         pipelines = build_audio_relay_pipeline_strings(_config())
@@ -132,7 +134,7 @@ class ServerAudioRelayPipelineTests(unittest.TestCase):
 
 def _config() -> dict:
     return {
-        "streaming_settings_audio": "rbuf=327680&wbuf=327680&tsbpdDelay=100",
+        "streaming_settings_audio": "rbuf=1048576&wbuf=1048576&tsbpdDelay=500",
         "ports": {
             "audio_send_tn": 8805,
             "audio_send_dk": 8806,
@@ -144,6 +146,20 @@ def _config() -> dict:
             "rate": 48000,
             "channels": 2,
             "encoding_name": "L16",
+        },
+        "live_queues": {
+            "server": {
+                "audio_input": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+                "audio_output": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+            },
         },
     }
 

@@ -286,36 +286,36 @@ class SenderRuntime:
             cfg,
             ("sender", "playback_input"),
             {
-                "max_size_buffers": 120,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 150,
+                "max_size_time_ms": 500,
             },
         )
         playback_output_queue = build_queue_element(
             cfg,
             ("sender", "playback_output"),
             {
-                "max_size_buffers": 30,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 75,
+                "max_size_time_ms": 500,
             },
         )
         audio_capture_queue = build_queue_element(
             cfg,
             ("sender", "audio_capture"),
             {
-                "max_size_buffers": 30,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 75,
+                "max_size_time_ms": 500,
             },
         )
         audio_l16_output_queue = build_queue_element(
             cfg,
             ("sender", "audio_l16_output"),
             {
-                "max_size_buffers": 30,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 75,
+                "max_size_time_ms": 500,
             },
         )
         audio_aac_output_queue = build_queue_element(

@@ -308,9 +308,9 @@ class VideoReceiver:
             config,
             ("receiver", "l16_input"),
             {
-                "max_size_buffers": 120,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 150,
+                "max_size_time_ms": 500,
             },
         )
         receiver_aac_input_queue = build_queue_element(
@@ -326,9 +326,9 @@ class VideoReceiver:
             config,
             ("receiver", "audio_output"),
             {
-                "max_size_buffers": 30,
+                "max_size_buffers": 0,
                 "max_size_bytes": 0,
-                "max_size_time_ms": 75,
+                "max_size_time_ms": 500,
             },
         )
 

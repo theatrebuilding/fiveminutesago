@@ -1,5 +1,5 @@
 server_ip: 100.119.85.108
-streaming_settings_audio: "rbuf=327680&wbuf=327680&tsbpdDelay=100"  # Separate RTP L16 audio transport settings.
+streaming_settings_audio: "rbuf=1048576&wbuf=1048576&tsbpdDelay=500"  # Separate RTP L16 audio transport settings; larger buffers smooth raw PCM jitter.
 streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
 
 ports:
@@ -54,9 +54,21 @@ live_queues:
       max_size_bytes: 0
       max_size_time_ms: 100
     playback_input:
-      max_size_buffers: 120
+      max_size_buffers: 0
       max_size_bytes: 0
-      max_size_time_ms: 150
+      max_size_time_ms: 500
+    playback_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_capture:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_l16_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
   receiver:
     preview:
       leaky: "downstream"
@@ -68,14 +80,26 @@ live_queues:
       max_size_bytes: 0
       max_size_time_ms: 150
     l16_input:
-      max_size_buffers: 120
+      max_size_buffers: 0
       max_size_bytes: 0
-      max_size_time_ms: 150
+      max_size_time_ms: 500
+    audio_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
   server:
     relay_input:
-      max_size_buffers: 120
+      max_size_buffers: 0
       max_size_bytes: 0
-      max_size_time_ms: 150
+      max_size_time_ms: 500
+    audio_input:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
     preview_branch:
       max_size_buffers: 120
       max_size_bytes: 0

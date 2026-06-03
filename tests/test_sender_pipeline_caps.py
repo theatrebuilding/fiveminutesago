@@ -90,6 +90,8 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertIn("identity name=playback_probe_reference signal-handoffs=true silent=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
+        self.assertIn("max-size-time=500000000", pipeline)
+        self.assertIn("rbuf=1048576&wbuf=1048576&tsbpdDelay=500", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
 
     def test_audio_caps_use_explicit_capsfilters_in_capture_only_pipeline(self) -> None:
@@ -115,7 +117,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
 def _config() -> dict:
     return {
         "server_ip": "100.119.85.108",
-        "streaming_settings_audio": "rbuf=327680&wbuf=327680&tsbpdDelay=100",
+        "streaming_settings_audio": "rbuf=1048576&wbuf=1048576&tsbpdDelay=500",
         "streaming_settings_video": "rbuf=327680&wbuf=327680&tsbpdDelay=100",
         "ports": {
             "audio_send_tn": 8805,
@@ -155,6 +157,30 @@ def _config() -> dict:
             "gain-control": False,
             "noise-suppression": False,
             "noise-suppression-level": "high",
+        },
+        "live_queues": {
+            "sender": {
+                "playback_input": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+                "playback_output": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+                "audio_capture": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+                "audio_l16_output": {
+                    "max_size_buffers": 0,
+                    "max_size_bytes": 0,
+                    "max_size_time_ms": 500,
+                },
+            },
         },
     }
 

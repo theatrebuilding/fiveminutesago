@@ -954,18 +954,18 @@ def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]
         config,
         ("server", "audio_input"),
         {
-            "max_size_buffers": 30,
+            "max_size_buffers": 0,
             "max_size_bytes": 0,
-            "max_size_time_ms": 75,
+            "max_size_time_ms": 500,
         },
     )
     audio_output_queue = build_queue_element(
         config,
         ("server", "audio_output"),
         {
-            "max_size_buffers": 30,
+            "max_size_buffers": 0,
             "max_size_bytes": 0,
-            "max_size_time_ms": 75,
+            "max_size_time_ms": 500,
         },
     )
 
