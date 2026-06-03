@@ -49,6 +49,7 @@ pipeline_str_tn = f"""
     srtsrc uri=srt://:{audio_send_tn}?mode=listener !
       queue !
       application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={audio_channels} !
+      rtpjitterbuffer latency=200 do-lost=true !
       rtpL16depay !
       decodebin !
       audioconvert !
@@ -70,6 +71,7 @@ pipeline_str_dk = f"""
     srtsrc uri=srt://:{audio_send_dk}?mode=listener !
       queue !
       application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={audio_channels} !
+      rtpjitterbuffer latency=200 do-lost=true !
       rtpL16depay !
       decodebin !
       audioconvert !

@@ -44,9 +44,10 @@ AUDIO_DIAGNOSTIC_ELEMENTS = {
     "capture_after_dsp": "mic/DSP outbound",
     "l16_outbound": "L16 send to server",
     "remote_inbound": "remote L16 from server",
-    "playback_probe_reference": "playback/probe reference",
+    "playback_probe_reference": "playback reference",
 }
 SENDER_AUDIO_FORMAT_CHECK_TITLE = "Audio endian/caps check"
+SENDER_PLAYBACK_AUDIO_MODES = {"aec", "playback-only"}
 
 
 def parse_sync_delay_ms(value):
@@ -264,8 +265,8 @@ class SenderRuntime:
             if not self.audio_send_port:
                 print("ERROR: Missing audio send port in config.")
                 sys.exit(1)
-            if self.sender_audio_mode == "aec" and not self.audio_recv_port:
-                print("ERROR: Missing audio receive port in config for sender playback/DSP mode.")
+            if self.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and not self.audio_recv_port:
+                print("ERROR: Missing audio receive port in config for sender playback mode.")
                 sys.exit(1)
             audio_branches = self.build_audio_branches(cfg)
 
@@ -305,7 +306,7 @@ class SenderRuntime:
         encoding_name = audio_opts.get("encoding_name", "L16")
         playback_device = self.playback_device or audio_opts.get("playback_device", "default")
         runtime_playback_device = alsa_runtime_device(playback_device)
-        playback_enabled = self.sender_audio_mode == "aec"
+        playback_enabled = self.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES
         try:
             capture_pair = normalize_audio_channel_pair(
                 self.capture_input_channels,
@@ -390,7 +391,11 @@ class SenderRuntime:
         if playback_enabled:
             try:
                 transport_audio_rate = validate_audio_rate(transport_audio_rate)
-                dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
+                if self.sender_audio_mode == "aec":
+                    dsp_properties, resolved_dsp_cfg = build_webrtcdsp_properties(dsp_cfg)
+                else:
+                    dsp_properties = ""
+                    resolved_dsp_cfg = {}
             except ValueError as exc:
                 print(f"ERROR: {exc}")
                 sys.exit(1)
@@ -401,7 +406,7 @@ class SenderRuntime:
         device_audio_rate = transport_audio_rate
         audio_source, source_label, uses_dsp = self.resolve_audio_source(audio_opts, device_audio_rate)
         aac_encoder = self.resolve_aac_encoder(audio_opts)
-        enable_dsp = playback_enabled and uses_dsp
+        enable_dsp = self.sender_audio_mode == "aec" and uses_dsp
         capture_input_channel_count = capture_hardware_channels if uses_dsp else channels
         capture_mix_element = build_input_pair_mix_element(capture_pair, capture_hardware_channels) if uses_dsp else ""
         capture_pair_segment = f"! {capture_mix_element}" if capture_mix_element else ""
@@ -411,16 +416,18 @@ class SenderRuntime:
         playback_branch = ""
         if playback_enabled:
             audio_delay_ns = self.audio_delay_ms * 1_000_000
+            echo_probe_segment = "! webrtcechoprobe name=playback_probe" if self.sender_audio_mode == "aec" else ""
             playback_branch = f"""
                 srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                     {playback_input_queue}
                     ! application/x-rtp,media=audio,clock-rate={transport_audio_rate},encoding-name={encoding_name},channels={channels}
+                    ! rtpjitterbuffer latency=200 do-lost=true
                     ! rtpL16depay
                     ! audioconvert
                     ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                     ! identity name=remote_inbound signal-handoffs=true silent=true
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
-                    ! webrtcechoprobe name=playback_probe
+                    {echo_probe_segment}
                     ! identity name=playback_probe_reference signal-handoffs=true silent=true
                     ! {playback_output_queue}
                     ! audioconvert
@@ -432,9 +439,14 @@ class SenderRuntime:
 
         dsp_segment = f"! webrtcdsp probe=playback_probe {dsp_properties}" if enable_dsp else ""
 
-        if playback_enabled:
+        if self.sender_audio_mode == "aec":
             print(
                 "[Sender] Sender playback + DSP mode active: remote audio is returned on the separate PCM path for local playback and acoustic echo cancellation.",
+                flush=True,
+            )
+        elif playback_enabled:
+            print(
+                "[Sender] Sender playback-only mode active: remote audio is returned for local playback, and WebRTC DSP/echo probe are bypassed.",
                 flush=True,
             )
         else:
@@ -471,10 +483,11 @@ class SenderRuntime:
                 f"(requesting {playback_output_channel_count} hardware channels).",
                 flush=True,
             )
-            print(f"[Sender] Audio playback/probe delay: {self.audio_delay_ms} ms", flush=True)
+            delay_label = "playback/probe" if self.sender_audio_mode == "aec" else "playback"
+            print(f"[Sender] Audio {delay_label} delay: {self.audio_delay_ms} ms", flush=True)
         if enable_dsp:
             print(f"[Sender] Active WebRTC DSP settings: {resolved_dsp_cfg}", flush=True)
-        elif playback_enabled:
+        elif self.sender_audio_mode == "aec":
             print("[Sender] WebRTC DSP is bypassed because the sender audio source is a test signal.", flush=True)
 
         self.audio_format_expectations = {
@@ -804,7 +817,7 @@ class SenderRuntime:
         bus = self.pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self.on_message)
-        if self.sender_audio_mode == "aec" and self.audio_enabled and self.sync_delay_file:
+        if self.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and self.audio_enabled and self.sync_delay_file:
             GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
         if self.audio_enabled:
             GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self.log_audio_diagnostics)
@@ -902,7 +915,12 @@ def main():
     parser.add_argument("--playback-output-channels", type=parse_channel_pair, default="1/2", help="1-based sender hardware playback stereo pair, for example 1/2 or 5/6.")
     parser.add_argument("--playback-hardware-channels", type=int, help="Sender playback channel count to request from ALSA before output pair mapping.")
     parser.add_argument("--audio-source", choices=["device", "test"], default="device", help="Audio source mode. Use 'test' for audiotestsrc instead of a capture device.")
-    parser.add_argument("--sender-audio-mode", choices=["aec", "capture-only"], default="aec", help="Sender audio mode. Use 'capture-only' to disable remote playback and WebRTC DSP on the sender.")
+    parser.add_argument(
+        "--sender-audio-mode",
+        choices=["aec", "playback-only", "capture-only"],
+        default="aec",
+        help="Sender audio mode. Use 'playback-only' to receive/play remote audio without WebRTC DSP, or 'capture-only' to disable sender playback.",
+    )
     parser.add_argument("--audio-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial sender remote-audio playback/probe delay in milliseconds for A/V sync calibration.")
     parser.add_argument("--sync-delay-file", help="Optional control file containing the live sender audio delay in milliseconds.")
     parser.add_argument("--video-device", help="Video device path override, for example /host-dev/video2.")

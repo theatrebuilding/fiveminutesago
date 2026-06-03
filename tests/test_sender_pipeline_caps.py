@@ -106,6 +106,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertIn("identity name=l16_outbound signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=remote_inbound signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=playback_probe_reference signal-handoffs=true silent=true", pipeline)
+        self.assertIn("rtpjitterbuffer latency=200 do-lost=true", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
         self.assertIn("max-size-time=500000000", pipeline)
@@ -132,6 +133,28 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertNotIn("audioresample", pipeline)
         self.assertNotIn("! audio/x-raw", pipeline)
+
+    def test_playback_only_pipeline_receives_sender_audio_without_dsp_or_echo_probe(self) -> None:
+        runtime = sender_send.SenderRuntime(
+            country="tn",
+            video_device="/host-dev/video0",
+            audio_enabled=True,
+            audio_device="hw:3,0",
+            playback_device="hw:3,0",
+            sender_audio_mode="playback-only",
+            preview_pattern="/tmp/sender-preview-%05d.jpg",
+        )
+
+        with patch.object(sender_send, "load_config", return_value=_config()):
+            pipeline = runtime.build_pipeline()
+
+        self.assertIn("srtsrc uri=\"srt://100.119.85.108:8808?mode=caller", pipeline)
+        self.assertIn('alsasink device="hw:3,0" async=false', pipeline)
+        self.assertIn("identity name=remote_inbound signal-handoffs=true silent=true", pipeline)
+        self.assertIn("identity name=playback_probe_reference signal-handoffs=true silent=true", pipeline)
+        self.assertIn("rtpjitterbuffer latency=200 do-lost=true", pipeline)
+        self.assertNotIn("webrtcdsp", pipeline)
+        self.assertNotIn("webrtcechoprobe", pipeline)
 
 
 def _config() -> dict:

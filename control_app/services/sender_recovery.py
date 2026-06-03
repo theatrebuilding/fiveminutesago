@@ -5,6 +5,7 @@ from typing import Any
 
 
 PLAYBACK_DSP_MODE = "playback-dsp"
+PLAYBACK_ONLY_MODE = "playback-only"
 CAPTURE_ONLY_MODE = "capture-only"
 VIDEO_ONLY_MODE = "video-only"
 
@@ -280,6 +281,8 @@ def sender_mode_for_request(request: Any | None) -> str | None:
         return VIDEO_ONLY_MODE
     if getattr(request, "sender_audio_mode", "aec") == "aec":
         return PLAYBACK_DSP_MODE
+    if getattr(request, "sender_audio_mode", "aec") == "playback-only":
+        return PLAYBACK_ONLY_MODE
     return CAPTURE_ONLY_MODE
 
 

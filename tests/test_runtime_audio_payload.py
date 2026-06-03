@@ -75,6 +75,28 @@ class RuntimeAudioPayloadTests(unittest.TestCase):
         self.assertEqual(request.sender_capture_input_channels, (1, 2))
         self.assertEqual(request.sender_playback_output_channels, (1, 2))
 
+    def test_sender_playback_only_keeps_playback_routing_without_dsp(self) -> None:
+        request = RuntimeLaunchRequest.from_payload(
+            {
+                "role": "sender",
+                "country": "dk",
+                "audio_source": "device",
+                "audio_device": "hw:2,0",
+                "sender_audio_mode": "playback-only",
+                "sender_playback_device": "hw:3,0",
+                "sender_playback_output_channels": [5, 6],
+                "sender_playback_hardware_channels": 8,
+                "sender_audio_delay_ms": 120,
+                "video_source": "test",
+            }
+        )
+
+        self.assertEqual(request.sender_audio_mode, "playback-only")
+        self.assertEqual(request.sender_playback_device, "hw:3,0")
+        self.assertEqual(request.sender_playback_output_channels, (5, 6))
+        self.assertEqual(request.sender_playback_hardware_channels, 8)
+        self.assertEqual(request.sender_audio_delay_ms, 120)
+
     def test_invalid_channel_pair_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             RuntimeLaunchRequest.from_payload(

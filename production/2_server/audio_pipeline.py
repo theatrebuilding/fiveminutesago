@@ -47,12 +47,14 @@ def build_audio_pipeline():
         srtsrc name=a_send_tn uri=srt://:{audio_send_tn}?mode=listener wait-for-connection=false ! 
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+          rtpjitterbuffer latency=200 do-lost=true !
           rtpL16depay !
           tee name=tee_tn
 
         srtsrc name=a_send_dk uri=srt://:{audio_send_dk}?mode=listener wait-for-connection=false !
           queue !
           application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
+          rtpjitterbuffer latency=200 do-lost=true !
           rtpL16depay !
           tee name=tee_dk
 

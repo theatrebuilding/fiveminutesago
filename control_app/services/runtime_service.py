@@ -26,6 +26,7 @@ from .sender_recovery import (
     CAPTURE_ONLY_MODE,
     DEGRADED_PHASE,
     PLAYBACK_DSP_MODE,
+    PLAYBACK_ONLY_MODE,
     RESTORING_PHASE,
     RecoveryAction,
     SenderRecoveryPolicy,
@@ -44,7 +45,8 @@ from production.audio_support import (
 VALID_ROLES = {"server", "sender", "receiver"}
 VALID_COUNTRIES = {"tn", "dk"}
 VALID_SENDER_AUDIO_SOURCES = {"off", "device", "test"}
-VALID_SENDER_AUDIO_MODES = {"aec", "capture-only"}
+VALID_SENDER_AUDIO_MODES = {"aec", "playback-only", "capture-only"}
+SENDER_PLAYBACK_AUDIO_MODES = {"aec", "playback-only"}
 VALID_SENDER_VIDEO_SOURCES = {"config", "device", "test"}
 VALID_RECEIVER_AUDIO_TRANSPORTS = {"config", "off", "aac", "l16"}
 MAX_SYNC_DELAY_MS = 3000
@@ -125,7 +127,7 @@ class RuntimeLaunchRequest:
         sender_audio_mode_raw = payload.get("sender_audio_mode")
         sender_audio_mode = str(sender_audio_mode_raw).strip().lower() if sender_audio_mode_raw is not None else "aec"
         if sender_audio_mode not in VALID_SENDER_AUDIO_MODES:
-            raise ValueError("Sender audio mode must be one of: aec, capture-only.")
+            raise ValueError("Sender audio mode must be one of: aec, playback-only, capture-only.")
 
         audio_device_raw = payload.get("audio_device")
         audio_device = str(audio_device_raw).strip() or None if audio_device_raw is not None else None
@@ -217,7 +219,7 @@ class RuntimeLaunchRequest:
                 audio_device = None
                 sender_capture_input_channels = (1, 2)
                 sender_capture_hardware_channels = 2
-            if sender_audio_mode != "aec" or audio_source == "off":
+            if sender_audio_mode not in SENDER_PLAYBACK_AUDIO_MODES or audio_source == "off":
                 sender_playback_device = None
                 sender_audio_delay_ms = 0
                 sender_playback_output_channels = (1, 2)
@@ -427,16 +429,20 @@ class RuntimeService:
             if (
                 active_request is None
                 or not active_request.audio_enabled
-                or active_request.sender_audio_mode != "aec"
+                or active_request.sender_audio_mode not in SENDER_PLAYBACK_AUDIO_MODES
             ):
-                raise RuntimeError("Sender audio delay requires active Playback + DSP mode; the sender is currently degraded.")
+                raise RuntimeError("Sender audio delay requires an active sender playback mode; the sender is currently degraded.")
             delay_ms = _parse_sync_delay_ms(
                 payload.get("sender_audio_delay_ms", payload.get("delay_ms", request.sender_audio_delay_ms)),
                 "sender_audio_delay_ms",
             )
             next_request = replace(request, sender_audio_delay_ms=delay_ms)
             self._write_sync_delay_file("sender-audio-delay-ms.txt", delay_ms)
-            label = "sender audio playback/probe"
+            label = (
+                "sender audio playback/probe"
+                if active_request.sender_audio_mode == "aec"
+                else "sender audio playback"
+            )
         else:
             delay_ms = _parse_sync_delay_ms(
                 payload.get("receiver_video_delay_ms", payload.get("delay_ms", request.receiver_video_delay_ms)),
@@ -604,9 +610,9 @@ class RuntimeService:
                         str(request.sender_capture_hardware_channels),
                     ]
                 )
-            if request.sender_audio_mode == "aec" and request.sender_playback_device:
+            if request.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and request.sender_playback_device:
                 command.extend(["--playback-device", request.sender_playback_device])
-            if request.sender_audio_mode == "aec" and request.audio_enabled:
+            if request.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and request.audio_enabled:
                 command.extend(
                     [
                         "--playback-output-channels",
@@ -615,7 +621,7 @@ class RuntimeService:
                         str(request.sender_playback_hardware_channels),
                     ]
                 )
-            if request.sender_audio_mode == "aec" and request.audio_enabled:
+            if request.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and request.audio_enabled:
                 command.extend(
                     [
                         "--audio-delay-ms",
@@ -979,13 +985,16 @@ class RuntimeService:
             "srtsink",
             "rtpL16pay",
         ]
-        if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
-            elements.extend(["alsasink", "srtsrc", "webrtcechoprobe", "rtpL16depay"])
+        sender_mode = sender_mode_for_request(request)
+        if sender_mode in {PLAYBACK_DSP_MODE, PLAYBACK_ONLY_MODE}:
+            elements.extend(["alsasink", "srtsrc", "rtpjitterbuffer", "rtpL16depay"])
+        if sender_mode == PLAYBACK_DSP_MODE:
+            elements.append("webrtcechoprobe")
         if _sender_routes_require_mix_matrix(request):
             elements.append("audiomixmatrix")
         if request.audio_source == "device":
             elements.append("alsasrc")
-            if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
+            if sender_mode == PLAYBACK_DSP_MODE:
                 elements.append("webrtcdsp")
         else:
             elements.append("audiotestsrc")
@@ -1005,7 +1014,7 @@ class RuntimeService:
                 capture_open_error = self._gst_capture_open_error(request, capture_device, audio_rate)
                 if capture_open_error:
                     errors.append(capture_open_error)
-        if sender_mode_for_request(request) == PLAYBACK_DSP_MODE:
+        if sender_mode in {PLAYBACK_DSP_MODE, PLAYBACK_ONLY_MODE}:
             playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
             playback_error = self._alsa_device_error(["aplay", "-l"], playback_device, "playback")
             if playback_error:
@@ -1228,7 +1237,7 @@ def _sender_request_summary(request: RuntimeLaunchRequest, config: dict[str, Any
                     f"capture_hardware_channels={request.sender_capture_hardware_channels}",
                 ]
             )
-        if request.sender_audio_mode == "aec":
+        if request.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES:
             playback_device = request.sender_playback_device or str(audio.get("playback_device", "default"))
             fields.extend(
                 [
@@ -1259,7 +1268,7 @@ def _sender_routes_require_mix_matrix(request: RuntimeLaunchRequest) -> bool:
         or request.sender_capture_hardware_channels != 2
     ):
         return True
-    if request.sender_audio_mode == "aec" and request.audio_enabled and (
+    if request.sender_audio_mode in SENDER_PLAYBACK_AUDIO_MODES and request.audio_enabled and (
         request.sender_playback_output_channels != (1, 2)
         or request.sender_playback_hardware_channels != 2
     ):
@@ -1270,6 +1279,8 @@ def _sender_routes_require_mix_matrix(request: RuntimeLaunchRequest) -> bool:
 def _sender_mode_label(mode: str | None) -> str:
     if mode == PLAYBACK_DSP_MODE:
         return "Playback + DSP"
+    if mode == PLAYBACK_ONLY_MODE:
+        return "sender playback"
     if mode == CAPTURE_ONLY_MODE:
         return "capture-only"
     if mode == VIDEO_ONLY_MODE:

@@ -351,6 +351,7 @@ class VideoReceiver:
             srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                 {receiver_l16_input_queue} !
                 application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+                rtpjitterbuffer latency=200 do-lost=true !
                 rtpL16depay !
                 audioconvert !
                 audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !

@@ -973,6 +973,7 @@ def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]
         srtsrc name=a_send_tn uri=srt://:{ports["audio_send_tn"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
           {audio_input_queue} !
           application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+          rtpjitterbuffer latency=200 do-lost=true !
           rtpL16depay !
           identity name=audio_diag_tn_uplink signal-handoffs=true silent=true !
           {audio_output_queue} !
@@ -986,6 +987,7 @@ def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]
         srtsrc name=a_send_dk uri=srt://:{ports["audio_send_dk"]}?mode=listener{audio_srt_suffix} wait-for-connection=false !
           {audio_input_queue} !
           application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+          rtpjitterbuffer latency=200 do-lost=true !
           rtpL16depay !
           identity name=audio_diag_dk_uplink signal-handoffs=true silent=true !
           {audio_output_queue} !

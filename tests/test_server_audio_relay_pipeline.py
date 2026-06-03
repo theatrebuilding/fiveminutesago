@@ -53,6 +53,7 @@ class ServerAudioRelayPipelineTests(unittest.TestCase):
         self.assertIn("identity name=audio_diag_dk_uplink signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_tn_to_dk_return signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=audio_diag_dk_to_tn_return signal-handoffs=true silent=true", pipeline)
+        self.assertEqual(pipeline.count("rtpjitterbuffer latency=200 do-lost=true"), 2)
         self.assertIn("rbuf=1048576&wbuf=1048576&tsbpdDelay=500", pipeline)
         self.assertIn("max-size-time=500000000", pipeline)
 

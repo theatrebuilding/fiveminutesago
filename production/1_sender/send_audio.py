@@ -90,6 +90,7 @@ class AudioSender:
             srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller" wait-for-connection=false 
                 ! queue max-size-time=2000000000 max-size-buffers=500
                 ! application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels}
+                ! rtpjitterbuffer latency=200 do-lost=true
                 ! rtpL16depay
                 ! audioconvert
                 ! audio/x-raw,format=S16LE,channels={channels},rate={audio_rate}

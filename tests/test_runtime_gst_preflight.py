@@ -155,6 +155,45 @@ class RuntimeGstPreflightTests(unittest.TestCase):
 
         self.assertEqual(errors, ["capture preflight failed: device busy"])
 
+    def test_sender_preflight_requires_rtp_jitterbuffer_for_playback_dsp(self) -> None:
+        service = _runtime_service()
+        request = RuntimeLaunchRequest(
+            role="sender",
+            country="tn",
+            audio_source="test",
+            sender_audio_mode="aec",
+        )
+
+        with (
+            patch.object(service, "_gst_element_available", side_effect=lambda element: element != "rtpjitterbuffer"),
+            patch.object(service, "_alsa_device_error", return_value=None),
+            patch.object(service, "_gst_playback_open_error", return_value=None),
+        ):
+            errors = service._sender_preflight_errors(request)
+
+        self.assertIn("missing GStreamer element rtpjitterbuffer", errors)
+
+    def test_playback_only_preflight_does_not_require_webrtc_elements(self) -> None:
+        service = _runtime_service()
+        request = RuntimeLaunchRequest(
+            role="sender",
+            country="tn",
+            audio_source="test",
+            sender_audio_mode="playback-only",
+        )
+
+        def element_available(element: str) -> bool:
+            return element not in {"webrtcdsp", "webrtcechoprobe"}
+
+        with (
+            patch.object(service, "_gst_element_available", side_effect=element_available),
+            patch.object(service, "_alsa_device_error", return_value=None),
+            patch.object(service, "_gst_playback_open_error", return_value=None),
+        ):
+            errors = service._sender_preflight_errors(request)
+
+        self.assertEqual(errors, [])
+
 
 def _runtime_service() -> RuntimeService:
     return RuntimeService(

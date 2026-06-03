@@ -239,6 +239,11 @@ function describeSenderAudioChoice(launch) {
   if (senderAudioMode === "capture-only") {
     return `${sourceLabel} • capture only`;
   }
+  if (senderAudioMode === "playback-only") {
+    const delayMs = normalizeSyncDelayMs(launch.sender_audio_delay_ms);
+    const delayLabel = delayMs ? ` • audio delay ${delayMs} ms` : "";
+    return `${sourceLabel} • playback only${delayLabel}`;
+  }
 
   const delayMs = normalizeSyncDelayMs(launch.sender_audio_delay_ms);
   const delayLabel = delayMs ? ` • audio delay ${delayMs} ms` : "";
@@ -253,7 +258,9 @@ function describeSenderRecovery(recovery) {
     ? "video-only"
     : recovery.active_mode === "capture-only"
       ? "capture-only"
-      : "Playback + DSP";
+      : recovery.active_mode === "playback-only"
+        ? "sender playback"
+        : "Playback + DSP";
   if (recovery.phase === "restoring") {
     const stableText = recovery.stable_in_seconds != null
       ? `; clearing degraded status in ${formatSeconds(recovery.stable_in_seconds)}`
@@ -270,7 +277,7 @@ function shouldShowSenderPlaybackField() {
   if (roleSelect.value !== "sender") {
     return false;
   }
-  if (senderAudioModeSelect.value !== "aec") {
+  if (senderAudioModeSelect.value === "capture-only") {
     return false;
   }
   const selectedAudioValue = audioDeviceSelect.value || AUDIO_OFF_VALUE;
@@ -1464,7 +1471,10 @@ function buildLaunchPayload() {
         10
       );
     }
-    if (payload.audio_enabled && payload.sender_audio_mode === "aec") {
+    if (
+      payload.audio_enabled &&
+      (payload.sender_audio_mode === "aec" || payload.sender_audio_mode === "playback-only")
+    ) {
       payload.sender_playback_device =
         senderPlaybackDeviceSelect.value && senderPlaybackDeviceSelect.value !== AUDIO_PLAYBACK_DEFAULT_DEVICE_VALUE
           ? senderPlaybackDeviceSelect.value

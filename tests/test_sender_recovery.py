@@ -8,9 +8,11 @@ from control_app.services.sender_recovery import (
     DEGRADED_PHASE,
     NORMAL_PHASE,
     PLAYBACK_DSP_MODE,
+    PLAYBACK_ONLY_MODE,
     RESTORING_PHASE,
     VIDEO_ONLY_MODE,
     SenderRecoveryPolicy,
+    sender_mode_for_request,
 )
 
 
@@ -99,6 +101,11 @@ class SenderRecoveryPolicyTests(unittest.TestCase):
         self.assertEqual(snapshot["desired_mode"], CAPTURE_ONLY_MODE)
         self.assertEqual(snapshot["active_mode"], VIDEO_ONLY_MODE)
         self.assertIsNone(snapshot["next_retry_at"])
+
+    def test_playback_only_mode_is_distinct_from_playback_dsp(self) -> None:
+        request = Request(sender_audio_mode="playback-only")
+
+        self.assertEqual(sender_mode_for_request(request), PLAYBACK_ONLY_MODE)
 
     def test_playback_preview_watchdog_degrades_to_capture_only(self) -> None:
         policy = SenderRecoveryPolicy()
