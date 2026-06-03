@@ -25,6 +25,9 @@ ALSA_CARD_PATTERN = re.compile(
 )
 ALSA_HW_PATTERN = re.compile(r"^hw:(?P<card>\d+),(?P<device>\d+)$")
 COMMON_AUDIO_RATES = COMMON_AUDIO_HARDWARE_RATES
+SPEAKER_TEST_CHANNEL_SECONDS = 1.5
+SPEAKER_TEST_SHUTDOWN_SECONDS = 1.0
+SPEAKER_TEST_CHANNEL_GAP_SECONDS = 0.15
 
 
 class AudioDeviceService:
@@ -100,23 +103,10 @@ class AudioDeviceService:
 
         outputs: list[str] = []
         for command in commands:
-            try:
-                result = subprocess.run(
-                    command,
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                    timeout=4,
-                )
-            except FileNotFoundError as exc:
-                raise RuntimeError("speaker-test is not available in this container.") from exc
-            except subprocess.TimeoutExpired as exc:
-                raise RuntimeError("speaker-test did not finish within 4 seconds.") from exc
-            output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part)
+            output = self._run_bounded_speaker_test(command)
             if output:
                 outputs.append(output)
-            if result.returncode != 0:
-                raise RuntimeError(output or f"speaker-test exited with code {result.returncode}.")
+            time.sleep(SPEAKER_TEST_CHANNEL_GAP_SECONDS)
 
         return {
             "ok": True,
@@ -124,6 +114,36 @@ class AudioDeviceService:
             "commands": commands,
             "output": "\n".join(outputs),
         }
+
+    def _run_bounded_speaker_test(self, command: list[str]) -> str:
+        try:
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("speaker-test is not available in this container.") from exc
+
+        try:
+            stdout, stderr = process.communicate(timeout=SPEAKER_TEST_CHANNEL_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.terminate()
+            try:
+                stdout, stderr = process.communicate(timeout=SPEAKER_TEST_SHUTDOWN_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                stdout, stderr = process.communicate()
+            output = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
+            if process.returncode and process.returncode > 0:
+                raise RuntimeError(output or f"speaker-test exited with code {process.returncode}.")
+            return output
+
+        output = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
+        if process.returncode != 0:
+            raise RuntimeError(output or f"speaker-test exited with code {process.returncode}.")
+        return output
 
     def build_speaker_test_commands(self, settings: dict[str, Any]) -> list[list[str]]:
         rate = validate_local_audio_rate(settings.get("rate"), fallback=48000)

@@ -486,7 +486,7 @@ function applyAudioTestButtonState() {
       senderMicTestMessage.textContent = "Tap the mic after starting; levels update for 10 seconds.";
     }
     if (senderOutputTestMessage.textContent.startsWith("Stop the sender")) {
-      senderOutputTestMessage.textContent = "Plays a short test tone on the selected left/right output channels.";
+      senderOutputTestMessage.textContent = "Plays a short bounded tone on the selected left channel, then right channel.";
     }
   }
 }
@@ -1554,7 +1554,7 @@ async function runSenderOutputTest() {
   }
   outputTestRunning = true;
   setBusy([senderOutputTestButton], true);
-  senderOutputTestMessage.textContent = "Playing test tone on the selected output pair…";
+  senderOutputTestMessage.textContent = "Playing bounded test tone: left, then right…";
   try {
     const payload = await api("/api/devices/audio/playback/test", {
       method: "POST",

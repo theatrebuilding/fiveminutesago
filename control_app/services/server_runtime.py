@@ -70,6 +70,7 @@ class ServerRuntime:
         self._main_loop: GLib.MainLoop | None = None
         self._loop_thread: threading.Thread | None = None
         self._audio_pipelines: dict[str, Gst.Pipeline] = {}
+        self._pipeline_bus_watches: dict[str, tuple[Gst.Bus, int]] = {}
         self._packet_monitor: UdpPacketMonitor | None = None
         self._video_feeds: dict[str, VideoFeedState] = {}
         self._recording_active = False
@@ -266,9 +267,8 @@ class ServerRuntime:
         except Exception:
             for feed_state in self._video_feeds.values():
                 if feed_state.pipeline is not None:
-                    self._set_pipeline_state(
+                    self._teardown_pipeline(
                         feed_state.pipeline,
-                        Gst.State.NULL,
                         f"video-{feed_state.feed}",
                         timeout_seconds=5,
                         suppress_errors=True,
@@ -277,14 +277,15 @@ class ServerRuntime:
                     feed_state.tee = None
                     feed_state.recording_session = None
             for label, pipeline in list(self._audio_pipelines.items()):
-                self._set_pipeline_state(
+                self._teardown_pipeline(
                     pipeline,
-                    Gst.State.NULL,
                     label,
                     timeout_seconds=5,
                     suppress_errors=True,
                 )
             self._audio_pipelines = {}
+            for label in list(self._pipeline_bus_watches):
+                self._disconnect_pipeline_bus(label)
             if self._packet_monitor is not None:
                 self._packet_monitor.stop()
                 self._packet_monitor = None
@@ -309,14 +310,21 @@ class ServerRuntime:
         for feed_state in self._video_feeds.values():
             if feed_state.pipeline is not None:
                 self._detach_recording_probe(feed_state)
-                self._set_pipeline_state(feed_state.pipeline, Gst.State.NULL, f"video-{feed_state.feed}", timeout_seconds=10)
+                self._teardown_pipeline(
+                    feed_state.pipeline,
+                    f"video-{feed_state.feed}",
+                    timeout_seconds=10,
+                    suppress_errors=True,
+                )
                 feed_state.pipeline = None
                 feed_state.tee = None
                 feed_state.recording_session = None
 
         for label, pipeline in list(self._audio_pipelines.items()):
-            self._set_pipeline_state(pipeline, Gst.State.NULL, label, timeout_seconds=10)
+            self._teardown_pipeline(pipeline, label, timeout_seconds=10, suppress_errors=True)
         self._audio_pipelines = {}
+        for label in list(self._pipeline_bus_watches):
+            self._disconnect_pipeline_bus(label)
 
         if self._packet_monitor is not None:
             self._packet_monitor.stop()
@@ -367,7 +375,7 @@ class ServerRuntime:
 
         if feed_state.pipeline is not None:
             self._detach_recording_probe(feed_state)
-            self._set_pipeline_state(feed_state.pipeline, Gst.State.NULL, f"video-{feed}", timeout_seconds=10)
+            self._teardown_pipeline(feed_state.pipeline, f"video-{feed}", timeout_seconds=10, suppress_errors=True)
             feed_state.pipeline = None
             feed_state.tee = None
             self._next_preview_frame_at.pop(feed, None)
@@ -385,7 +393,7 @@ class ServerRuntime:
 
         existing = self._audio_pipelines.get(label)
         if existing is not None:
-            self._set_pipeline_state(existing, Gst.State.NULL, label, timeout_seconds=10)
+            self._teardown_pipeline(existing, label, timeout_seconds=10, suppress_errors=True)
 
         pipeline = self._build_audio_pipeline(config, label)
         self._audio_pipelines[label] = pipeline
@@ -402,10 +410,12 @@ class ServerRuntime:
         if message.type == Gst.MessageType.ERROR:
             err, debug = message.parse_error()
             self._log(f"[{label}] ERROR: {err}. {debug or ''}".strip())
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
+            if self._running:
+                GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         elif message.type == Gst.MessageType.EOS:
             self._log(f"[{label}] End of stream detected.")
-            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
+            if self._running:
+                GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         return True
 
     def _on_video_message(self, bus: Gst.Bus, message: Gst.Message, feed: str) -> bool:
@@ -619,10 +629,48 @@ class ServerRuntime:
         label: str,
         handler: Callable[[Gst.Bus, Gst.Message], bool],
     ) -> None:
+        self._disconnect_pipeline_bus(label)
         bus = pipeline.get_bus()
         bus.add_signal_watch()
-        bus.connect("message", handler)
+        handler_id = bus.connect("message", handler)
+        self._pipeline_bus_watches[label] = (bus, handler_id)
         self._log(f"[{label}] Pipeline configured.")
+
+    def _disconnect_pipeline_bus(self, label: str) -> None:
+        watch = self._pipeline_bus_watches.pop(label, None)
+        if watch is None:
+            return
+        bus, handler_id = watch
+        try:
+            bus.disconnect(handler_id)
+        except Exception as exc:  # pragma: no cover - defensive cleanup for runtime-only bindings
+            self._log(f"[{label}] Could not disconnect pipeline bus handler cleanly: {exc}")
+        try:
+            bus.remove_signal_watch()
+        except Exception as exc:  # pragma: no cover - defensive cleanup for runtime-only bindings
+            self._log(f"[{label}] Could not remove pipeline bus watch cleanly: {exc}")
+
+    def _teardown_pipeline(
+        self,
+        pipeline: Gst.Pipeline,
+        label: str,
+        timeout_seconds: float = 10.0,
+        suppress_errors: bool = False,
+    ) -> None:
+        self._disconnect_pipeline_bus(label)
+        try:
+            self._set_pipeline_state(
+                pipeline,
+                Gst.State.NULL,
+                label,
+                timeout_seconds=timeout_seconds,
+                suppress_errors=suppress_errors,
+            )
+        finally:
+            try:
+                pipeline.get_bus().set_flushing(True)
+            except Exception:
+                pass
 
     def _set_pipeline_state(
         self,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import subprocess
 import unittest
+from unittest.mock import patch
 
 from control_app.services.audio_device_service import AudioDeviceService, _pcm_s16le_pair_levels
 
@@ -58,6 +60,50 @@ Capture:
         self.assertEqual(commands[0][commands[0].index("-s") + 1], "5")
         self.assertEqual(commands[1][commands[1].index("-s") + 1], "6")
 
+    def test_playback_test_bounds_each_channel_and_continues_to_right(self) -> None:
+        service = AudioDeviceService()
+        started_commands: list[list[str]] = []
+        processes: list[_TimeoutSpeakerProcess] = []
+
+        def fake_popen(command: list[str], **_: object) -> "_TimeoutSpeakerProcess":
+            started_commands.append(command)
+            process = _TimeoutSpeakerProcess(command)
+            processes.append(process)
+            return process
+
+        with patch("control_app.services.audio_device_service.subprocess.Popen", fake_popen), patch(
+            "control_app.services.audio_device_service.time.sleep",
+        ):
+            result = service.run_playback_test(
+                {
+                    "device": "hw:2,0",
+                    "rate": 48000,
+                    "output_channels": [1, 2],
+                    "hardware_channels": 2,
+                }
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual([command[command.index("-s") + 1] for command in started_commands], ["1", "2"])
+        self.assertEqual([process.terminated for process in processes], [True, True])
+
+    def test_playback_test_still_fails_fast_on_speaker_error(self) -> None:
+        service = AudioDeviceService()
+
+        with patch(
+            "control_app.services.audio_device_service.subprocess.Popen",
+            lambda command, **kwargs: _ExitedSpeakerProcess(command, 1, stderr="Playback open error"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "Playback open error"):
+                service.run_playback_test(
+                    {
+                        "device": "hw:2,0",
+                        "rate": 48000,
+                        "output_channels": [1, 2],
+                        "hardware_channels": 2,
+                    }
+                )
+
     def test_capture_level_command_uses_plughw_and_caps_duration(self) -> None:
         service = AudioDeviceService()
 
@@ -100,6 +146,38 @@ Capture:
 
         self.assertAlmostEqual(levels["left"]["peak"], 1.0)
         self.assertAlmostEqual(levels["right"]["peak"], 0.25)
+
+
+class _TimeoutSpeakerProcess:
+    def __init__(self, command: list[str]) -> None:
+        self.command = command
+        self.returncode: int | None = None
+        self.terminated = False
+        self._communicate_count = 0
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        self._communicate_count += 1
+        if self._communicate_count == 1:
+            raise subprocess.TimeoutExpired(self.command, timeout)
+        self.returncode = -15
+        return "", f"terminated {self.command[self.command.index('-s') + 1]}"
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+class _ExitedSpeakerProcess:
+    def __init__(self, command: list[str], returncode: int, stdout: str = "", stderr: str = "") -> None:
+        self.command = command
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+    def communicate(self, timeout: float | None = None) -> tuple[str, str]:
+        return self.stdout, self.stderr
 
 
 if __name__ == "__main__":
