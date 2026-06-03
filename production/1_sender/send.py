@@ -46,6 +46,7 @@ AUDIO_DIAGNOSTIC_ELEMENTS = {
     "remote_inbound": "remote L16 from server",
     "playback_probe_reference": "playback/probe reference",
 }
+SENDER_AUDIO_FORMAT_CHECK_TITLE = "Audio endian/caps check"
 
 
 def parse_sync_delay_ms(value):
@@ -68,6 +69,52 @@ def parse_channel_pair(value):
     except ValueError as exc:
         raise argparse.ArgumentTypeError(str(exc)) from exc
     return f"{pair[0]}/{pair[1]}"
+
+
+def _first_caps_values(caps):
+    try:
+        if caps.get_size() <= 0:
+            return {}
+        structure = caps.get_structure(0)
+    except Exception:
+        return {}
+
+    values = {}
+    for key in ("format", "rate", "channels"):
+        try:
+            value = structure.get_value(key)
+        except Exception:
+            value = None
+        if value is not None:
+            values[key] = value
+    return values
+
+
+def _audio_caps_check_result(actual, expected):
+    actual_format = str(actual.get("format", "")).upper()
+    try:
+        actual_rate = int(actual.get("rate"))
+    except (TypeError, ValueError):
+        actual_rate = None
+    try:
+        actual_channels = int(actual.get("channels"))
+    except (TypeError, ValueError):
+        actual_channels = None
+
+    expected_format = str(expected.get("format", "")).upper()
+    expected_rate = int(expected.get("rate"))
+    expected_channels = int(expected.get("channels"))
+    ok = (
+        actual_format == expected_format
+        and actual_rate == expected_rate
+        and actual_channels == expected_channels
+    )
+    actual_details = (
+        f"format={actual_format or 'unknown'}, "
+        f"rate={actual_rate if actual_rate is not None else 'unknown'}, "
+        f"channels={actual_channels if actual_channels is not None else 'unknown'}"
+    )
+    return ok, actual_details
 
 
 class SenderRuntime:
@@ -121,6 +168,8 @@ class SenderRuntime:
         self.audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
         self.last_audio_diagnostic_counts = dict(self.audio_diagnostic_counts)
         self.audio_diagnostic_active_elements = []
+        self.audio_format_expectations = {}
+        self.audio_format_checked_elements = set()
 
     def set_clock(self, clock):
         self.clock = clock
@@ -428,6 +477,34 @@ class SenderRuntime:
         elif playback_enabled:
             print("[Sender] WebRTC DSP is bypassed because the sender audio source is a test signal.", flush=True)
 
+        self.audio_format_expectations = {
+            "capture_after_dsp": {
+                "format": "S16LE",
+                "rate": transport_audio_rate,
+                "channels": channels,
+            },
+            "l16_outbound": {
+                "format": "S16BE",
+                "rate": transport_audio_rate,
+                "channels": channels,
+            },
+        }
+        if playback_enabled:
+            self.audio_format_expectations.update(
+                {
+                    "remote_inbound": {
+                        "format": "S16LE",
+                        "rate": transport_audio_rate,
+                        "channels": channels,
+                    },
+                    "playback_probe_reference": {
+                        "format": "S16LE",
+                        "rate": transport_audio_rate,
+                        "channels": channels,
+                    },
+                }
+            )
+
         return f"""
             {playback_branch}
 
@@ -634,6 +711,7 @@ class SenderRuntime:
         self.audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
         self.last_audio_diagnostic_counts = dict(self.audio_diagnostic_counts)
         self.audio_diagnostic_active_elements = []
+        self.audio_format_checked_elements = set()
         for element_name in AUDIO_DIAGNOSTIC_ELEMENTS:
             element = self.pipeline.get_by_name(element_name)
             if element is None:
@@ -641,8 +719,56 @@ class SenderRuntime:
             element.connect("handoff", self.on_audio_diagnostic_handoff, element_name)
             self.audio_diagnostic_active_elements.append(element_name)
 
-    def on_audio_diagnostic_handoff(self, _identity, _buffer, element_name):
+    def on_audio_diagnostic_handoff(self, identity, _buffer, element_name):
         self.audio_diagnostic_counts[element_name] = self.audio_diagnostic_counts.get(element_name, 0) + 1
+        self.check_audio_format(identity, element_name)
+
+    def check_audio_format(self, element, element_name):
+        if element_name in self.audio_format_checked_elements:
+            return
+        expected = self.audio_format_expectations.get(element_name)
+        if not expected:
+            return
+
+        caps = self._current_caps_for_element(element)
+        if caps is None:
+            self.audio_format_checked_elements.add(element_name)
+            label = AUDIO_DIAGNOSTIC_ELEMENTS.get(element_name, element_name)
+            print(
+                f"[Sender] {SENDER_AUDIO_FORMAT_CHECK_TITLE} FAILED: "
+                f"{label} produced audio but no negotiated caps were visible; expected "
+                f"format={expected['format']}, rate={expected['rate']}, channels={expected['channels']}.",
+                flush=True,
+            )
+            return
+
+        self.audio_format_checked_elements.add(element_name)
+        actual = _first_caps_values(caps)
+        ok, details = _audio_caps_check_result(actual, expected)
+        status = "SUCCESS" if ok else "FAILED"
+        label = AUDIO_DIAGNOSTIC_ELEMENTS.get(element_name, element_name)
+        print(
+            f"[Sender] {SENDER_AUDIO_FORMAT_CHECK_TITLE} {status}: "
+            f"{label} negotiated {details}; expected "
+            f"format={expected['format']}, rate={expected['rate']}, channels={expected['channels']}.",
+            flush=True,
+        )
+
+    def _current_caps_for_element(self, element):
+        for pad_name in ("src", "sink"):
+            try:
+                pad = element.get_static_pad(pad_name)
+            except Exception:
+                pad = None
+            if pad is None:
+                continue
+            try:
+                caps = pad.get_current_caps()
+            except Exception:
+                caps = None
+            if caps is not None:
+                return caps
+        return None
 
     def log_audio_diagnostics(self):
         if self.pipeline is None or not self.audio_enabled:

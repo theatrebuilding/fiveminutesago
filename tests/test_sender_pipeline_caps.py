@@ -66,6 +66,24 @@ sender_send.Gst.ElementFactory = _FakeElementFactory
 
 
 class SenderPipelineCapsTests(unittest.TestCase):
+    def test_audio_caps_check_reports_success_for_expected_l16_endian_caps(self) -> None:
+        ok, details = sender_send._audio_caps_check_result(
+            {"format": "S16BE", "rate": 48000, "channels": 2},
+            {"format": "S16BE", "rate": 48000, "channels": 2},
+        )
+
+        self.assertTrue(ok)
+        self.assertEqual(details, "format=S16BE, rate=48000, channels=2")
+
+    def test_audio_caps_check_reports_failure_for_wrong_endian_caps(self) -> None:
+        ok, details = sender_send._audio_caps_check_result(
+            {"format": "S16LE", "rate": 48000, "channels": 2},
+            {"format": "S16BE", "rate": 48000, "channels": 2},
+        )
+
+        self.assertFalse(ok)
+        self.assertEqual(details, "format=S16LE, rate=48000, channels=2")
+
     def test_audio_caps_use_explicit_capsfilters_in_playback_dsp_pipeline(self) -> None:
         runtime = sender_send.SenderRuntime(
             country="tn",
