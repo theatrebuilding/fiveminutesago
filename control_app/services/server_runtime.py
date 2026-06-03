@@ -141,8 +141,9 @@ class ServerRuntime:
                 feed: self._preview_snapshot(feed, feed_state.preview_pattern, packet_activity.get(feed))
                 for feed, feed_state in self._video_feeds.items()
             }
+            running = self._running or self._main_loop is not None
             return {
-                "running": self._running,
+                "running": running,
                 "started_at": _to_iso(self._started_at),
                 "started_at_ts": self._started_at,
                 "stopped_at": _to_iso(self._stopped_at),
@@ -244,6 +245,7 @@ class ServerRuntime:
             self._audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
             self._last_audio_diagnostic_counts = dict(self._audio_diagnostic_counts)
             self._audio_pipelines = self._build_audio_pipelines(config)
+            failed_audio_labels: list[str] = []
             for label, pipeline in self._audio_pipelines.items():
                 self._configure_audio_diagnostics(pipeline)
                 self._configure_bus(
@@ -251,7 +253,14 @@ class ServerRuntime:
                     label,
                     lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
                 )
-                self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
+                try:
+                    self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
+                except RuntimeError as exc:
+                    self._log(
+                        f"[{label}] Audio relay did not arm during server startup; "
+                        f"the server will keep starting and retry this relay. {exc}"
+                    )
+                    failed_audio_labels.append(label)
             GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self._log_audio_diagnostics)
 
             self._last_preview_log_at = {}
@@ -296,6 +305,9 @@ class ServerRuntime:
             self._started_at = time.time()
             self._stopped_at = None
             self._last_exit_code = None
+
+        for label in failed_audio_labels:
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
 
         self._log("Server runtime started.")
 
@@ -395,15 +407,19 @@ class ServerRuntime:
         if existing is not None:
             self._teardown_pipeline(existing, label, timeout_seconds=10, suppress_errors=True)
 
-        pipeline = self._build_audio_pipeline(config, label)
-        self._audio_pipelines[label] = pipeline
-        self._configure_audio_diagnostics(pipeline)
-        self._configure_bus(
-            pipeline,
-            label,
-            lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
-        )
-        self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
+        try:
+            pipeline = self._build_audio_pipeline(config, label)
+            self._audio_pipelines[label] = pipeline
+            self._configure_audio_diagnostics(pipeline)
+            self._configure_bus(
+                pipeline,
+                label,
+                lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
+            )
+            self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
+        except Exception as exc:
+            self._log(f"[{label}] Audio relay restart failed; retrying. {exc}")
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         return False
 
     def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message, label: str) -> bool:

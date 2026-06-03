@@ -309,7 +309,6 @@ class RuntimeService:
                 preview_dir=self._preview_dir,
                 log_callback=self.record_event,
             )
-            runtime.start()
             with self._lock:
                 self._server_runtime = runtime
                 self._current_request = request
@@ -317,6 +316,19 @@ class RuntimeService:
                 self._started_at = time.time()
                 self._stopped_at = None
                 self._last_exit_code = None
+            try:
+                runtime.start()
+            except Exception:
+                with self._lock:
+                    if self._server_runtime is runtime:
+                        self._last_exit_code = 1
+                        self._stopped_at = time.time()
+                raise
+            with self._lock:
+                if self._server_runtime is runtime:
+                    self._started_at = time.time()
+                    self._stopped_at = None
+                    self._last_exit_code = None
         else:
             active_request = self._prepare_process_request(request)
             process = self._launch_process(active_request)

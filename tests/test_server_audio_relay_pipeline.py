@@ -4,6 +4,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     import yaml  # noqa: F401
@@ -85,6 +86,49 @@ class ServerAudioRelayPipelineTests(unittest.TestCase):
         self.assertEqual(pipeline.states, ["NULL"])
         self.assertNotIn("audio-tn-to-dk", runtime._pipeline_bus_watches)
 
+    def test_server_start_continues_when_audio_relay_initial_arm_fails(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        logs: list[str] = []
+        runtime._log_callback = logs.append
+        started_video_feeds: list[str] = []
+        scheduled_retries: list[tuple] = []
+
+        with _patched_gst_for_teardown(), patch.object(
+            server_runtime, "_load_config", return_value=_server_config()
+        ), patch.object(
+            server_runtime, "UdpPacketMonitor", _FakePacketMonitor
+        ), patch.object(
+            runtime, "_build_audio_pipelines", return_value={"audio-tn-to-dk": object()}
+        ), patch.object(
+            runtime, "_configure_audio_diagnostics"
+        ), patch.object(
+            runtime, "_configure_bus"
+        ), patch.object(
+            runtime,
+            "_set_pipeline_state",
+            side_effect=RuntimeError("[audio-tn-to-dk] Could not change pipeline state to PLAYING."),
+        ), patch.object(
+            runtime,
+            "_start_video_feed",
+            side_effect=lambda feed_state: started_video_feeds.append(feed_state.feed),
+        ), patch.object(
+            server_runtime.GLib,
+            "timeout_add_seconds",
+            create=True,
+            side_effect=lambda *args: scheduled_retries.append(args) or 1,
+        ):
+            runtime._start_runtime()
+
+        self.assertTrue(runtime.snapshot()["running"])
+        self.assertEqual(started_video_feeds, ["tn", "dk"])
+        self.assertTrue(any("server will keep starting" in line for line in logs))
+        self.assertTrue(any(args[1] == runtime._restart_audio_pipeline for args in scheduled_retries))
+
 
 def _config() -> dict:
     return {
@@ -104,11 +148,39 @@ def _config() -> dict:
     }
 
 
+def _server_config() -> dict:
+    config = _config()
+    config["ports"].update(
+        {
+            "video_send_tn": 8891,
+            "video_receive_dk": 8892,
+            "video_send_dk": 8893,
+            "video_receive_tn": 8894,
+        }
+    )
+    return config
+
+
+class _FakePacketMonitor:
+    def __init__(self, *_args, **_kwargs) -> None:
+        self.started = False
+        self.stopped = False
+
+    def start(self) -> None:
+        self.started = True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def snapshot(self) -> dict:
+        return {}
+
+
 class _patched_gst_for_teardown:
     def __enter__(self):
         self.original_gst = server_runtime.Gst
         server_runtime.Gst = types.SimpleNamespace(
-            State=types.SimpleNamespace(NULL="NULL"),
+            State=types.SimpleNamespace(NULL="NULL", PLAYING="PLAYING"),
             StateChangeReturn=types.SimpleNamespace(
                 FAILURE="FAILURE",
                 ASYNC="ASYNC",

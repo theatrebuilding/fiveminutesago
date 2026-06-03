@@ -1652,6 +1652,7 @@ async function startRole() {
     await refreshStatus();
   } catch (error) {
     actionMessage.textContent = error.message;
+    await refreshStatus();
   } finally {
     setBusy([startRoleButton], false);
   }
