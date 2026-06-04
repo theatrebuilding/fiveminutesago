@@ -60,27 +60,17 @@ def srt_listener_uri(port):
 def build_audio_pipeline():
     require_config()
 
-    rtp_caps = (
-        f"application/x-rtp,"
-        f"media=audio,"
-        f"clock-rate={clock_rate},"
-        f"encoding-name={encoding_name},"
-        f"channels={channels}"
-    )
-
     pipeline = f"""
         srtsrc name=a_send_tn
           uri="{srt_listener_uri(audio_send_tn)}"
           wait-for-connection=false
           ! queue
-          ! {rtp_caps}
           ! tee name=tee_tn
 
         srtsrc name=a_send_dk
           uri="{srt_listener_uri(audio_send_dk)}"
           wait-for-connection=false
           ! queue
-          ! {rtp_caps}
           ! tee name=tee_dk
 
         tee_tn.
