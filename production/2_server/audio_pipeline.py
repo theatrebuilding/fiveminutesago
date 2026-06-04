@@ -2,74 +2,100 @@
 import os
 import sys
 
-# 1) Insert parent directory into Python path so we can import config_loader.
+# Allow import from parent directory.
 script_dir = os.path.dirname(os.path.realpath(__file__))
 parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
 if parent_dir not in sys.path:
     sys.path.insert(0, parent_dir)
 
-# 2) Import the configuration loader and load config.
 from config_loader import load_config
+
 cfg = load_config()
 
-# 3) Fetch port values and streaming settings from the config.
-audio_send_tn       = cfg.get("ports", {}).get("audio_send_tn")
-audio_send_dk       = cfg.get("ports", {}).get("audio_send_dk")
-audio_receive_dk    = cfg.get("ports", {}).get("audio_receive_dk")
-audio_receive_tn    = cfg.get("ports", {}).get("audio_receive_tn")
+ports = cfg.get("ports", {})
+audio_cfg = cfg.get("audio", {})
 
-streaming_settings  = cfg.get("streaming_settings_audio", "")
-clock_rate          = cfg.get("audio", {}).get("rate", 48000)
-channels            = cfg.get("audio", {}).get("channels", 2)
-encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
-audio_format        = cfg.get("audio", {}).get("format", "S16BE") 
+audio_send_tn = ports.get("audio_send_tn")
+audio_send_dk = ports.get("audio_send_dk")
+audio_receive_dk = ports.get("audio_receive_dk")
+audio_receive_tn = ports.get("audio_receive_tn")
 
-compression_level   = cfg.get("webrtcdsp_settings", {}).get("compression-gain-db", 0)
-delay_agnostic      = cfg.get("webrtcdsp_settings", {}).get("delay-agnostic", True)
-echo_cancel         = cfg.get("webrtcdsp_settings", {}).get("echo-cancel", True)
-echo_suppression  = cfg.get("webrtcdsp_settings", {}).get("echo-suppression-level", "high")
-extended_filter = cfg.get("webrtcdsp_settings", {}).get("extended-filter", True)
-experimental_agc = cfg.get("webrtcdsp_settings", {}).get("experimental-agc", False)
-gain_control = cfg.get("webrtcdsp_settings", {}).get("gain-control", False)
-gain_control_mode = cfg.get("webrtcdsp_settings", {}).get("gain-control-mode", "adaptive-digital")
-high_pass_filter = cfg.get("webrtcdsp_settings", {}).get("high-pass-filter", False)
-limiter = cfg.get("webrtcdsp_settings", {}).get("limiter", True)
-noise_suppression = cfg.get("webrtcdsp_settings", {}).get("noise-suppression", False)
-noise_suppression_level = cfg.get("webrtcdsp_settings", {}).get("noise-suppression-level", "low")
-startup_min_volume = cfg.get("webrtcdsp_settings", {}).get("startup-min-volume", 12)
-target_level_dbfs = cfg.get("webrtcdsp_settings", {}).get("target-level-dbfs", 3)
-voice_detection = cfg.get("webrtcdsp_settings", {}).get("voice-detection", False)
-voice_detection_fs = cfg.get("webrtcdsp_settings", {}).get("voice-detection-frame-size-ms", 0)
-voice_detection_likelihood = cfg.get("webrtcdsp_settings", {}).get("voice-detection-likelihood", "low")
+streaming_settings = cfg.get("streaming_settings_audio", "")
+
+clock_rate = audio_cfg.get("rate", 48000)
+channels = audio_cfg.get("channels", 2)
+encoding_name = audio_cfg.get("encoding_name", "L16")
+
+
+def require_config():
+    missing = []
+
+    required_values = {
+        "ports.audio_send_tn": audio_send_tn,
+        "ports.audio_send_dk": audio_send_dk,
+        "ports.audio_receive_dk": audio_receive_dk,
+        "ports.audio_receive_tn": audio_receive_tn,
+        "audio.rate": clock_rate,
+        "audio.channels": channels,
+        "audio.encoding_name": encoding_name,
+    }
+
+    for name, value in required_values.items():
+        if value is None or value == "":
+            missing.append(name)
+
+    if missing:
+        raise RuntimeError("Missing required config values: " + ", ".join(missing))
+
+
+def srt_listener_uri(port):
+    uri = f"srt://:{port}?mode=listener"
+
+    if streaming_settings:
+        uri += f"&{streaming_settings}"
+
+    return uri
+
 
 def build_audio_pipeline():
+    require_config()
+
+    rtp_caps = (
+        f"application/x-rtp,"
+        f"media=audio,"
+        f"clock-rate={clock_rate},"
+        f"encoding-name={encoding_name},"
+        f"channels={channels}"
+    )
+
     pipeline = f"""
-        srtsrc name=a_send_tn uri=srt://:{audio_send_tn}?mode=listener wait-for-connection=false ! 
-          queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
-          rtpjitterbuffer latency=200 do-lost=true !
-          rtpL16depay !
-          tee name=tee_tn
+        srtsrc name=a_send_tn
+          uri="{srt_listener_uri(audio_send_tn)}"
+          wait-for-connection=false
+          ! queue
+          ! {rtp_caps}
+          ! tee name=tee_tn
 
-        srtsrc name=a_send_dk uri=srt://:{audio_send_dk}?mode=listener wait-for-connection=false !
-          queue !
-          application/x-rtp,media=audio,clock-rate={clock_rate},encoding-name={encoding_name},channels={channels} !
-          rtpjitterbuffer latency=200 do-lost=true !
-          rtpL16depay !
-          tee name=tee_dk
+        srtsrc name=a_send_dk
+          uri="{srt_listener_uri(audio_send_dk)}"
+          wait-for-connection=false
+          ! queue
+          ! {rtp_caps}
+          ! tee name=tee_dk
 
-        tee_tn. ! queue !
-          audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
-          rtpL16pay !
-          srtsink name=a_recv_dk uri=srt://:{audio_receive_dk}?mode=listener wait-for-connection=false
+        tee_tn.
+          ! queue
+          ! srtsink name=a_recv_dk
+              uri="{srt_listener_uri(audio_receive_dk)}"
+              wait-for-connection=false
 
-        tee_dk. ! queue !
-          audio/x-raw,format={audio_format},channels={channels},rate={clock_rate} !
-          rtpL16pay !
-          srtsink name=a_recv_tn uri=srt://:{audio_receive_tn}?mode=listener wait-for-connection=false
-          
-
+        tee_dk.
+          ! queue
+          ! srtsink name=a_recv_tn
+              uri="{srt_listener_uri(audio_receive_tn)}"
+              wait-for-connection=false
     """
+
     return pipeline.strip()
 
 
