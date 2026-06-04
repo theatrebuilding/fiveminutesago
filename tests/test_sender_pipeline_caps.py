@@ -107,6 +107,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertIn("identity name=remote_inbound signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=playback_probe_reference signal-handoffs=true silent=true", pipeline)
         self.assertIn("rtpjitterbuffer latency=200 do-lost=true", pipeline)
+        self.assertIn("rtpL16pay mtu=600", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16LE", pipeline)
         self.assertIn("capsfilter caps=audio/x-raw,format=S16BE", pipeline)
         self.assertIn("max-size-time=500000000", pipeline)

@@ -136,8 +136,7 @@ video:
   alignment: 7
 
 webrtcdsp_settings:
-  # These settings are applied by the sender-side audio capture pipeline in production/1_sender/send.py
-  # and by the standalone production/1_sender/send_audio.py pipeline.
+  # These settings are applied by the sender-side audio capture pipeline in production/1_sender/send.py.
   # For AEC to work, the same sender Pi must both play the remote audio and capture the local microphone.
   compression-gain-db: 5               # Sets the maximum gain the digital compression stage may apply, in dB.
   delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.

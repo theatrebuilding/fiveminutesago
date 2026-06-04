@@ -535,7 +535,7 @@ class SenderRuntime:
                 ! audioconvert
                 ! capsfilter caps=audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
                 ! identity name=l16_outbound signal-handoffs=true silent=true
-                ! rtpL16pay
+                ! rtpL16pay mtu=600
                 ! srtsink wait-for-connection=false
                     uri="srt://{self.server_ip}:{self.audio_send_port}?mode=caller&{streaming_settings_audio}"
 
