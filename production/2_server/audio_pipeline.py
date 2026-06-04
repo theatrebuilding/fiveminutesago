@@ -19,7 +19,7 @@ audio_receive_dk    = cfg.get("ports", {}).get("audio_receive_dk")
 audio_receive_tn    = cfg.get("ports", {}).get("audio_receive_tn")
 
 streaming_settings  = cfg.get("streaming_settings_audio", "")
-clock_rate          = cfg.get("audio", {}).get("rate", 32000)
+clock_rate          = cfg.get("audio", {}).get("rate", 48000)
 channels            = cfg.get("audio", {}).get("channels", 2)
 encoding_name       = cfg.get("audio", {}).get("encoding_name", "L16")
 audio_format        = cfg.get("audio", {}).get("format", "S16BE") 
