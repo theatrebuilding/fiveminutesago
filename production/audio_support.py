@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -72,6 +73,7 @@ WEBRTC_DSP_INT_KEYS = {
     "target-level-dbfs",
     "voice-detection-frame-size-ms",
 }
+ALSA_HW_DEVICE_PATTERN = re.compile(r"^hw:(?P<card>\d+),(?P<device>\d+)$")
 
 
 def gst_escape(value: Any) -> str:
@@ -79,14 +81,19 @@ def gst_escape(value: Any) -> str:
 
 
 def alsa_runtime_device(value: Any) -> str:
-    """Return the exact ALSA device string to open at runtime.
+    """Return the ALSA device string to open at runtime.
 
-    Keep `hw:*` devices as `hw:*` so ALSA cannot silently insert a plug-layer
-    sample-rate, channel, or format conversion. If a selected hardware device
-    cannot open with the requested caps, the runtime should fail loudly.
+    UI-discovered devices are presented as stable `hw:CARD,DEVICE` names, but
+    the runtime opens those through ALSA's plug layer for better USB soundcard
+    compatibility. This lets ALSA adapt local hardware format/rate/channel
+    details while the GStreamer transport caps stay fixed and simple.
     """
 
-    return str(value or "default").strip() or "default"
+    device = str(value or "default").strip() or "default"
+    match = ALSA_HW_DEVICE_PATTERN.match(device)
+    if match is None:
+        return device
+    return f"plughw:{match.group('card')},{match.group('device')}"
 
 
 def validate_audio_rate(audio_rate: Any) -> int:

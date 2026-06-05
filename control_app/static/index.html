@@ -55,7 +55,7 @@
               <select id="audio-device-select">
                 <option value="">No audio input</option>
               </select>
-              <p id="audio-device-message" class="field-help">If nothing is selected, sender audio stays disabled.</p>
+              <p id="audio-device-message" class="field-help">Selected hardware inputs are opened through ALSA compatibility mode so different USB soundcards are less likely to break the stream.</p>
             </label>
 
             <label id="sender-capture-pair-field" class="field hidden">
@@ -99,7 +99,7 @@
               <select id="sender-playback-device-select">
                 <option value="__audio_playback_default__">Default output from config</option>
               </select>
-              <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender playback modes.</p>
+              <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender playback modes. Hardware outputs are opened through ALSA compatibility mode.</p>
             </label>
 
             <label id="sender-playback-output-pair-field" class="field hidden">

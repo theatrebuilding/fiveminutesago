@@ -458,7 +458,7 @@ class SenderRuntime:
         print(f"[Sender] Using audio source: {source_label}", flush=True)
         print(
             f"[Sender] Audio device/transport rate: {device_audio_rate} Hz "
-            "(no ALSA plug or audioresample rate conversion).",
+            "(selected hw devices open through ALSA plug compatibility; no GStreamer audioresample).",
             flush=True,
         )
         if uses_dsp:

@@ -384,6 +384,9 @@ function deviceDetailsMessage(details, fallback) {
   if (details?.rates?.length) {
     parts.push(`rates: ${details.rates.join(", ")} Hz`);
   }
+  if (details?.runtime_device && details.runtime_device !== details.device) {
+    parts.push(`opens as ${details.runtime_device} for compatibility`);
+  }
   const warning = details?.warnings?.length ? ` ${details.warnings.join(" ")}` : "";
   return `${parts.length ? parts.join(" • ") : fallback}${warning}`;
 }

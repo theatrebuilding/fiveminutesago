@@ -57,7 +57,7 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         self.assertIn("capsfilter", command)
         self.assertIn("caps=audio/x-raw,channels=2,rate=48000", command)
         self.assertNotIn("audio", command)
-        self.assertIn("device=hw:3,0", command)
+        self.assertIn("device=plughw:3,0", command)
 
     def test_multichannel_playback_preflight_keeps_mix_matrix_as_one_property(self) -> None:
         service = _runtime_service()
@@ -108,7 +108,7 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         self.assertIn("capsfilter caps=audio/x-raw,channels=2,rate=48000", error)
         self.assertIn(" ! ", error)
         self.assertNotIn("'!'", error)
-        self.assertIn("device=hw:3,0", error)
+        self.assertIn("device=plughw:3,0", error)
 
     def test_restore_preflight_can_skip_capture_open_when_fallback_owns_mic(self) -> None:
         service = _runtime_service()

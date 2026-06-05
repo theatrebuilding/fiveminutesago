@@ -100,7 +100,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertIn("webrtcdsp probe=playback_probe", pipeline)
-        self.assertIn('alsasink device="hw:3,0" async=false', pipeline)
+        self.assertIn('alsasink device="plughw:3,0" async=false', pipeline)
         self.assertIn("mpegtsmux name=av_mux alignment=7 ignore-inactive-pads=true", pipeline)
         self.assertIn("identity name=capture_after_dsp signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=l16_outbound signal-handoffs=true silent=true", pipeline)
@@ -150,7 +150,7 @@ class SenderPipelineCapsTests(unittest.TestCase):
             pipeline = runtime.build_pipeline()
 
         self.assertIn("srtsrc uri=\"srt://100.119.85.108:8808?mode=caller", pipeline)
-        self.assertIn('alsasink device="hw:3,0" async=false', pipeline)
+        self.assertIn('alsasink device="plughw:3,0" async=false', pipeline)
         self.assertIn("identity name=remote_inbound signal-handoffs=true silent=true", pipeline)
         self.assertIn("identity name=playback_probe_reference signal-handoffs=true silent=true", pipeline)
         self.assertIn("rtpjitterbuffer latency=200 do-lost=true", pipeline)
