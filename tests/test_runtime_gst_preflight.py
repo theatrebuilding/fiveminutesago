@@ -82,7 +82,11 @@ class RuntimeGstPreflightTests(unittest.TestCase):
         matrix_args = [arg for arg in command if arg.startswith("matrix=")]
         self.assertEqual(len(matrix_args), 1)
         self.assertIn("<(double)1.0, (double)0.0>", matrix_args[0])
-        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=10,rate=48000", command)
+        self.assertIn("channel-mask=0", command)
+        self.assertIn(
+            "caps=audio/x-raw,format=S16LE,layout=interleaved,channels=10,rate=48000,channel-mask=(bitmask)0x0",
+            command,
+        )
 
     def test_preflight_failure_includes_exact_command_for_diagnostics(self) -> None:
         service = _runtime_service()

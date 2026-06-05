@@ -175,10 +175,16 @@ class SenderPipelineCapsTests(unittest.TestCase):
         with patch.object(sender_send, "load_config", return_value=_config()):
             pipeline = runtime.build_pipeline()
 
-        self.assertIn("capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=48000", pipeline)
+        self.assertIn(
+            "capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=48000,channel-mask=(bitmask)0x0",
+            pipeline,
+        )
         self.assertIn("audiomixmatrix in-channels=12 out-channels=2", pipeline)
-        self.assertIn("audiomixmatrix in-channels=2 out-channels=10", pipeline)
-        self.assertIn("capsfilter caps=audio/x-raw,layout=interleaved,channels=10,rate=48000", pipeline)
+        self.assertIn("audiomixmatrix in-channels=2 out-channels=10 channel-mask=0", pipeline)
+        self.assertIn(
+            "capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels=10,rate=48000,channel-mask=(bitmask)0x0",
+            pipeline,
+        )
 
 
 def _config() -> dict:

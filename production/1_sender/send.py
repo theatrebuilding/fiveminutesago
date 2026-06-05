@@ -24,6 +24,7 @@ if root_dir not in sys.path:
 
 from audio_support import (
     alsa_runtime_device,
+    build_gst_audio_raw_caps,
     build_input_pair_mix_element,
     build_output_pair_mix_element,
     build_webrtcdsp_properties,
@@ -413,6 +414,36 @@ class SenderRuntime:
         playback_mix_element = build_output_pair_mix_element(playback_pair, playback_hardware_channels)
         playback_pair_segment = f"! {playback_mix_element}" if playback_mix_element else ""
         playback_output_channel_count = playback_hardware_channels if playback_mix_element else channels
+        remote_stereo_caps = build_gst_audio_raw_caps(
+            audio_format="S16LE",
+            channels=channels,
+            rate=transport_audio_rate,
+        )
+        playback_stereo_caps = build_gst_audio_raw_caps(
+            audio_format="S16LE",
+            channels=channels,
+            rate=device_audio_rate,
+        )
+        playback_hardware_caps = build_gst_audio_raw_caps(
+            audio_format="S16LE",
+            channels=playback_output_channel_count,
+            rate=device_audio_rate,
+        )
+        capture_hardware_caps = build_gst_audio_raw_caps(
+            audio_format="S16LE",
+            channels=capture_input_channel_count,
+            rate=device_audio_rate,
+        )
+        capture_stereo_caps = build_gst_audio_raw_caps(
+            audio_format="S16LE",
+            channels=channels,
+            rate=transport_audio_rate,
+        )
+        l16_transport_caps = build_gst_audio_raw_caps(
+            audio_format="S16BE",
+            channels=channels,
+            rate=transport_audio_rate,
+        )
         playback_branch = ""
         if playback_enabled:
             audio_delay_ns = self.audio_delay_ms * 1_000_000
@@ -424,16 +455,16 @@ class SenderRuntime:
                     ! rtpjitterbuffer latency=200 do-lost=true
                     ! rtpL16depay
                     ! audioconvert
-                    ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                    ! capsfilter caps={remote_stereo_caps}
                     ! identity name=remote_inbound signal-handoffs=true silent=true
                     ! queue name=audio_playback_delay_queue max-size-buffers=0 max-size-bytes=0 max-size-time={DELAY_QUEUE_MAX_TIME_NS} min-threshold-time={audio_delay_ns}
                     {echo_probe_segment}
                     ! identity name=playback_probe_reference signal-handoffs=true silent=true
                     ! {playback_output_queue}
                     ! audioconvert
-                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={channels},rate={device_audio_rate}
+                    ! capsfilter caps={playback_stereo_caps}
                     {playback_pair_segment}
-                    ! capsfilter caps=audio/x-raw,layout=interleaved,channels={playback_output_channel_count},rate={device_audio_rate}
+                    ! capsfilter caps={playback_hardware_caps}
                     ! alsasink device="{gst_escape(runtime_playback_device)}" async=false
             """
 
@@ -524,16 +555,16 @@ class SenderRuntime:
             {audio_source}
                 ! {audio_capture_queue}
                 ! audioconvert
-                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={capture_input_channel_count},rate={device_audio_rate}
+                ! capsfilter caps={capture_hardware_caps}
                 {capture_pair_segment}
-                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps={capture_stereo_caps}
                 {dsp_segment}
                 ! identity name=capture_after_dsp signal-handoffs=true silent=true
                 ! tee name=audio_capture_tee
 
             audio_capture_tee. ! {audio_l16_output_queue}
                 ! audioconvert
-                ! capsfilter caps=audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps={l16_transport_caps}
                 ! identity name=l16_outbound signal-handoffs=true silent=true
                 ! rtpL16pay mtu=600
                 ! srtsink wait-for-connection=false
@@ -541,7 +572,7 @@ class SenderRuntime:
 
             audio_capture_tee. ! {audio_aac_output_queue}
                 ! audioconvert
-                ! capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={transport_audio_rate}
+                ! capsfilter caps={capture_stereo_caps}
                 ! {aac_encoder}
                 ! aacparse
                 ! {audio_mux_queue}

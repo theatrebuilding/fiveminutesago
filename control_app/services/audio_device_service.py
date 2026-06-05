@@ -13,9 +13,11 @@ from typing import Any
 from production.audio_support import (
     COMMON_AUDIO_HARDWARE_RATES,
     alsa_runtime_device,
+    build_gst_audio_raw_caps,
     build_input_pair_mix_element,
-    build_mono_output_channel_mix_element,
+    build_output_pair_mix_element,
     channel_pairs_for_count,
+    format_gst_mix_matrix,
     normalize_audio_channel_pair,
     resolve_audio_hardware_channels,
 )
@@ -157,9 +159,9 @@ class AudioDeviceService:
         )
         device = alsa_runtime_device(settings.get("device", "default"))
         audio_rate = _test_audio_rate(settings)
+        output_mix = build_output_pair_mix_element(pair, hardware_channels)
         commands: list[list[str]] = []
-        for output_channel in pair:
-            output_mix = build_mono_output_channel_mix_element(output_channel, hardware_channels)
+        for side in ("left", "right"):
             command = [
                 "gst-launch-1.0",
                 "-q",
@@ -172,22 +174,25 @@ class AudioDeviceService:
                 "audioconvert",
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=1,rate={audio_rate}",
+                f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=2, rate=audio_rate)}",
                 "!",
             ]
-            command.extend(shlex.split(output_mix))
+            command.extend(shlex.split(_stereo_side_matrix_element(side)))
             command.extend(
                 [
                     "!",
                     "capsfilter",
-                    f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
+                    f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=2, rate=audio_rate)}",
                 ]
             )
+            if output_mix:
+                command.append("!")
+                command.extend(shlex.split(output_mix))
             command.extend(
                 [
                     "!",
                     "capsfilter",
-                    f"caps=audio/x-raw,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
+                    f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=hardware_channels, rate=audio_rate)}",
                     "!",
                     "alsasink",
                     f"device={device}",
@@ -262,7 +267,7 @@ class AudioDeviceService:
             "do-timestamp=true",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
+            f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=hardware_channels, rate=audio_rate)}",
         ]
         if capture_mix:
             command.append("!")
@@ -271,7 +276,7 @@ class AudioDeviceService:
             [
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=2, rate=audio_rate)}",
                 "!",
                 "fdsink",
                 "fd=1",
@@ -491,6 +496,17 @@ def _test_audio_rate(settings: dict[str, Any]) -> int:
         return int(audio.get("rate", DEFAULT_TEST_AUDIO_RATE))
     except (TypeError, ValueError):
         return DEFAULT_TEST_AUDIO_RATE
+
+
+def _stereo_side_matrix_element(side: str) -> str:
+    if side == "right":
+        rows = [[0.0, 0.0], [0.0, 1.0]]
+    else:
+        rows = [[1.0, 0.0], [0.0, 0.0]]
+    return (
+        'audiomixmatrix in-channels=2 out-channels=2 '
+        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+    )
 
 
 def _pcm_s16le_pair_levels(

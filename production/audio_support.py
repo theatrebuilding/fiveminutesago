@@ -8,6 +8,7 @@ SUPPORTED_WEBRTC_SAMPLE_RATES = {8000, 16000, 32000, 48000}
 COMMON_AUDIO_HARDWARE_RATES = [8000, 16000, 32000, 44100, 48000, 88200, 96000]
 DEFAULT_AUDIO_CHANNEL_PAIR = [1, 2]
 MAX_AUDIO_HARDWARE_CHANNELS = 64
+GST_UNPOSITIONED_CHANNEL_MASK = "(bitmask)0x0"
 SUPPORTED_MPEGTS_LPCM_SAMPLE_RATES = {48000, 96000}
 SUPPORTED_MPEGTS_LPCM_FORMATS = {
     "S16BE": 16,
@@ -201,6 +202,37 @@ def resolve_audio_hardware_channels(
     return normalize_audio_hardware_channels(value, pair, field_name)
 
 
+def build_gst_audio_raw_caps(
+    *,
+    channels: Any,
+    rate: Any,
+    audio_format: str | None = None,
+    layout: str = "interleaved",
+    unpositioned_multichannel: bool = True,
+) -> str:
+    try:
+        channel_count = int(channels)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"channels must be an integer; got {channels!r}.") from exc
+    try:
+        sample_rate = int(rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"rate must be an integer; got {rate!r}.") from exc
+    fields = ["audio/x-raw"]
+    if audio_format:
+        fields.append(f"format={audio_format}")
+    fields.extend(
+        [
+            f"layout={layout}",
+            f"channels={channel_count}",
+            f"rate={sample_rate}",
+        ]
+    )
+    if unpositioned_multichannel and channel_count > 2:
+        fields.append(f"channel-mask={GST_UNPOSITIONED_CHANNEL_MASK}")
+    return ",".join(fields)
+
+
 def channel_pairs_for_count(channel_count: Any, supported_counts: Any = None) -> list[dict[str, Any]]:
     try:
         count = int(channel_count)
@@ -244,30 +276,7 @@ def build_output_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> 
     rows[pair[1] - 1][1] = 1.0
     return (
         f'audiomixmatrix in-channels=2 out-channels={output_channels} '
-        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
-    )
-
-
-def build_mono_output_channel_mix_element(output_channel: Any, hardware_channels: Any) -> str:
-    try:
-        channel = int(output_channel)
-    except (TypeError, ValueError) as exc:
-        raise ValueError("output_channel must be a positive integer.") from exc
-    if channel < 1:
-        raise ValueError("output_channel must be a positive integer.")
-    pair_start = channel if channel % 2 else channel - 1
-    output_channels = normalize_audio_hardware_channels(
-        hardware_channels,
-        [pair_start, pair_start + 1],
-        "output hardware_channels",
-    )
-    if channel > output_channels:
-        raise ValueError(f"output_channel must be between 1 and {output_channels}.")
-    rows = [[0.0] for _ in range(output_channels)]
-    rows[channel - 1][0] = 1.0
-    return (
-        f'audiomixmatrix in-channels=1 out-channels={output_channels} '
-        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+        f'channel-mask=0 matrix="{format_gst_mix_matrix(rows)}"'
     )
 
 

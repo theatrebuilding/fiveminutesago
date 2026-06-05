@@ -4,8 +4,8 @@ import unittest
 
 from production.audio_support import (
     alsa_runtime_device,
+    build_gst_audio_raw_caps,
     build_input_pair_mix_element,
-    build_mono_output_channel_mix_element,
     build_output_pair_mix_element,
     channel_pairs_for_count,
     choose_audio_hardware_channels,
@@ -66,16 +66,20 @@ class AudioRoutingTests(unittest.TestCase):
         self.assertIn("audiomixmatrix", element)
         self.assertIn("in-channels=2", element)
         self.assertIn("out-channels=8", element)
+        self.assertIn("channel-mask=0", element)
         self.assertIn("<(double)1.0, (double)0.0>", element)
         self.assertIn("<(double)0.0, (double)1.0>", element)
 
-    def test_mono_output_matrix_targets_one_physical_channel(self) -> None:
-        element = build_mono_output_channel_mix_element(2, 4)
+    def test_raw_caps_mark_multichannel_hardware_as_unpositioned(self) -> None:
+        self.assertEqual(
+            build_gst_audio_raw_caps(audio_format="S16LE", channels=10, rate=48000),
+            "audio/x-raw,format=S16LE,layout=interleaved,channels=10,rate=48000,channel-mask=(bitmask)0x0",
+        )
+        self.assertEqual(
+            build_gst_audio_raw_caps(audio_format="S16LE", channels=2, rate=48000),
+            "audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate=48000",
+        )
 
-        self.assertIn("audiomixmatrix", element)
-        self.assertIn("in-channels=1", element)
-        self.assertIn("out-channels=4", element)
-        self.assertIn('matrix="<<(double)0.0>, <(double)1.0>', element)
 
     def test_default_stereo_pair_needs_no_matrix(self) -> None:
         self.assertEqual(build_input_pair_mix_element([1, 2], 2), "")

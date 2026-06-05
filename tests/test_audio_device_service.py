@@ -63,8 +63,14 @@ Capture:
             [arg for arg in commands[0] if arg.startswith("matrix=")][0],
             [arg for arg in commands[1] if arg.startswith("matrix=")][0],
         )
-        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=1,rate=48000", commands[0])
-        self.assertIn("caps=audio/x-raw,layout=interleaved,channels=10,rate=48000", commands[0])
+        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate=48000", commands[0])
+        self.assertIn("in-channels=2", commands[0])
+        self.assertIn("out-channels=10", commands[0])
+        self.assertIn("channel-mask=0", commands[0])
+        self.assertIn(
+            "caps=audio/x-raw,format=S16LE,layout=interleaved,channels=10,rate=48000,channel-mask=(bitmask)0x0",
+            commands[0],
+        )
         self.assertIn("alsasink", commands[0])
         self.assertIn("device=plughw:2,0", commands[0])
 
@@ -129,7 +135,10 @@ Capture:
 
         self.assertEqual(command[:3], ["gst-launch-1.0", "-q", "alsasrc"])
         self.assertIn("device=plughw:2,0", command)
-        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=96000", command)
+        self.assertIn(
+            "caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=96000,channel-mask=(bitmask)0x0",
+            command,
+        )
         self.assertIn("audiomixmatrix", command)
         self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate=96000", command)
         self.assertIn("fdsink", command)

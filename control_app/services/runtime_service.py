@@ -36,6 +36,7 @@ from .sender_recovery import (
 )
 from production.audio_support import (
     alsa_runtime_device,
+    build_gst_audio_raw_caps,
     build_input_pair_mix_element,
     build_output_pair_mix_element,
     normalize_audio_channel_pair,
@@ -1048,7 +1049,7 @@ class RuntimeService:
             "num-buffers=5",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}",
+            f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=channels, rate=audio_rate)}",
         ]
         if mix:
             command.append("!")
@@ -1057,7 +1058,7 @@ class RuntimeService:
             [
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=2, rate=audio_rate)}",
                 "!",
                 "fakesink",
                 "sync=false",
@@ -1089,7 +1090,7 @@ class RuntimeService:
             "audioconvert",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+            f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=2, rate=audio_rate)}",
         ]
         if mix:
             command.append("!")
@@ -1098,7 +1099,7 @@ class RuntimeService:
             [
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={output_channels},rate={audio_rate}",
+                f"caps={build_gst_audio_raw_caps(audio_format='S16LE', channels=output_channels, rate=audio_rate)}",
                 "!",
                 "alsasink",
                 f"device={device}",
