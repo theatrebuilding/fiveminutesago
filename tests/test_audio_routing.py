@@ -5,10 +5,12 @@ import unittest
 from production.audio_support import (
     alsa_runtime_device,
     build_input_pair_mix_element,
+    build_mono_output_channel_mix_element,
     build_output_pair_mix_element,
     channel_pairs_for_count,
     choose_audio_hardware_channels,
     normalize_audio_channel_pair,
+    resolve_audio_hardware_channels,
 )
 
 
@@ -33,10 +35,15 @@ class AudioRoutingTests(unittest.TestCase):
             ],
         )
 
-    def test_pair_generation_uses_smallest_supported_channel_count_for_pair(self) -> None:
-        self.assertEqual(choose_audio_hardware_channels([1, 2], [10, 12]), 10)
-        self.assertEqual(choose_audio_hardware_channels([3, 4], [2, 10, 12]), 10)
+    def test_pair_generation_uses_full_supported_hardware_layout_for_pair(self) -> None:
+        self.assertEqual(choose_audio_hardware_channels([1, 2], [10, 12]), 12)
+        self.assertEqual(choose_audio_hardware_channels([3, 4], [2, 10, 12]), 12)
+        self.assertEqual(channel_pairs_for_count(6, [2, 6])[0]["hardware_channels"], 6)
         self.assertEqual(channel_pairs_for_count(6, [2, 6])[1]["hardware_channels"], 6)
+
+    def test_supported_counts_override_stale_pair_width(self) -> None:
+        self.assertEqual(resolve_audio_hardware_channels(2, [1, 2], [10], "hardware_channels"), 10)
+        self.assertEqual(resolve_audio_hardware_channels(4, [3, 4], [2, 12], "hardware_channels"), 12)
 
     def test_hw_devices_use_plug_layer_for_runtime_compatibility(self) -> None:
         self.assertEqual(alsa_runtime_device("hw:2,0"), "plughw:2,0")
@@ -61,6 +68,14 @@ class AudioRoutingTests(unittest.TestCase):
         self.assertIn("out-channels=8", element)
         self.assertIn("<(double)1.0, (double)0.0>", element)
         self.assertIn("<(double)0.0, (double)1.0>", element)
+
+    def test_mono_output_matrix_targets_one_physical_channel(self) -> None:
+        element = build_mono_output_channel_mix_element(2, 4)
+
+        self.assertIn("audiomixmatrix", element)
+        self.assertIn("in-channels=1", element)
+        self.assertIn("out-channels=4", element)
+        self.assertIn('matrix="<<(double)0.0>, <(double)1.0>', element)
 
     def test_default_stereo_pair_needs_no_matrix(self) -> None:
         self.assertEqual(build_input_pair_mix_element([1, 2], 2), "")

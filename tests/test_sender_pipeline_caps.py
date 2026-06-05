@@ -157,6 +157,29 @@ class SenderPipelineCapsTests(unittest.TestCase):
         self.assertNotIn("webrtcdsp", pipeline)
         self.assertNotIn("webrtcechoprobe", pipeline)
 
+    def test_multichannel_sender_pipeline_routes_default_pair_through_full_hardware_layout(self) -> None:
+        runtime = sender_send.SenderRuntime(
+            country="tn",
+            video_device="/host-dev/video0",
+            audio_enabled=True,
+            audio_device="hw:3,0",
+            playback_device="hw:3,0",
+            capture_input_channels="1/2",
+            capture_hardware_channels=12,
+            playback_output_channels="1/2",
+            playback_hardware_channels=10,
+            sender_audio_mode="aec",
+            preview_pattern="/tmp/sender-preview-%05d.jpg",
+        )
+
+        with patch.object(sender_send, "load_config", return_value=_config()):
+            pipeline = runtime.build_pipeline()
+
+        self.assertIn("capsfilter caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=48000", pipeline)
+        self.assertIn("audiomixmatrix in-channels=12 out-channels=2", pipeline)
+        self.assertIn("audiomixmatrix in-channels=2 out-channels=10", pipeline)
+        self.assertIn("capsfilter caps=audio/x-raw,layout=interleaved,channels=10,rate=48000", pipeline)
+
 
 def _config() -> dict:
     return {

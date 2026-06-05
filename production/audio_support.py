@@ -175,8 +175,30 @@ def choose_audio_hardware_channels(channel_pair: Any, supported_counts: Any = No
             if minimum <= channels <= MAX_AUDIO_HARDWARE_CHANNELS:
                 candidates.append(channels)
         if candidates:
-            return min(candidates)
+            return max(candidates)
     return minimum
+
+
+def resolve_audio_hardware_channels(
+    value: Any,
+    channel_pair: Any,
+    supported_counts: Any = None,
+    field_name: str = "hardware_channels",
+) -> int:
+    """Resolve the ALSA channel count to request for an explicitly routed pair.
+
+    When a device probe reports supported counts, prefer the largest valid
+    hardware layout instead of a stale/minimum pair width. Multichannel USB
+    interfaces often need the full capture/playback layout opened through
+    `plughw` so channels map 1:1 and ALSA does not collapse/remap a stereo
+    open before GStreamer can route the selected physical pair.
+    """
+
+    pair = normalize_audio_channel_pair(channel_pair, field_name.replace("hardware_channels", "channels"))
+    if supported_counts:
+        chosen = choose_audio_hardware_channels(pair, supported_counts)
+        return normalize_audio_hardware_channels(chosen, pair, field_name)
+    return normalize_audio_hardware_channels(value, pair, field_name)
 
 
 def channel_pairs_for_count(channel_count: Any, supported_counts: Any = None) -> list[dict[str, Any]]:
@@ -222,6 +244,29 @@ def build_output_pair_mix_element(channel_pair: Any, hardware_channels: Any) -> 
     rows[pair[1] - 1][1] = 1.0
     return (
         f'audiomixmatrix in-channels=2 out-channels={output_channels} '
+        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+    )
+
+
+def build_mono_output_channel_mix_element(output_channel: Any, hardware_channels: Any) -> str:
+    try:
+        channel = int(output_channel)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("output_channel must be a positive integer.") from exc
+    if channel < 1:
+        raise ValueError("output_channel must be a positive integer.")
+    pair_start = channel if channel % 2 else channel - 1
+    output_channels = normalize_audio_hardware_channels(
+        hardware_channels,
+        [pair_start, pair_start + 1],
+        "output hardware_channels",
+    )
+    if channel > output_channels:
+        raise ValueError(f"output_channel must be between 1 and {output_channels}.")
+    rows = [[0.0] for _ in range(output_channels)]
+    rows[channel - 1][0] = 1.0
+    return (
+        f'audiomixmatrix in-channels=1 out-channels={output_channels} '
         f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
     )
 

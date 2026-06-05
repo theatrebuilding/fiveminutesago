@@ -331,6 +331,7 @@ function ensurePairOption(select, channels) {
   option.value = value;
   option.textContent = `Configured channels ${value}`;
   option.dataset.hardwareChannels = String(maxPairChannel(value));
+  option.dataset.probedHardwareChannels = "false";
   select.appendChild(option);
 }
 
@@ -353,10 +354,10 @@ function setSelectedPairHardwareChannels(select, hardwareChannels) {
   }
   const normalized = String(parsed);
   const selectedOption = select.selectedOptions?.[0];
-  if (selectedOption) {
+  if (selectedOption && selectedOption.dataset.probedHardwareChannels !== "true") {
     selectedOption.dataset.hardwareChannels = normalized;
   }
-  select.dataset.hardwareChannels = normalized;
+  updatePairHardwareDataset(select);
 }
 
 function renderPairOptions(select, details, selectedChannels) {
@@ -371,6 +372,7 @@ function renderPairOptions(select, details, selectedChannels) {
     option.dataset.hardwareChannels = String(
       Number.parseInt(pair.hardware_channels || maxPairChannel(value), 10)
     );
+    option.dataset.probedHardwareChannels = details?.pairs?.length ? "true" : "false";
     select.appendChild(option);
   });
   setPairSelectValue(select, selectedValue);

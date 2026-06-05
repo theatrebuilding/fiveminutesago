@@ -50,7 +50,8 @@ Capture:
                 "device": "hw:2,0",
                 "rate": 48000,
                 "output_channels": [5, 6],
-                "hardware_channels": 10,
+                "hardware_channels": 2,
+                "supported_channel_counts": [10],
             }
         )
 
@@ -62,6 +63,7 @@ Capture:
             [arg for arg in commands[0] if arg.startswith("matrix=")][0],
             [arg for arg in commands[1] if arg.startswith("matrix=")][0],
         )
+        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=1,rate=48000", commands[0])
         self.assertIn("caps=audio/x-raw,layout=interleaved,channels=10,rate=48000", commands[0])
         self.assertIn("alsasink", commands[0])
         self.assertIn("device=plughw:2,0", commands[0])
@@ -119,6 +121,7 @@ Capture:
                 "device": "hw:2,0",
                 "rate": 96000,
                 "input_channels": [3, 4],
+                "hardware_channels": 4,
                 "supported_channel_counts": [2, 12],
                 "duration_seconds": 99,
             }

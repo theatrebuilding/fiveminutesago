@@ -36,6 +36,7 @@ from .sender_recovery import (
 )
 from production.audio_support import (
     alsa_runtime_device,
+    build_input_pair_mix_element,
     build_output_pair_mix_element,
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
@@ -1035,6 +1036,10 @@ class RuntimeService:
             return "capture preflight failed: gst-launch-1.0 unavailable"
         device = alsa_runtime_device(capture_device)
         channels = request.sender_capture_hardware_channels
+        mix = build_input_pair_mix_element(
+            request.sender_capture_input_channels,
+            request.sender_capture_hardware_channels,
+        )
         command = [
             "gst-launch-1.0",
             "-q",
@@ -1043,11 +1048,21 @@ class RuntimeService:
             "num-buffers=5",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,channels={channels},rate={audio_rate}",
-            "!",
-            "fakesink",
-            "sync=false",
+            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate}",
         ]
+        if mix:
+            command.append("!")
+            command.extend(shlex.split(mix))
+        command.extend(
+            [
+                "!",
+                "capsfilter",
+                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                "!",
+                "fakesink",
+                "sync=false",
+            ]
+        )
         return self._run_gst_preflight(command, "capture")
 
     def _gst_playback_open_error(
@@ -1074,7 +1089,7 @@ class RuntimeService:
             "audioconvert",
             "!",
             "capsfilter",
-            f"caps=audio/x-raw,channels=2,rate={audio_rate}",
+            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
         ]
         if mix:
             command.append("!")
@@ -1083,7 +1098,7 @@ class RuntimeService:
             [
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,channels={output_channels},rate={audio_rate}",
+                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={output_channels},rate={audio_rate}",
                 "!",
                 "alsasink",
                 f"device={device}",

@@ -14,12 +14,10 @@ from production.audio_support import (
     COMMON_AUDIO_HARDWARE_RATES,
     alsa_runtime_device,
     build_input_pair_mix_element,
-    build_output_pair_mix_element,
+    build_mono_output_channel_mix_element,
     channel_pairs_for_count,
-    choose_audio_hardware_channels,
-    format_gst_mix_matrix,
     normalize_audio_channel_pair,
-    normalize_audio_hardware_channels,
+    resolve_audio_hardware_channels,
 )
 
 
@@ -151,20 +149,17 @@ class AudioDeviceService:
 
     def build_speaker_test_commands(self, settings: dict[str, Any]) -> list[list[str]]:
         pair = normalize_audio_channel_pair(settings.get("output_channels", [1, 2]), "output_channels")
-        default_hardware_channels = choose_audio_hardware_channels(
+        hardware_channels = resolve_audio_hardware_channels(
+            settings.get("hardware_channels"),
             pair,
             settings.get("supported_channel_counts"),
-        )
-        hardware_channels = normalize_audio_hardware_channels(
-            settings.get("hardware_channels", default_hardware_channels),
-            pair,
             "hardware_channels",
         )
         device = alsa_runtime_device(settings.get("device", "default"))
         audio_rate = _test_audio_rate(settings)
-        output_mix = build_output_pair_mix_element(pair, hardware_channels)
         commands: list[list[str]] = []
-        for side in ("left", "right"):
+        for output_channel in pair:
+            output_mix = build_mono_output_channel_mix_element(output_channel, hardware_channels)
             command = [
                 "gst-launch-1.0",
                 "-q",
@@ -177,20 +172,17 @@ class AudioDeviceService:
                 "audioconvert",
                 "!",
                 "capsfilter",
-                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=1,rate={audio_rate}",
                 "!",
             ]
-            command.extend(shlex.split(_stereo_side_matrix_element(side)))
+            command.extend(shlex.split(output_mix))
             command.extend(
                 [
                     "!",
                     "capsfilter",
-                    f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                    f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
                 ]
             )
-            if output_mix:
-                command.append("!")
-                command.extend(shlex.split(output_mix))
             command.extend(
                 [
                     "!",
@@ -250,10 +242,10 @@ class AudioDeviceService:
     def build_capture_level_command(self, settings: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
         pair = normalize_audio_channel_pair(settings.get("input_channels", [1, 2]), "input_channels")
         supported_counts = settings.get("supported_channel_counts")
-        default_hardware_channels = choose_audio_hardware_channels(pair, supported_counts)
-        hardware_channels = normalize_audio_hardware_channels(
-            settings.get("hardware_channels", default_hardware_channels),
+        hardware_channels = resolve_audio_hardware_channels(
+            settings.get("hardware_channels"),
             pair,
+            supported_counts,
             "hardware_channels",
         )
         duration_seconds = int(settings.get("duration_seconds") or 10)
@@ -499,17 +491,6 @@ def _test_audio_rate(settings: dict[str, Any]) -> int:
         return int(audio.get("rate", DEFAULT_TEST_AUDIO_RATE))
     except (TypeError, ValueError):
         return DEFAULT_TEST_AUDIO_RATE
-
-
-def _stereo_side_matrix_element(side: str) -> str:
-    if side == "right":
-        rows = [[0.0, 0.0], [0.0, 1.0]]
-    else:
-        rows = [[1.0, 0.0], [0.0, 0.0]]
-    return (
-        'audiomixmatrix in-channels=2 out-channels=2 '
-        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
-    )
 
 
 def _pcm_s16le_pair_levels(
