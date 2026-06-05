@@ -42,7 +42,7 @@ Capture:
         self.assertEqual(parsed["channel_counts"], set(range(1, 9)))
         self.assertEqual(parsed["rates"], {8000, 16000, 32000, 44100, 48000})
 
-    def test_speaker_test_commands_use_runtime_device_and_selected_channels(self) -> None:
+    def test_speaker_test_commands_use_production_equivalent_playback_path(self) -> None:
         service = AudioDeviceService()
 
         commands = service.build_speaker_test_commands(
@@ -54,13 +54,17 @@ Capture:
             }
         )
 
-        self.assertEqual(commands[0][:3], ["speaker-test", "-D", "plughw:2,0"])
-        self.assertNotIn("-r", commands[0])
-        self.assertNotIn("-r", commands[1])
-        self.assertIn("-c", commands[0])
-        self.assertEqual(commands[0][commands[0].index("-c") + 1], "10")
-        self.assertEqual(commands[0][commands[0].index("-s") + 1], "5")
-        self.assertEqual(commands[1][commands[1].index("-s") + 1], "6")
+        self.assertEqual(len(commands), 2)
+        self.assertEqual(commands[0][:3], ["gst-launch-1.0", "-q", "audiotestsrc"])
+        self.assertIn("audiomixmatrix", commands[0])
+        self.assertIn("audiomixmatrix", commands[1])
+        self.assertNotEqual(
+            [arg for arg in commands[0] if arg.startswith("matrix=")][0],
+            [arg for arg in commands[1] if arg.startswith("matrix=")][0],
+        )
+        self.assertIn("caps=audio/x-raw,layout=interleaved,channels=10,rate=48000", commands[0])
+        self.assertIn("alsasink", commands[0])
+        self.assertIn("device=plughw:2,0", commands[0])
 
     def test_playback_test_bounds_each_channel_and_continues_to_right(self) -> None:
         service = AudioDeviceService()
@@ -86,7 +90,8 @@ Capture:
             )
 
         self.assertTrue(result["ok"])
-        self.assertEqual([command[command.index("-s") + 1] for command in started_commands], ["1", "2"])
+        self.assertEqual(len(started_commands), 2)
+        self.assertTrue(all(command[:3] == ["gst-launch-1.0", "-q", "audiotestsrc"] for command in started_commands))
         self.assertEqual([process.terminated for process in processes], [True, True])
 
     def test_playback_test_still_fails_fast_on_speaker_error(self) -> None:
@@ -106,7 +111,7 @@ Capture:
                     }
                 )
 
-    def test_capture_level_command_uses_runtime_device_and_duration(self) -> None:
+    def test_capture_level_command_uses_production_equivalent_capture_path(self) -> None:
         service = AudioDeviceService()
 
         command, metadata = service.build_capture_level_command(
@@ -119,12 +124,15 @@ Capture:
             }
         )
 
-        self.assertEqual(command[:4], ["arecord", "-q", "-D", "plughw:2,0"])
-        self.assertIn("S16_LE", command)
-        self.assertNotIn("-r", command)
-        self.assertEqual(command[command.index("-c") + 1], "12")
-        self.assertEqual(command[command.index("-d") + 1], "10")
+        self.assertEqual(command[:3], ["gst-launch-1.0", "-q", "alsasrc"])
+        self.assertIn("device=plughw:2,0", command)
+        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=12,rate=96000", command)
+        self.assertIn("audiomixmatrix", command)
+        self.assertIn("caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate=96000", command)
+        self.assertIn("fdsink", command)
         self.assertEqual(metadata["input_channels"], [3, 4])
+        self.assertEqual(metadata["analysis_channels"], 2)
+        self.assertEqual(metadata["analysis_input_channels"], [1, 2])
 
     def test_pcm_s16le_pair_levels_reports_selected_input_pair(self) -> None:
         def sample(value: int) -> bytes:
@@ -162,7 +170,7 @@ class _TimeoutSpeakerProcess:
         if self._communicate_count == 1:
             raise subprocess.TimeoutExpired(self.command, timeout)
         self.returncode = -15
-        return "", f"terminated {self.command[self.command.index('-s') + 1]}"
+        return "", "terminated gst pipeline"
 
     def terminate(self) -> None:
         self.terminated = True

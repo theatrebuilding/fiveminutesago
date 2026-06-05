@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import shlex
 import subprocess
 import threading
 import time
@@ -12,8 +13,11 @@ from typing import Any
 from production.audio_support import (
     COMMON_AUDIO_HARDWARE_RATES,
     alsa_runtime_device,
+    build_input_pair_mix_element,
+    build_output_pair_mix_element,
     channel_pairs_for_count,
     choose_audio_hardware_channels,
+    format_gst_mix_matrix,
     normalize_audio_channel_pair,
     normalize_audio_hardware_channels,
 )
@@ -24,9 +28,10 @@ ALSA_CARD_PATTERN = re.compile(
 )
 ALSA_HW_PATTERN = re.compile(r"^hw:(?P<card>\d+),(?P<device>\d+)$")
 COMMON_AUDIO_RATES = COMMON_AUDIO_HARDWARE_RATES
-SPEAKER_TEST_CHANNEL_SECONDS = 1.5
+SPEAKER_TEST_CHANNEL_SECONDS = 2.0
 SPEAKER_TEST_SHUTDOWN_SECONDS = 1.0
 SPEAKER_TEST_CHANNEL_GAP_SECONDS = 0.15
+DEFAULT_TEST_AUDIO_RATE = 48000
 
 
 class AudioDeviceService:
@@ -102,7 +107,7 @@ class AudioDeviceService:
 
         outputs: list[str] = []
         for command in commands:
-            output = self._run_bounded_speaker_test(command)
+            output = self._run_bounded_gst_test(command)
             if output:
                 outputs.append(output)
             time.sleep(SPEAKER_TEST_CHANNEL_GAP_SECONDS)
@@ -114,7 +119,7 @@ class AudioDeviceService:
             "output": "\n".join(outputs),
         }
 
-    def _run_bounded_speaker_test(self, command: list[str]) -> str:
+    def _run_bounded_gst_test(self, command: list[str]) -> str:
         try:
             process = subprocess.Popen(
                 command,
@@ -123,7 +128,7 @@ class AudioDeviceService:
                 text=True,
             )
         except FileNotFoundError as exc:
-            raise RuntimeError("speaker-test is not available in this container.") from exc
+            raise RuntimeError("gst-launch-1.0 is not available in this container.") from exc
 
         try:
             stdout, stderr = process.communicate(timeout=SPEAKER_TEST_CHANNEL_SECONDS)
@@ -136,12 +141,12 @@ class AudioDeviceService:
                 stdout, stderr = process.communicate()
             output = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
             if process.returncode and process.returncode > 0:
-                raise RuntimeError(output or f"speaker-test exited with code {process.returncode}.")
+                raise RuntimeError(output or f"gst-launch-1.0 exited with code {process.returncode}.")
             return output
 
         output = "\n".join(part for part in ((stdout or "").strip(), (stderr or "").strip()) if part)
         if process.returncode != 0:
-            raise RuntimeError(output or f"speaker-test exited with code {process.returncode}.")
+            raise RuntimeError(output or f"gst-launch-1.0 exited with code {process.returncode}.")
         return output
 
     def build_speaker_test_commands(self, settings: dict[str, Any]) -> list[list[str]]:
@@ -156,25 +161,49 @@ class AudioDeviceService:
             "hardware_channels",
         )
         device = alsa_runtime_device(settings.get("device", "default"))
+        audio_rate = _test_audio_rate(settings)
+        output_mix = build_output_pair_mix_element(pair, hardware_channels)
         commands: list[list[str]] = []
-        for speaker in pair:
-            commands.append(
+        for side in ("left", "right"):
+            command = [
+                "gst-launch-1.0",
+                "-q",
+                "audiotestsrc",
+                "is-live=true",
+                "wave=sine",
+                "freq=880",
+                "volume=0.2",
+                "!",
+                "audioconvert",
+                "!",
+                "capsfilter",
+                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                "!",
+            ]
+            command.extend(shlex.split(_stereo_side_matrix_element(side)))
+            command.extend(
                 [
-                    "speaker-test",
-                    "-D",
-                    device,
-                    "-t",
-                    "sine",
-                    "-f",
-                    "880",
-                    "-c",
-                    str(hardware_channels),
-                    "-s",
-                    str(speaker),
-                    "-l",
-                    "1",
+                    "!",
+                    "capsfilter",
+                    f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
                 ]
             )
+            if output_mix:
+                command.append("!")
+                command.extend(shlex.split(output_mix))
+            command.extend(
+                [
+                    "!",
+                    "capsfilter",
+                    f"caps=audio/x-raw,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
+                    "!",
+                    "alsasink",
+                    f"device={device}",
+                    "sync=false",
+                    "async=false",
+                ]
+            )
+            commands.append(command)
         return commands
 
     def start_capture_level_test(self, settings: dict[str, Any]) -> dict[str, Any]:
@@ -231,27 +260,40 @@ class AudioDeviceService:
         duration_seconds = max(1, min(duration_seconds, 10))
         source_device = str(settings.get("device") or "default").strip() or "default"
         runtime_device = alsa_runtime_device(source_device)
+        audio_rate = _test_audio_rate(settings)
+        capture_mix = build_input_pair_mix_element(pair, hardware_channels)
         command = [
-            "arecord",
+            "gst-launch-1.0",
             "-q",
-            "-D",
-            runtime_device,
-            "-f",
-            "S16_LE",
-            "-c",
-            str(hardware_channels),
-            "-t",
-            "raw",
-            "-d",
-            str(duration_seconds),
-            "-",
+            "alsasrc",
+            f"device={runtime_device}",
+            "do-timestamp=true",
+            "!",
+            "capsfilter",
+            f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels={hardware_channels},rate={audio_rate}",
         ]
+        if capture_mix:
+            command.append("!")
+            command.extend(shlex.split(capture_mix))
+        command.extend(
+            [
+                "!",
+                "capsfilter",
+                f"caps=audio/x-raw,format=S16LE,layout=interleaved,channels=2,rate={audio_rate}",
+                "!",
+                "fdsink",
+                "fd=1",
+                "sync=false",
+            ]
+        )
         return command, {
             "device": source_device,
             "runtime_device": runtime_device,
-            "rate": None,
+            "rate": audio_rate,
             "hardware_channels": hardware_channels,
             "input_channels": pair,
+            "analysis_channels": 2,
+            "analysis_input_channels": [1, 2],
             "duration_seconds": duration_seconds,
         }
 
@@ -304,17 +346,20 @@ class AudioDeviceService:
                 stderr=subprocess.PIPE,
                 stdin=subprocess.DEVNULL,
             )
-            frame_bytes = metadata["hardware_channels"] * 2
+            analysis_channels = int(metadata.get("analysis_channels") or metadata["hardware_channels"])
+            analysis_input_channels = metadata.get("analysis_input_channels") or metadata["input_channels"]
+            frame_bytes = analysis_channels * 2
             chunk_size = frame_bytes * 512
             assert process.stdout is not None
-            while True:
+            deadline = time.time() + float(metadata["duration_seconds"])
+            while time.time() < deadline:
                 chunk = process.stdout.read(chunk_size)
                 if not chunk:
                     break
                 levels = _pcm_s16le_pair_levels(
                     chunk,
-                    metadata["hardware_channels"],
-                    metadata["input_channels"],
+                    analysis_channels,
+                    analysis_input_channels,
                 )
                 with self._level_tests_lock:
                     session = self._level_tests.get(test_id)
@@ -322,22 +367,28 @@ class AudioDeviceService:
                         return
                     session["levels"] = levels
                     session["updated_at"] = time.time()
-            stderr = b""
-            if process.stderr is not None:
-                stderr = process.stderr.read()
-            exit_code = process.wait(timeout=1)
+            terminated = False
+            if process.poll() is None:
+                process.terminate()
+                terminated = True
+            stdout, stderr = process.communicate(timeout=1)
+            exit_code = process.returncode
             with self._level_tests_lock:
                 session = self._level_tests.get(test_id)
                 if session is None:
                     return
                 session["updated_at"] = time.time()
-                if exit_code == 0:
+                if terminated or exit_code == 0:
                     session["status"] = "completed"
                 else:
                     session["status"] = "error"
-                    session["error"] = stderr.decode("utf-8", errors="replace").strip() or f"arecord exited with code {exit_code}."
+                    session["error"] = stderr.decode("utf-8", errors="replace").strip() or f"gst-launch-1.0 exited with code {exit_code}."
         except FileNotFoundError:
-            self._finish_level_test_with_error(test_id, "arecord is not available in this container.")
+            self._finish_level_test_with_error(test_id, "gst-launch-1.0 is not available in this container.")
+        except subprocess.TimeoutExpired:
+            if process is not None:
+                process.kill()
+            self._finish_level_test_with_error(test_id, "mic test pipeline did not shut down cleanly.")
         except Exception as exc:
             self._finish_level_test_with_error(test_id, str(exc))
         finally:
@@ -427,6 +478,38 @@ def _parse_numeric_field(value: str, common_values: Any) -> set[int]:
         if number_match:
             values.add(int(number_match.group(0)))
     return values
+
+
+def _test_audio_rate(settings: dict[str, Any]) -> int:
+    explicit_rate = settings.get("rate")
+    if explicit_rate not in {None, ""}:
+        try:
+            return int(explicit_rate)
+        except (TypeError, ValueError):
+            return DEFAULT_TEST_AUDIO_RATE
+
+    try:
+        from production.config_loader import load_config
+
+        config = load_config()
+    except BaseException:
+        return DEFAULT_TEST_AUDIO_RATE
+    audio = config.get("audio", {}) if isinstance(config, dict) and isinstance(config.get("audio"), dict) else {}
+    try:
+        return int(audio.get("rate", DEFAULT_TEST_AUDIO_RATE))
+    except (TypeError, ValueError):
+        return DEFAULT_TEST_AUDIO_RATE
+
+
+def _stereo_side_matrix_element(side: str) -> str:
+    if side == "right":
+        rows = [[0.0, 0.0], [0.0, 1.0]]
+    else:
+        rows = [[1.0, 0.0], [0.0, 0.0]]
+    return (
+        'audiomixmatrix in-channels=2 out-channels=2 '
+        f'channel-mask=-1 matrix="{format_gst_mix_matrix(rows)}"'
+    )
 
 
 def _pcm_s16le_pair_levels(
