@@ -22,6 +22,7 @@ if root_dir not in sys.path:
 # Import configuration loader (assumes a config_loader.py module is available)
 from config_loader import load_config
 from live_queue_settings import build_queue_element
+from control_app.services.disconnect_fallback import DisconnectFallbackFrameSource
 
 
 DEFAULT_VIDEO_SINK = "auto"
@@ -31,6 +32,8 @@ DEFAULT_AUDIO_TRANSPORT = "config"
 MAX_SYNC_DELAY_MS = 3000
 DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
 SYNC_DELAY_POLL_MS = 500
+FALLBACK_FRAMERATE = 1
+FALLBACK_RECONNECT_INTERVAL_SECONDS = 5.0
 
 
 def gst_escape(value):
@@ -62,6 +65,7 @@ class VideoReceiver:
         video_output=None,
         video_delay_ms=0,
         sync_delay_file=None,
+        fallback_cache_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -71,6 +75,7 @@ class VideoReceiver:
         self.video_output = video_output
         self.video_delay_ms = video_delay_ms
         self.sync_delay_file = sync_delay_file
+        self.fallback_cache_file = fallback_cache_file
         self.pipeline = None
         self.loop = None
         self.server_address = None
@@ -78,6 +83,13 @@ class VideoReceiver:
         self.audio_receive_port = None
         # True if fallback is active; false if primary is active.
         self.fallback_active = False
+        self.fallback_started_at = None
+        self.reconnect_requested = False
+        self.primary_selector_pad = None
+        self.fallback_selector_pad = None
+        self.fallback_src = None
+        self.fallback_frame_source = None
+        self.fallback_frame_count = 0
         # Last time (seconds) a buffer was seen on the primary monitor branch.
         self.last_primary_buffer_time = None
         # Timeout threshold (seconds) after which primary is considered down.
@@ -220,11 +232,12 @@ class VideoReceiver:
                 primary_tee. ! {receiver_primary_selector_queue} name=primary_selector ! selector.
                 primary_tee. ! {receiver_primary_monitor_queue} name=primary_monitor ! fakesink sync=false async=false
                 {audio_branch}
-                videotestsrc pattern=snow
+                appsrc name=disconnect_fallback_src is-live=true format=time do-timestamp=true block=false
+                    caps=video/x-raw,format=RGB,width=1920,height=1080,framerate={FALLBACK_FRAMERATE}/1
                 ! videoconvert
                 ! videoscale
                 ! video/x-raw,width=1920,height=1080
-                ! {receiver_fallback_queue} ! selector.
+                ! {receiver_fallback_queue} name=fallback ! selector.
         """
         return pipeline_str.strip()
 
@@ -362,42 +375,81 @@ class VideoReceiver:
     def primary_buffer_probe(self, pad, info):
         if info.type & Gst.PadProbeType.BUFFER:
             self.last_primary_buffer_time = time.monotonic()
+            if self.fallback_active:
+                GLib.idle_add(self.switch_to_primary)
         return Gst.PadProbeReturn.OK
+
+    def primary_is_healthy(self, now=None):
+        now = time.monotonic() if now is None else now
+        return (
+            self.last_primary_buffer_time is not None
+            and (now - self.last_primary_buffer_time) < self.primary_timeout_threshold
+        )
+
+    def fallback_reconnect_due(self, now=None):
+        now = time.monotonic() if now is None else now
+        return (
+            self.fallback_active
+            and self.fallback_started_at is not None
+            and (now - self.fallback_started_at) >= FALLBACK_RECONNECT_INTERVAL_SECONDS
+        )
 
     def monitor_primary(self):
         """Periodically check if the primary branch is healthy and switch if needed."""
         now = time.monotonic()
-        primary_healthy = (self.last_primary_buffer_time is not None and
-                           (now - self.last_primary_buffer_time) < self.primary_timeout_threshold)
+        primary_healthy = self.primary_is_healthy(now)
         if primary_healthy and self.fallback_active:
             print("VideoReceiver: Primary stream recovered; switching to primary.")
             self.switch_to_primary()
         elif not primary_healthy and not self.fallback_active:
             print("VideoReceiver: Primary stream down; switching to fallback.")
             self.switch_to_fallback()
+        elif not primary_healthy and self.fallback_reconnect_due(now):
+            print("VideoReceiver: Primary stream still down; restarting receiver pipeline to retry SRT connection.")
+            self.reconnect_requested = True
+            self.stop()
+            return False
         return True  # Continue calling this callback
+
+    def resolve_selector_pads(self):
+        selector = self.pipeline.get_by_name("selector") if self.pipeline else None
+        if not selector:
+            return
+
+        for pad in selector.sinkpads:
+            peer = pad.get_peer()
+            if peer is None:
+                continue
+            parent = peer.get_parent_element()
+            name = parent.get_name() if parent is not None else ""
+            if name == "primary_selector":
+                self.primary_selector_pad = pad
+            elif name == "fallback":
+                self.fallback_selector_pad = pad
 
     def switch_to_primary(self):
         selector = self.pipeline.get_by_name("selector")
         if not selector:
             return
-        sink_pads = selector.sinkpads
-        if not sink_pads:
+        if self.primary_selector_pad is None:
+            self.resolve_selector_pads()
+        if self.primary_selector_pad is None:
             return
-        # Assume primary branch is connected to the first sink pad.
-        selector.set_property("active-pad", sink_pads[0])
+        selector.set_property("active-pad", self.primary_selector_pad)
         self.fallback_active = False
+        self.fallback_started_at = None
 
     def switch_to_fallback(self):
         selector = self.pipeline.get_by_name("selector")
         if not selector:
             return
-        sink_pads = selector.sinkpads
-        if len(sink_pads) < 2:
+        if self.fallback_selector_pad is None:
+            self.resolve_selector_pads()
+        if self.fallback_selector_pad is None:
             return
-        # Assume fallback branch is connected to the second sink pad.
-        selector.set_property("active-pad", sink_pads[1])
+        selector.set_property("active-pad", self.fallback_selector_pad)
         self.fallback_active = True
+        self.fallback_started_at = time.monotonic()
 
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -444,6 +496,42 @@ class VideoReceiver:
         self.video_delay_ms = delay_ms
         print(f"VideoReceiver: Video delay updated to {delay_ms} ms.", flush=True)
 
+    def start_fallback_frames(self):
+        self.fallback_src = self.pipeline.get_by_name("disconnect_fallback_src") if self.pipeline else None
+        if self.fallback_src is None:
+            print("VideoReceiver: disconnect_fallback_src element not found!", flush=True)
+            return
+
+        self.fallback_frame_source = DisconnectFallbackFrameSource(
+            width=1920,
+            height=1080,
+            cache_path=self.fallback_cache_file,
+        )
+        self.fallback_frame_count = 0
+        GLib.timeout_add(int(1000 / FALLBACK_FRAMERATE), self.push_fallback_frame)
+
+    def push_fallback_frame(self):
+        if self.pipeline is None or self.fallback_src is None or self.fallback_frame_source is None:
+            return False
+
+        try:
+            frame = self.fallback_frame_source.frame()
+        except Exception as exc:
+            print(f"VideoReceiver: Could not render disconnect fallback frame: {exc}", flush=True)
+            return True
+
+        buffer = Gst.Buffer.new_allocate(None, len(frame), None)
+        buffer.fill(0, frame)
+        frame_duration = Gst.SECOND // FALLBACK_FRAMERATE
+        buffer.pts = self.fallback_frame_count * frame_duration
+        buffer.duration = frame_duration
+        self.fallback_frame_count += 1
+
+        result = self.fallback_src.emit("push-buffer", buffer)
+        if result != Gst.FlowReturn.OK:
+            print(f"VideoReceiver: Disconnect fallback frame push returned {result}.", flush=True)
+        return True
+
     def run(self):
         pipeline_str = self.build_pipeline()
         print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
@@ -460,12 +548,15 @@ class VideoReceiver:
         
         # Set initial active pad to primary branch.
         selector = self.pipeline.get_by_name("selector")
-        if selector and selector.sinkpads:
-            selector.set_property("active-pad", selector.sinkpads[0])
+        self.resolve_selector_pads()
+        if selector and self.primary_selector_pad is not None:
+            selector.set_property("active-pad", self.primary_selector_pad)
             self.fallback_active = False
+            self.fallback_started_at = None
             print("VideoReceiver: Starting with primary video source.")
         else:
             print("VideoReceiver: Could not set initial active pad.")
+        self.start_fallback_frames()
         
         # Attach pad probe to the 'primary_monitor' queue's src pad.
         primary_monitor_queue = self.pipeline.get_by_name("primary_monitor")
@@ -509,6 +600,7 @@ class ReceiverManager:
         video_output=None,
         video_delay_ms=0,
         sync_delay_file=None,
+        fallback_cache_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -518,6 +610,7 @@ class ReceiverManager:
         self.video_output = video_output
         self.video_delay_ms = video_delay_ms
         self.sync_delay_file = sync_delay_file
+        self.fallback_cache_file = fallback_cache_file
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -535,6 +628,7 @@ class ReceiverManager:
                 video_output=self.video_output,
                 video_delay_ms=self.video_delay_ms,
                 sync_delay_file=self.sync_delay_file,
+                fallback_cache_file=self.fallback_cache_file,
             )
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
@@ -546,8 +640,13 @@ class ReceiverManager:
             self.video_receiver = None
             if self.shutdown_event.is_set():
                 break
-            print("ReceiverManager: Video receiver stopped unexpectedly. Restarting in 5 seconds...")
-            time.sleep(5)
+            restart_delay = 0 if video_receiver.reconnect_requested else 5
+            print(
+                "ReceiverManager: Video receiver stopped unexpectedly. "
+                f"Restarting in {restart_delay} seconds..."
+            )
+            if restart_delay:
+                time.sleep(restart_delay)
 
     def start(self):
         self.video_thread = threading.Thread(target=self.run_video_worker)
@@ -576,6 +675,7 @@ def main():
     parser.add_argument("--audio-transport", choices=["config", "off", "aac", "l16"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'l16' for the separate uncompressed return audio or 'aac' for audio from the live MPEG-TS stream.")
     parser.add_argument("--video-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial receiver video delay in milliseconds for A/V sync calibration.")
     parser.add_argument("--sync-delay-file", help="Optional control file containing the live receiver video delay in milliseconds.")
+    parser.add_argument("--fallback-cache-file", help="Optional cache file for disconnect fallback paragraphs.")
     args = parser.parse_args()
 
     manager = ReceiverManager(
@@ -587,6 +687,7 @@ def main():
         video_output=args.video_output,
         video_delay_ms=args.video_delay_ms,
         sync_delay_file=args.sync_delay_file,
+        fallback_cache_file=args.fallback_cache_file,
     )
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))
