@@ -65,7 +65,7 @@ class VideoReceiver:
         video_output=None,
         video_delay_ms=0,
         sync_delay_file=None,
-        fallback_cache_file=None,
+        fallback_text_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -75,7 +75,7 @@ class VideoReceiver:
         self.video_output = video_output
         self.video_delay_ms = video_delay_ms
         self.sync_delay_file = sync_delay_file
-        self.fallback_cache_file = fallback_cache_file
+        self.fallback_text_file = fallback_text_file
         self.pipeline = None
         self.loop = None
         self.server_address = None
@@ -505,7 +505,7 @@ class VideoReceiver:
         self.fallback_frame_source = DisconnectFallbackFrameSource(
             width=1920,
             height=1080,
-            cache_path=self.fallback_cache_file,
+            fallback_text_file=self.fallback_text_file,
         )
         self.fallback_frame_count = 0
         GLib.timeout_add(int(1000 / FALLBACK_FRAMERATE), self.push_fallback_frame)
@@ -600,7 +600,7 @@ class ReceiverManager:
         video_output=None,
         video_delay_ms=0,
         sync_delay_file=None,
-        fallback_cache_file=None,
+        fallback_text_file=None,
     ):
         self.country = country
         self.preview_pattern = preview_pattern
@@ -610,7 +610,7 @@ class ReceiverManager:
         self.video_output = video_output
         self.video_delay_ms = video_delay_ms
         self.sync_delay_file = sync_delay_file
-        self.fallback_cache_file = fallback_cache_file
+        self.fallback_text_file = fallback_text_file
         self.shutdown_event = threading.Event()
         self.video_receiver = None
         # Create a shared system clock for synchronization.
@@ -628,7 +628,7 @@ class ReceiverManager:
                 video_output=self.video_output,
                 video_delay_ms=self.video_delay_ms,
                 sync_delay_file=self.sync_delay_file,
-                fallback_cache_file=self.fallback_cache_file,
+                fallback_text_file=self.fallback_text_file,
             )
             self.video_receiver = video_receiver  # Store reference.
             video_receiver.set_clock(self.shared_clock)
@@ -675,7 +675,7 @@ def main():
     parser.add_argument("--audio-transport", choices=["config", "off", "aac", "l16"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'l16' for the separate uncompressed return audio or 'aac' for audio from the live MPEG-TS stream.")
     parser.add_argument("--video-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial receiver video delay in milliseconds for A/V sync calibration.")
     parser.add_argument("--sync-delay-file", help="Optional control file containing the live receiver video delay in milliseconds.")
-    parser.add_argument("--fallback-cache-file", help="Optional cache file for disconnect fallback paragraphs.")
+    parser.add_argument("--fallback-text-file", help="Optional text file for disconnect fallback paragraphs.")
     args = parser.parse_args()
 
     manager = ReceiverManager(
@@ -687,7 +687,7 @@ def main():
         video_output=args.video_output,
         video_delay_ms=args.video_delay_ms,
         sync_delay_file=args.sync_delay_file,
-        fallback_cache_file=args.fallback_cache_file,
+        fallback_text_file=args.fallback_text_file,
     )
     signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
     signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))

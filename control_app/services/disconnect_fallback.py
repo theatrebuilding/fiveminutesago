@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 import random
-import threading
-import textwrap
 import time
 from pathlib import Path
-from typing import Callable, Iterable
-
-URL = "https://thepostculturalbody.pubpub.org/pub/seacable/draft?access=xb7qo1am"
+from typing import Iterable
 
 WIDTH = 1280
 HEIGHT = 720
 FONT_SIZE = 44
 MARGIN = 90
-SECONDS_PER_PARAGRAPH = 7
-CACHE_MAX_PARAGRAPHS = 200
+DEFAULT_MIN_SECONDS_PER_PARAGRAPH = 3.0
+DEFAULT_SECONDS_PER_WORD = 0.35
+DEFAULT_MAX_SECONDS_PER_PARAGRAPH = 45.0
+DEFAULT_FALLBACK_TEXT_FILE = Path(__file__).resolve().parents[2] / "fallback.txt"
 
 DEFAULT_FALLBACK_PARAGRAPHS = [
     "Signal lost. Waiting for the live image to return.",
@@ -22,178 +20,80 @@ DEFAULT_FALLBACK_PARAGRAPHS = [
     "No stream is currently visible. The receiver will automatically rejoin when the signal returns.",
 ]
 
-ParagraphFetcher = Callable[[str], list[str]]
 
-
-def fetch_paragraphs(url: str) -> list[str]:
-    import requests
-    from bs4 import BeautifulSoup
-
-    response = requests.get(
-        url,
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=20,
-    )
-    response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
-        tag.decompose()
-
-    # Prefer actual paragraph tags.
-    paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
-
-    # Fallback: split visible page text into blocks.
-    if len(paragraphs) < 5:
-        text = soup.get_text("\n", strip=True)
-        lines = [line.strip() for line in text.splitlines() if line.strip()]
-
-        # Roughly discard interface text before the actual document body.
-        start_markers = [
-            "Published under CC BY-SA 4.0",
-            "spect-actor:",
-            "الممثل-المتفرج:",
-        ]
-
-        start_index = 0
-        for i, line in enumerate(lines):
-            if any(marker in line for marker in start_markers):
-                start_index = i
-                break
-
-        paragraphs = lines[start_index:]
-
-    # Remove obvious UI fragments and tiny junk.
-    junk = {
-        "Search",
-        "Dashboard",
-        "Login",
-        "Sharing",
-        "Cite",
-        "Download",
-        "Comments",
-        "License",
-    }
-
-    cleaned = []
-    for para in paragraphs:
-        para = " ".join(para.split())
-        if len(para) < 3:
-            continue
-        if para in junk:
-            continue
-        if para not in cleaned:
-            cleaned.append(para)
-
-    random.shuffle(cleaned)
-    return cleaned
-
-
-def read_cached_paragraphs(cache_path: str | Path | None) -> list[str]:
-    if cache_path is None:
+def read_text_file_paragraphs(path: str | Path | None) -> list[str]:
+    if path is None:
         return []
 
     try:
-        raw_text = Path(cache_path).read_text(encoding="utf-8")
+        raw_text = Path(path).read_text(encoding="utf-8")
     except OSError:
         return []
 
+    if not raw_text.strip():
+        return []
+
+    blocks = raw_text.split("\n\n")
+    if len(blocks) == 1:
+        # fallback.txt is script-like: each non-empty line is an on-screen unit.
+        candidates = raw_text.splitlines()
+    else:
+        # Conventional paragraph files can use blank lines to wrap paragraphs.
+        candidates = blocks
+
     paragraphs = []
-    for block in raw_text.split("\n\n"):
-        paragraph = " ".join(block.split())
-        if paragraph and paragraph not in paragraphs:
+    for candidate in candidates:
+        paragraph = " ".join(candidate.split())
+        if paragraph:
             paragraphs.append(paragraph)
     return paragraphs
 
 
-def write_cached_paragraphs(cache_path: str | Path | None, paragraphs: Iterable[str]) -> None:
-    if cache_path is None:
-        return
-
-    cleaned = []
-    for paragraph in paragraphs:
-        paragraph = " ".join(str(paragraph).split())
-        if paragraph and paragraph not in cleaned:
-            cleaned.append(paragraph)
-        if len(cleaned) >= CACHE_MAX_PARAGRAPHS:
-            break
-
-    if not cleaned:
-        return
-
-    path = Path(cache_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n\n".join(cleaned) + "\n", encoding="utf-8")
-
-
 def load_paragraphs(
     *,
-    url: str = URL,
-    cache_path: str | Path | None = None,
-    fetcher: ParagraphFetcher = fetch_paragraphs,
+    fallback_text_file: str | Path | None = DEFAULT_FALLBACK_TEXT_FILE,
     defaults: Iterable[str] = DEFAULT_FALLBACK_PARAGRAPHS,
 ) -> list[str]:
-    try:
-        fetched = fetcher(url)
-    except Exception:
-        fetched = []
-
-    if fetched:
-        write_cached_paragraphs(cache_path, fetched)
-        return list(fetched)
-
-    cached = read_cached_paragraphs(cache_path)
-    if cached:
-        return cached
-
+    paragraphs = read_text_file_paragraphs(fallback_text_file)
+    if paragraphs:
+        return paragraphs
     return list(defaults)
 
 
-def load_cached_or_default(
-    cache_path: str | Path | None = None,
-    defaults: Iterable[str] = DEFAULT_FALLBACK_PARAGRAPHS,
-) -> list[str]:
-    cached = read_cached_paragraphs(cache_path)
-    return cached or list(defaults)
+def paragraph_display_seconds(
+    paragraph: str,
+    *,
+    min_seconds: float = DEFAULT_MIN_SECONDS_PER_PARAGRAPH,
+    seconds_per_word: float = DEFAULT_SECONDS_PER_WORD,
+    max_seconds: float = DEFAULT_MAX_SECONDS_PER_PARAGRAPH,
+) -> float:
+    word_count = len(str(paragraph).split())
+    display_seconds = max(min_seconds, word_count * seconds_per_word)
+    return min(max_seconds, display_seconds)
 
 
 class DisconnectFallbackTextSource:
     def __init__(
         self,
         *,
-        url: str = URL,
-        cache_path: str | Path | None = None,
-        fetcher: ParagraphFetcher = fetch_paragraphs,
-        async_refresh: bool = True,
+        fallback_text_file: str | Path | None = DEFAULT_FALLBACK_TEXT_FILE,
         defaults: Iterable[str] = DEFAULT_FALLBACK_PARAGRAPHS,
     ) -> None:
-        self.url = url
-        self.cache_path = cache_path
-        self.fetcher = fetcher
+        self.fallback_text_file = fallback_text_file
         self.defaults = list(defaults)
-        self._lock = threading.Lock()
-        self._paragraphs = load_cached_or_default(cache_path, self.defaults)
-        if async_refresh:
-            threading.Thread(target=self.refresh, name="disconnect-fallback-refresh", daemon=True).start()
+        self._paragraphs = load_paragraphs(
+            fallback_text_file=fallback_text_file,
+            defaults=self.defaults,
+        )
 
     def paragraphs(self) -> list[str]:
-        with self._lock:
-            return list(self._paragraphs)
+        return list(self._paragraphs)
 
     def refresh(self) -> None:
-        try:
-            fetched = self.fetcher(self.url)
-        except Exception as exc:
-            print(f"DisconnectFallback: Could not refresh fallback text: {exc}", flush=True)
-            return
-
-        if not fetched:
-            return
-
-        write_cached_paragraphs(self.cache_path, fetched)
-        with self._lock:
-            self._paragraphs = list(fetched)
+        self._paragraphs = load_paragraphs(
+            fallback_text_file=self.fallback_text_file,
+            defaults=self.defaults,
+        )
 
 
 class DisconnectFallbackFrameSource:
@@ -204,16 +104,19 @@ class DisconnectFallbackFrameSource:
         height: int,
         font_size: int = FONT_SIZE,
         margin: int | None = None,
-        seconds_per_paragraph: int = SECONDS_PER_PARAGRAPH,
-        cache_path: str | Path | None = None,
-        url: str = URL,
+        fallback_text_file: str | Path | None = DEFAULT_FALLBACK_TEXT_FILE,
+        min_seconds_per_paragraph: float = DEFAULT_MIN_SECONDS_PER_PARAGRAPH,
+        seconds_per_word: float = DEFAULT_SECONDS_PER_WORD,
+        max_seconds_per_paragraph: float = DEFAULT_MAX_SECONDS_PER_PARAGRAPH,
     ) -> None:
         self.width = width
         self.height = height
         self.font_size = font_size
         self.margin = margin if margin is not None else max(40, int(width * 0.07))
-        self.seconds_per_paragraph = seconds_per_paragraph
-        self.text_source = DisconnectFallbackTextSource(url=url, cache_path=cache_path)
+        self.min_seconds_per_paragraph = min_seconds_per_paragraph
+        self.seconds_per_word = seconds_per_word
+        self.max_seconds_per_paragraph = max_seconds_per_paragraph
+        self.text_source = DisconnectFallbackTextSource(fallback_text_file=fallback_text_file)
         self.index = 0
         self.last_change = 0.0
         self.current_paragraph: str | None = None
@@ -241,7 +144,18 @@ class DisconnectFallbackFrameSource:
         if not paragraphs:
             paragraphs = list(DEFAULT_FALLBACK_PARAGRAPHS)
 
-        if self.current_paragraph is None or now - self.last_change >= self.seconds_per_paragraph:
+        current_display_seconds = (
+            paragraph_display_seconds(
+                self.current_paragraph,
+                min_seconds=self.min_seconds_per_paragraph,
+                seconds_per_word=self.seconds_per_word,
+                max_seconds=self.max_seconds_per_paragraph,
+            )
+            if self.current_paragraph is not None
+            else 0.0
+        )
+
+        if self.current_paragraph is None or now - self.last_change >= current_display_seconds:
             if self.index >= len(paragraphs):
                 random.shuffle(paragraphs)
                 self.index = 0
@@ -320,7 +234,7 @@ def main():
     text_source = DisconnectFallbackTextSource()
 
     pygame.init()
-    pygame.display.set_caption("Random PubPub Paragraphs")
+    pygame.display.set_caption("Disconnect Fallback")
 
     screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
     width, height = screen.get_size()
@@ -330,17 +244,20 @@ def main():
     index = 0
     running = True
     last_change = 0.0
+    current_paragraph = None
 
     while running:
         now = time.time()
         paragraphs = text_source.paragraphs() or list(DEFAULT_FALLBACK_PARAGRAPHS)
+        current_display_seconds = paragraph_display_seconds(current_paragraph) if current_paragraph else 0.0
 
-        if now - last_change >= SECONDS_PER_PARAGRAPH:
+        if current_paragraph is None or now - last_change >= current_display_seconds:
             if index >= len(paragraphs):
                 random.shuffle(paragraphs)
                 index = 0
 
-            draw_paragraph(screen, font, paragraphs[index], width=width, height=height, margin=margin)
+            current_paragraph = paragraphs[index]
+            draw_paragraph(screen, font, current_paragraph, width=width, height=height, margin=margin)
             index += 1
             last_change = now
 
@@ -357,7 +274,8 @@ def main():
                         random.shuffle(paragraphs)
                         index = 0
 
-                    draw_paragraph(screen, font, paragraphs[index], width=width, height=height, margin=margin)
+                    current_paragraph = paragraphs[index]
+                    draw_paragraph(screen, font, current_paragraph, width=width, height=height, margin=margin)
                     index += 1
                     last_change = time.time()
 

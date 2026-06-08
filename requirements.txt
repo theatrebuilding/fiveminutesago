@@ -1,6 +1,4 @@
 fastapi
 PyYAML
 uvicorn
-requests
-beautifulsoup4
 pygame

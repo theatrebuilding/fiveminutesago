@@ -655,8 +655,8 @@ class RuntimeService:
                 str(request.receiver_video_delay_ms),
                 "--sync-delay-file",
                 str(self._sync_delay_file("receiver-video-delay-ms.txt")),
-                "--fallback-cache-file",
-                str(self._runtime_dir / "disconnect-fallback-paragraphs.txt"),
+                "--fallback-text-file",
+                str(self._project_root / "fallback.txt"),
                 "--preview-pattern",
                 preview_pattern,
             ]
