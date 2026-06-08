@@ -60,6 +60,12 @@ def load_paragraphs(
     return list(defaults)
 
 
+def shuffle_paragraphs(paragraphs: Iterable[str]) -> list[str]:
+    shuffled = list(paragraphs)
+    random.shuffle(shuffled)
+    return shuffled
+
+
 def paragraph_display_seconds(
     paragraph: str,
     *,
@@ -81,18 +87,22 @@ class DisconnectFallbackTextSource:
     ) -> None:
         self.fallback_text_file = fallback_text_file
         self.defaults = list(defaults)
-        self._paragraphs = load_paragraphs(
-            fallback_text_file=fallback_text_file,
-            defaults=self.defaults,
+        self._paragraphs = shuffle_paragraphs(
+            load_paragraphs(
+                fallback_text_file=fallback_text_file,
+                defaults=self.defaults,
+            )
         )
 
     def paragraphs(self) -> list[str]:
         return list(self._paragraphs)
 
     def refresh(self) -> None:
-        self._paragraphs = load_paragraphs(
-            fallback_text_file=self.fallback_text_file,
-            defaults=self.defaults,
+        self._paragraphs = shuffle_paragraphs(
+            load_paragraphs(
+                fallback_text_file=self.fallback_text_file,
+                defaults=self.defaults,
+            )
         )
 
 

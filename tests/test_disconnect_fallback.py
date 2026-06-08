@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import tempfile
 import unittest
+import unittest.mock
 
 from control_app.services import disconnect_fallback
 
@@ -34,6 +35,20 @@ class DisconnectFallbackTests(unittest.TestCase):
             paragraphs = disconnect_fallback.load_paragraphs(fallback_text_file=fallback_path)
 
             self.assertEqual(paragraphs, ["Repeat me", "Repeat me"])
+
+
+    def test_text_source_shuffles_paragraphs_before_display(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fallback_path = Path(tmpdir) / "fallback.txt"
+            fallback_path.write_text("First\nSecond\nThird\n", encoding="utf-8")
+
+            def reverse(values):
+                values.reverse()
+
+            with unittest.mock.patch.object(disconnect_fallback.random, "shuffle", side_effect=reverse):
+                text_source = disconnect_fallback.DisconnectFallbackTextSource(fallback_text_file=fallback_path)
+
+            self.assertEqual(text_source.paragraphs(), ["Third", "Second", "First"])
 
     def test_load_paragraphs_uses_defaults_when_file_is_missing_or_empty(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
