@@ -28,6 +28,19 @@ if "gi" not in sys.modules:
         def obtain():
             return object()
 
+    class _FakeBuffer:
+        @staticmethod
+        def new_allocate(_allocator, size, _params):
+            return _FakeBuffer(size)
+
+        def __init__(self, size):
+            self.size = size
+            self.pts = None
+            self.duration = None
+
+        def fill(self, _offset, data):
+            self.data = data
+
     class _FakeGst:
         ElementFactory = _FakeElementFactory
         SystemClock = _FakeSystemClock
@@ -35,6 +48,8 @@ if "gi" not in sys.modules:
         MessageType = types.SimpleNamespace(ERROR=object(), EOS=object())
         PadProbeType = types.SimpleNamespace(BUFFER=1)
         PadProbeReturn = types.SimpleNamespace(OK=object())
+        FlowReturn = types.SimpleNamespace(OK=object(), FLUSHING=object(), ERROR=object())
+        Buffer = _FakeBuffer
         SECOND = 1_000_000_000
 
         @staticmethod
@@ -55,6 +70,7 @@ _SPEC.loader.exec_module(receiver_receive)
 receiver_receive.GLib = types.SimpleNamespace(idle_add=lambda func, *args: func(*args))
 receiver_receive.Gst.PadProbeType = types.SimpleNamespace(BUFFER=1)
 receiver_receive.Gst.PadProbeReturn = types.SimpleNamespace(OK=object())
+receiver_receive.Gst.FlowReturn = types.SimpleNamespace(OK=object(), FLUSHING=object(), ERROR=object())
 
 
 class ReceiverFallbackTests(unittest.TestCase):
@@ -69,13 +85,52 @@ class ReceiverFallbackTests(unittest.TestCase):
         self.assertIn("name=fallback ! selector.", pipeline)
         self.assertNotIn("videotestsrc pattern=snow", pipeline)
 
-    def test_fallback_reconnect_is_due_only_after_active_interval(self) -> None:
-        receiver = receiver_receive.VideoReceiver("tn")
+    def test_monitor_primary_stays_on_fallback_without_restarting_receiver(self) -> None:
+        class Receiver(receiver_receive.VideoReceiver):
+            def __init__(self):
+                super().__init__("tn")
+                self.stopped = False
+
+            def stop(self):
+                self.stopped = True
+
+        receiver = Receiver()
         receiver.fallback_active = True
         receiver.fallback_started_at = 10.0
 
-        self.assertFalse(receiver.fallback_reconnect_due(14.9))
-        self.assertTrue(receiver.fallback_reconnect_due(15.0))
+        self.assertTrue(receiver.monitor_primary())
+        self.assertFalse(receiver.stopped)
+        self.assertTrue(receiver.fallback_active)
+
+    def test_fallback_push_retries_silently_when_active_pipeline_is_flushing(self) -> None:
+        class FallbackSource:
+            def frame(self):
+                return b"abc"
+
+        class AppSrc:
+            def emit(self, _signal, _buffer):
+                return receiver_receive.Gst.FlowReturn.FLUSHING
+
+        receiver = receiver_receive.VideoReceiver("tn")
+        receiver.pipeline = object()
+        receiver.fallback_src = AppSrc()
+        receiver.fallback_frame_source = FallbackSource()
+        receiver.fallback_frames_running = True
+        receiver.fallback_active = True
+
+        self.assertTrue(receiver.push_fallback_frame())
+        self.assertTrue(receiver.fallback_frames_running)
+
+    def test_fallback_push_stops_timer_when_fallback_is_inactive(self) -> None:
+        receiver = receiver_receive.VideoReceiver("tn")
+        receiver.pipeline = object()
+        receiver.fallback_src = object()
+        receiver.fallback_frame_source = object()
+        receiver.fallback_frames_running = True
+        receiver.fallback_active = False
+
+        self.assertFalse(receiver.push_fallback_frame())
+        self.assertFalse(receiver.fallback_frames_running)
 
     def test_primary_buffer_probe_schedules_switch_back_to_primary(self) -> None:
         class Receiver(receiver_receive.VideoReceiver):

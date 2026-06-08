@@ -33,7 +33,6 @@ MAX_SYNC_DELAY_MS = 3000
 DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
 SYNC_DELAY_POLL_MS = 500
 FALLBACK_FRAMERATE = 1
-FALLBACK_RECONNECT_INTERVAL_SECONDS = 5.0
 
 
 def gst_escape(value):
@@ -84,12 +83,12 @@ class VideoReceiver:
         # True if fallback is active; false if primary is active.
         self.fallback_active = False
         self.fallback_started_at = None
-        self.reconnect_requested = False
         self.primary_selector_pad = None
         self.fallback_selector_pad = None
         self.fallback_src = None
         self.fallback_frame_source = None
         self.fallback_frame_count = 0
+        self.fallback_frames_running = False
         # Last time (seconds) a buffer was seen on the primary monitor branch.
         self.last_primary_buffer_time = None
         # Timeout threshold (seconds) after which primary is considered down.
@@ -386,14 +385,6 @@ class VideoReceiver:
             and (now - self.last_primary_buffer_time) < self.primary_timeout_threshold
         )
 
-    def fallback_reconnect_due(self, now=None):
-        now = time.monotonic() if now is None else now
-        return (
-            self.fallback_active
-            and self.fallback_started_at is not None
-            and (now - self.fallback_started_at) >= FALLBACK_RECONNECT_INTERVAL_SECONDS
-        )
-
     def monitor_primary(self):
         """Periodically check if the primary branch is healthy and switch if needed."""
         now = time.monotonic()
@@ -404,11 +395,6 @@ class VideoReceiver:
         elif not primary_healthy and not self.fallback_active:
             print("VideoReceiver: Primary stream down; switching to fallback.")
             self.switch_to_fallback()
-        elif not primary_healthy and self.fallback_reconnect_due(now):
-            print("VideoReceiver: Primary stream still down; restarting receiver pipeline to retry SRT connection.")
-            self.reconnect_requested = True
-            self.stop()
-            return False
         return True  # Continue calling this callback
 
     def resolve_selector_pads(self):
@@ -450,6 +436,7 @@ class VideoReceiver:
         selector.set_property("active-pad", self.fallback_selector_pad)
         self.fallback_active = True
         self.fallback_started_at = time.monotonic()
+        self.start_fallback_frames()
 
     def on_message(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -497,6 +484,8 @@ class VideoReceiver:
         print(f"VideoReceiver: Video delay updated to {delay_ms} ms.", flush=True)
 
     def start_fallback_frames(self):
+        if self.fallback_frames_running:
+            return
         self.fallback_src = self.pipeline.get_by_name("disconnect_fallback_src") if self.pipeline else None
         if self.fallback_src is None:
             print("VideoReceiver: disconnect_fallback_src element not found!", flush=True)
@@ -508,10 +497,17 @@ class VideoReceiver:
             fallback_text_file=self.fallback_text_file,
         )
         self.fallback_frame_count = 0
+        self.fallback_frames_running = True
         GLib.timeout_add(int(1000 / FALLBACK_FRAMERATE), self.push_fallback_frame)
 
     def push_fallback_frame(self):
-        if self.pipeline is None or self.fallback_src is None or self.fallback_frame_source is None:
+        if (
+            self.pipeline is None
+            or self.fallback_src is None
+            or self.fallback_frame_source is None
+            or not self.fallback_active
+        ):
+            self.fallback_frames_running = False
             return False
 
         try:
@@ -528,7 +524,9 @@ class VideoReceiver:
         self.fallback_frame_count += 1
 
         result = self.fallback_src.emit("push-buffer", buffer)
-        if result != Gst.FlowReturn.OK:
+        if result == Gst.FlowReturn.OK:
+            return True
+        if result != Gst.FlowReturn.FLUSHING:
             print(f"VideoReceiver: Disconnect fallback frame push returned {result}.", flush=True)
         return True
 
@@ -556,7 +554,6 @@ class VideoReceiver:
             print("VideoReceiver: Starting with primary video source.")
         else:
             print("VideoReceiver: Could not set initial active pad.")
-        self.start_fallback_frames()
         
         # Attach pad probe to the 'primary_monitor' queue's src pad.
         primary_monitor_queue = self.pipeline.get_by_name("primary_monitor")
@@ -582,6 +579,10 @@ class VideoReceiver:
             print(f"VideoReceiver: Exception -> {e}")
         finally:
             self.pipeline.set_state(Gst.State.NULL)
+            self.pipeline = None
+            self.fallback_src = None
+            self.fallback_frame_source = None
+            self.fallback_frames_running = False
             print("VideoReceiver: Pipeline stopped.")
 
     def stop(self):
@@ -640,13 +641,8 @@ class ReceiverManager:
             self.video_receiver = None
             if self.shutdown_event.is_set():
                 break
-            restart_delay = 0 if video_receiver.reconnect_requested else 5
-            print(
-                "ReceiverManager: Video receiver stopped unexpectedly. "
-                f"Restarting in {restart_delay} seconds..."
-            )
-            if restart_delay:
-                time.sleep(restart_delay)
+            print("ReceiverManager: Video receiver stopped unexpectedly. Restarting in 5 seconds...")
+            time.sleep(5)
 
     def start(self):
         self.video_thread = threading.Thread(target=self.run_video_worker)

@@ -49,20 +49,20 @@ class DisconnectFallbackTests(unittest.TestCase):
     def test_paragraph_display_seconds_increases_with_word_count(self) -> None:
         short = disconnect_fallback.paragraph_display_seconds(
             "one two",
-            min_seconds=1.0,
+            min_seconds=5.0,
             seconds_per_word=0.5,
             max_seconds=20.0,
         )
         long = disconnect_fallback.paragraph_display_seconds(
-            "one two three four five six seven eight",
-            min_seconds=1.0,
+            " ".join(["word"] * 14),
+            min_seconds=5.0,
             seconds_per_word=0.5,
             max_seconds=20.0,
         )
 
         self.assertLess(short, long)
-        self.assertEqual(short, 1.0)
-        self.assertEqual(long, 4.0)
+        self.assertEqual(short, 5.0)
+        self.assertEqual(long, 7.0)
 
     def test_paragraph_display_seconds_is_capped(self) -> None:
         display_seconds = disconnect_fallback.paragraph_display_seconds(
