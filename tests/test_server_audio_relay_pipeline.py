@@ -276,6 +276,12 @@ class ServerArchivePlaybackTests(unittest.TestCase):
         self.assertEqual(server_runtime.archive_prefix_for_feed("tn"), "video_tn_")
         self.assertEqual(server_runtime.archive_prefix_for_feed("dk"), "video_dk_")
 
+    def test_archive_audio_receive_ports_target_opposite_sender_pcm_streams(self) -> None:
+        ports = _server_config()["ports"]
+
+        self.assertEqual(server_runtime.archive_audio_receive_port_for_feed(ports, "tn"), 8807)
+        self.assertEqual(server_runtime.archive_audio_receive_port_for_feed(ports, "dk"), 8808)
+
     def test_random_archive_start_offset_uses_duration_when_available(self) -> None:
         with patch.object(server_runtime.random, "uniform", return_value=12.5) as uniform:
             offset = server_runtime.random_archive_start_offset(60.0)
@@ -309,7 +315,113 @@ class ServerArchivePlaybackTests(unittest.TestCase):
         self.assertIn("qtdemux name=tn_archive_demux", pipeline)
         self.assertIn("mpegtsmux name=tn_archive_mux alignment=7", pipeline)
         self.assertIn('srtsink name=tn_relay uri="srt://:7703?mode=listener', pipeline)
+        self.assertIn("audio/mpeg,mpegversion=4", pipeline)
+        self.assertIn("avdec_aac", pipeline)
+        self.assertIn("audio/x-raw,format=S16BE,layout=interleaved,channels=2,rate=48000", pipeline)
+        self.assertIn("rtpL16pay mtu=600", pipeline)
+        self.assertIn("application/x-rtp,media=audio,clock-rate=48000,encoding-name=L16,channels=2", pipeline)
+        self.assertIn('srtsink name=tn_archive_audio_relay uri="srt://:8807?mode=listener', pipeline)
         self.assertIn("h264parse name=tn_preview_h264parse", pipeline)
+
+    def test_archive_dk_pipeline_sends_recorded_audio_to_tn_pcm_port(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        feed_state = server_runtime.VideoFeedState("dk", 7702, 7704, "dk-%05d.jpg")
+        selection = server_runtime.ArchivePlaybackSelection(
+            feed="dk",
+            file_path=Path('/archive/video_dk_sample.mp4'),
+            start_offset_seconds=5.0,
+            duration_seconds=30.0,
+        )
+
+        with patch.object(server_runtime, "_load_config", return_value=_server_config()), patch.object(
+            server_runtime.Gst, "parse_launch", side_effect=lambda pipeline: pipeline, create=True
+        ):
+            pipeline = runtime._build_archive_video_pipeline(feed_state, selection)
+
+        self.assertIn('filesrc name=dk_archive_source location="/archive/video_dk_sample.mp4"', pipeline)
+        self.assertIn('srtsink name=dk_relay uri="srt://:7704?mode=listener', pipeline)
+        self.assertIn('srtsink name=dk_archive_audio_relay uri="srt://:8808?mode=listener', pipeline)
+        self.assertNotIn('dk_archive_audio_relay uri="srt://:8807', pipeline)
+
+    def test_audio_relay_restart_is_suppressed_during_archive_playback(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        logs: list[str] = []
+        runtime._log_callback = logs.append
+        runtime._running = True
+        runtime._archive_playback_active = True
+
+        with patch.object(runtime, "_build_audio_pipeline") as build_audio_pipeline:
+            self.assertFalse(runtime._restart_audio_pipeline("audio-tn-to-dk"))
+
+        build_audio_pipeline.assert_not_called()
+        self.assertTrue(any("skipped while back-in-time mode is active" in line for line in logs))
+
+    def test_start_archive_playback_releases_live_pcm_relays_before_archive_pipelines(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        runtime._running = True
+        runtime._video_feeds = {
+            "tn": server_runtime.VideoFeedState("tn", 7701, 7703, "tn-%05d.jpg"),
+            "dk": server_runtime.VideoFeedState("dk", 7702, 7704, "dk-%05d.jpg"),
+        }
+        selections = {
+            "tn": server_runtime.ArchivePlaybackSelection("tn", Path("/archive/video_tn_a.mp4"), 1.0, 10.0),
+            "dk": server_runtime.ArchivePlaybackSelection("dk", Path("/archive/video_dk_b.mp4"), 2.0, 20.0),
+        }
+        calls: list[str] = []
+
+        with patch.object(server_runtime, "_load_config", return_value=_server_config()), patch.object(
+            runtime, "_select_archive_playback_files", return_value=selections
+        ), patch.object(
+            runtime, "_stop_audio_relay_pipelines", side_effect=lambda: calls.append("stop-audio")
+        ), patch.object(
+            runtime,
+            "_start_archive_video_feed",
+            side_effect=lambda feed_state, _selection: calls.append(f"archive-{feed_state.feed}"),
+        ):
+            runtime._start_archive_playback_on_loop()
+
+        self.assertTrue(runtime._archive_playback_active)
+        self.assertEqual(calls, ["stop-audio", "archive-tn", "archive-dk"])
+
+    def test_stop_archive_playback_restores_live_pcm_relays_before_live_video(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        runtime._running = True
+        runtime._archive_playback_active = True
+        runtime._video_feeds = {
+            "tn": server_runtime.VideoFeedState("tn", 7701, 7703, "tn-%05d.jpg"),
+            "dk": server_runtime.VideoFeedState("dk", 7702, 7704, "dk-%05d.jpg"),
+        }
+        calls: list[str] = []
+
+        with patch.object(server_runtime, "_load_config", return_value=_server_config()), patch.object(
+            runtime, "_start_audio_relay_pipelines", side_effect=lambda _config: calls.append("start-audio") or []
+        ), patch.object(
+            runtime, "_start_video_feed", side_effect=lambda feed_state: calls.append(f"live-{feed_state.feed}")
+        ):
+            runtime._stop_archive_playback_on_loop()
+
+        self.assertFalse(runtime._archive_playback_active)
+        self.assertEqual(calls, ["start-audio", "live-tn", "live-dk"])
 
     def test_recording_cannot_start_while_archive_playback_is_active(self) -> None:
         runtime = ServerRuntime(

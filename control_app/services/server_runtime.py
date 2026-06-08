@@ -285,24 +285,7 @@ class ServerRuntime:
 
             self._audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
             self._last_audio_diagnostic_counts = dict(self._audio_diagnostic_counts)
-            self._audio_pipelines = self._build_audio_pipelines(config)
-            failed_audio_labels: list[str] = []
-            for label, pipeline in self._audio_pipelines.items():
-                self._configure_audio_diagnostics(pipeline)
-                self._configure_bus(
-                    pipeline,
-                    label,
-                    lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
-                )
-                try:
-                    self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
-                except RuntimeError as exc:
-                    self._log(
-                        f"[{label}] Audio relay did not arm during server startup; "
-                        f"the server will keep starting and retry this relay. {exc}"
-                    )
-                    failed_audio_labels.append(label)
-            GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self._log_audio_diagnostics)
+            failed_audio_labels = self._start_audio_relay_pipelines(config)
 
             self._last_preview_log_at = {}
             self._last_continuity_warning_at = {}
@@ -377,9 +360,7 @@ class ServerRuntime:
                 feed_state.tee = None
                 feed_state.recording_session = None
 
-        for label, pipeline in list(self._audio_pipelines.items()):
-            self._teardown_pipeline(pipeline, label, timeout_seconds=10, suppress_errors=True)
-        self._audio_pipelines = {}
+        self._stop_audio_relay_pipelines()
         for label in list(self._pipeline_bus_watches):
             self._disconnect_pipeline_bus(label)
 
@@ -457,10 +438,13 @@ class ServerRuntime:
         if self._recording_active:
             raise RuntimeError("Stop recording before going back in time.")
 
+        config = _load_config(self._config_path)
         selections = self._select_archive_playback_files()
 
         stopped_feeds: list[VideoFeedState] = []
         try:
+            self._stop_audio_relay_pipelines()
+
             for feed_state in self._video_feeds.values():
                 if feed_state.pipeline is not None:
                     self._detach_recording_probe(feed_state)
@@ -496,6 +480,9 @@ class ServerRuntime:
                     self._start_video_feed(feed_state)
                 except Exception as exc:  # pragma: no cover - defensive runtime recovery
                     self._log(f"[{feed_state.feed}] ERROR: Could not restore live feed after archive start failure. {exc}")
+            failed_audio_labels = self._start_audio_relay_pipelines(config)
+            for label in failed_audio_labels:
+                GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
             raise
 
         with self._lock:
@@ -515,6 +502,7 @@ class ServerRuntime:
         if not self._archive_playback_active:
             return
 
+        config = _load_config(self._config_path)
         for feed_state in self._video_feeds.values():
             if feed_state.pipeline is not None:
                 self._teardown_pipeline(
@@ -533,6 +521,10 @@ class ServerRuntime:
             self._archive_playback_active = False
             self._archive_playback_started_at = None
             self._archive_playback_files = {}
+
+        failed_audio_labels = self._start_audio_relay_pipelines(config)
+        for label in failed_audio_labels:
+            GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
 
         for feed_state in self._video_feeds.values():
             self._start_video_feed(feed_state)
@@ -618,6 +610,9 @@ class ServerRuntime:
     def _restart_audio_pipeline(self, label: str) -> bool:
         if not self._running:
             return False
+        if self._archive_playback_active:
+            self._log(f"[{label}] Live audio relay restart skipped while back-in-time mode is active.")
+            return False
         config = _load_config(self._config_path)
         self._log(f"[{label}] Restarting audio relay pipeline.")
 
@@ -639,6 +634,35 @@ class ServerRuntime:
             self._log(f"[{label}] Audio relay restart failed; retrying. {exc}")
             GLib.timeout_add_seconds(3, self._restart_audio_pipeline, label)
         return False
+
+    def _start_audio_relay_pipelines(self, config: dict[str, Any]) -> list[str]:
+        self._audio_diagnostic_counts = {name: 0 for name in AUDIO_DIAGNOSTIC_ELEMENTS}
+        self._last_audio_diagnostic_counts = dict(self._audio_diagnostic_counts)
+        self._audio_pipelines = self._build_audio_pipelines(config)
+
+        failed_audio_labels: list[str] = []
+        for label, pipeline in self._audio_pipelines.items():
+            self._configure_audio_diagnostics(pipeline)
+            self._configure_bus(
+                pipeline,
+                label,
+                lambda bus, message, pipeline_label=label: self._on_audio_message(bus, message, pipeline_label),
+            )
+            try:
+                self._set_pipeline_state(pipeline, Gst.State.PLAYING, label, allow_pending=True)
+            except RuntimeError as exc:
+                self._log(
+                    f"[{label}] Audio relay did not arm during server startup; "
+                    f"the server will keep starting and retry this relay. {exc}"
+                )
+                failed_audio_labels.append(label)
+        GLib.timeout_add_seconds(AUDIO_DIAGNOSTIC_LOG_SECONDS, self._log_audio_diagnostics)
+        return failed_audio_labels
+
+    def _stop_audio_relay_pipelines(self) -> None:
+        for label, pipeline in list(self._audio_pipelines.items()):
+            self._teardown_pipeline(pipeline, label, timeout_seconds=10, suppress_errors=True)
+        self._audio_pipelines = {}
 
     def _on_audio_message(self, bus: Gst.Bus, message: Gst.Message, label: str) -> bool:
         if message.type == Gst.MessageType.ERROR:
@@ -1109,8 +1133,19 @@ class ServerRuntime:
         selection: ArchivePlaybackSelection,
     ) -> Gst.Pipeline:
         config = _load_config(self._config_path)
+        ports = config.get("ports", {})
+        audio = config.get("audio", {})
+        audio_rate = int(audio.get("rate", 48000))
+        channels = int(audio.get("channels", 2))
+        encoding_name = str(audio.get("encoding_name", "L16")).strip() or "L16"
+        audio_format = str(audio.get("format", "S16BE")).strip().upper() or "S16BE"
+        if audio_format != "S16BE":
+            raise RuntimeError("audio.format must be S16BE for archive playback on the separate RTP L16 stream.")
         video_streaming_settings = str(config.get("streaming_settings_video", "") or "").strip()
         video_srt_suffix = f"&{video_streaming_settings}" if video_streaming_settings else ""
+        audio_streaming_settings = str(config.get("streaming_settings_audio", "") or "").strip()
+        audio_srt_suffix = f"&{audio_streaming_settings}" if audio_streaming_settings else ""
+        audio_receive_port = archive_audio_receive_port_for_feed(ports, feed_state.feed)
         relay_output_queue = build_queue_element(
             config,
             ("server", "relay_output"),
@@ -1118,6 +1153,15 @@ class ServerRuntime:
                 "max_size_buffers": 30,
                 "max_size_bytes": 0,
                 "max_size_time_ms": 100,
+            },
+        )
+        audio_output_queue = build_queue_element(
+            config,
+            ("server", "audio_output"),
+            {
+                "max_size_buffers": 0,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 500,
             },
         )
         preview_branch_queue = build_queue_element(
@@ -1157,9 +1201,22 @@ class ServerRuntime:
             tee name={feed_state.feed}_stream_tee
 
             {feed_state.feed}_archive_demux. ! queue !
+            video/x-h264 !
             h264parse config-interval=1 !
             video/x-h264,stream-format=byte-stream,alignment=au !
             {feed_state.feed}_archive_mux.
+
+            {feed_state.feed}_archive_demux. ! queue !
+            audio/mpeg,mpegversion=4 !
+            aacparse !
+            avdec_aac !
+            audioconvert ! audioresample !
+            audio/x-raw,format=S16BE,layout=interleaved,channels={channels},rate={audio_rate} !
+            identity name={feed_state.feed}_archive_audio_file signal-handoffs=true silent=true !
+            rtpL16pay mtu=600 !
+            application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+            {audio_output_queue} !
+            srtsink name={feed_state.feed}_archive_audio_relay uri="srt://:{audio_receive_port}?mode=listener{audio_srt_suffix}" wait-for-connection=false
 
             {feed_state.feed}_stream_tee. ! {relay_output_queue} !
             srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener{video_srt_suffix}" wait-for-connection=false
@@ -1240,6 +1297,15 @@ def archive_prefix_for_feed(feed: str) -> str:
         return "video_tn_"
     if normalized == "dk":
         return "video_dk_"
+    raise ValueError(f"Unknown video feed: {feed}")
+
+
+def archive_audio_receive_port_for_feed(ports: dict[str, Any], feed: str) -> int:
+    normalized = str(feed).strip().lower()
+    if normalized == "tn":
+        return int(ports["audio_receive_dk"])
+    if normalized == "dk":
+        return int(ports["audio_receive_tn"])
     raise ValueError(f"Unknown video feed: {feed}")
 
 
