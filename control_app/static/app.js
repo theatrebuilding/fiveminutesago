@@ -27,6 +27,7 @@ const configPanelTitle = document.getElementById("config-panel-title");
 const configEditor = document.getElementById("config-editor");
 const configMessage = document.getElementById("config-message");
 const recordMessage = document.getElementById("record-message");
+const timeShiftMessage = document.getElementById("time-shift-message");
 
 const roleSelect = document.getElementById("role-select");
 const countryField = document.getElementById("country-field");
@@ -87,6 +88,7 @@ const serverPanel = document.getElementById("server-panel");
 const senderPanel = document.getElementById("sender-panel");
 const receiverPanel = document.getElementById("receiver-panel");
 const recordToggleButton = document.getElementById("record-toggle");
+const timeShiftToggleButton = document.getElementById("time-shift-toggle");
 
 const previewTnMeta = document.getElementById("preview-tn-meta");
 const previewTnImage = document.getElementById("preview-tn-image");
@@ -1238,6 +1240,7 @@ function renderStatus(status) {
   const sender = runtime.sender;
   const receiver = runtime.receiver;
   const recording = server?.recording;
+  const archivePlayback = server?.archive_playback;
   const launch = runtime.launch;
   const serverActive = runtime.running && runtime.role === "server";
   const senderActive = runtime.running && runtime.role === "sender";
@@ -1280,7 +1283,13 @@ function renderStatus(status) {
     recordingState.textContent = "Idle";
     recordingMeta.textContent = `${storage.archive.file_count} archived files`;
   } else {
-    if (recording?.active) {
+    if (archivePlayback?.active) {
+      recordingState.textContent = "Back In Time";
+      const names = Object.values(archivePlayback.files || {})
+        .map((file) => file.name)
+        .filter(Boolean);
+      recordingMeta.textContent = names.length ? names.join(" • ") : "Streaming archive playback.";
+    } else if (recording?.active) {
       recordingState.textContent = "Recording";
       recordingMeta.textContent = `Started ${new Date(recording.started_at).toLocaleTimeString()}`;
     } else if (recording?.finalizing) {
@@ -1293,7 +1302,11 @@ function renderStatus(status) {
   }
 
   recordToggleButton.textContent = recording?.active ? "Stop Recording" : "Start Recording";
-  recordToggleButton.disabled = !serverActive;
+  recordToggleButton.disabled = !serverActive || Boolean(archivePlayback?.active);
+  timeShiftToggleButton.textContent = archivePlayback?.active ? "resume present time" : "go back in time";
+  timeShiftToggleButton.classList.toggle("button-accent", !archivePlayback?.active);
+  timeShiftToggleButton.classList.toggle("button-danger", Boolean(archivePlayback?.active));
+  timeShiftToggleButton.disabled = !serverActive || Boolean(recording?.active);
 
   recordingMetric.classList.toggle("hidden", !serverContext);
   serverPanel.classList.toggle("hidden", !serverActive);
@@ -1728,6 +1741,26 @@ async function toggleRecording() {
   }
 }
 
+async function toggleTimeShift() {
+  if (!latestStatus?.runtime?.running || latestStatus.runtime.role !== "server") {
+    return;
+  }
+
+  const action = latestStatus.runtime.server?.archive_playback?.active ? "stop" : "start";
+  setBusy([timeShiftToggleButton], true);
+  timeShiftMessage.textContent = action === "start" ? "Going back in time…" : "Resuming present time…";
+
+  try {
+    const payload = await api(`/api/server/archive-playback/${action}`, { method: "POST" });
+    timeShiftMessage.textContent = payload.message;
+    await refreshStatus();
+  } catch (error) {
+    timeShiftMessage.textContent = error.message;
+  } finally {
+    setBusy([timeShiftToggleButton], false);
+  }
+}
+
 function selectedArchiveBaseName() {
   if (!selectedArchiveFile) {
     return "";
@@ -1962,6 +1995,7 @@ startRoleButton.addEventListener("click", toggleRoleAction);
 senderMicTestButton.addEventListener("click", startSenderMicTest);
 senderOutputTestButton.addEventListener("click", runSenderOutputTest);
 recordToggleButton.addEventListener("click", toggleRecording);
+timeShiftToggleButton.addEventListener("click", toggleTimeShift);
 applyConfigButton.addEventListener("click", () => saveConfig(true));
 dspSettingsButton.addEventListener("click", openDspSettings);
 dspSettingsCancelButton.addEventListener("click", closeDspSettings);

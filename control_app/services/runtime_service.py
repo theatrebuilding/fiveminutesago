@@ -414,6 +414,26 @@ class RuntimeService:
         self.record_event("Recording stopped from dashboard.")
         return self.snapshot()
 
+    def start_archive_playback(self) -> dict[str, Any]:
+        with self._lock:
+            runtime = self._server_runtime
+            request = self._current_request
+        if runtime is None or request is None or request.role != "server":
+            raise RuntimeError("Go back in time is only available while the server role is running.")
+        runtime.start_archive_playback()
+        self.record_event("Go back in time started from dashboard.")
+        return self.snapshot()
+
+    def stop_archive_playback(self) -> dict[str, Any]:
+        with self._lock:
+            runtime = self._server_runtime
+            request = self._current_request
+        if runtime is None or request is None or request.role != "server":
+            raise RuntimeError("Go back in time is only available while the server role is running.")
+        runtime.stop_archive_playback()
+        self.record_event("Present time resumed from dashboard.")
+        return self.snapshot()
+
     def set_sync_delay(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("Sync delay payload must be a JSON object.")

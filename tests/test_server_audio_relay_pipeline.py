@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -252,6 +253,106 @@ class _FakePipeline:
 
     def get_state(self, _timeout_ns: int) -> tuple[str, str, None]:
         return "SUCCESS", self.states[-1], None
+
+
+class ServerArchivePlaybackTests(unittest.TestCase):
+    def test_archive_candidates_filter_by_feed_prefix_and_ignore_incomplete_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_dir = Path(tmpdir)
+            keep_tn = archive_dir / "video_tn_20260101010101.mp4"
+            keep_dk = archive_dir / "video_dk_20260101010101.mp4"
+            ignored_failed = archive_dir / "video_tn_20260101010101.failed.mp4"
+            ignored_recording = archive_dir / "video_tn_20260101010101.recording.mp4"
+            ignored_other = archive_dir / "notes.mp4"
+            for path in (keep_tn, keep_dk, ignored_failed, ignored_recording, ignored_other):
+                path.write_bytes(b"x")
+
+            self.assertEqual(server_runtime.archive_candidates_for_feed(archive_dir, "tn"), [keep_tn])
+            self.assertEqual(server_runtime.archive_candidates_for_feed(archive_dir, "dk"), [keep_dk])
+
+    def test_archive_feed_prefixes_send_opposite_country_recordings_to_receivers(self) -> None:
+        # The server's `tn` feed is routed to the DK receiver; its archive source must be video_tn_*.
+        # The server's `dk` feed is routed to the TN receiver; its archive source must be video_dk_*.
+        self.assertEqual(server_runtime.archive_prefix_for_feed("tn"), "video_tn_")
+        self.assertEqual(server_runtime.archive_prefix_for_feed("dk"), "video_dk_")
+
+    def test_random_archive_start_offset_uses_duration_when_available(self) -> None:
+        with patch.object(server_runtime.random, "uniform", return_value=12.5) as uniform:
+            offset = server_runtime.random_archive_start_offset(60.0)
+
+        self.assertEqual(offset, 12.5)
+        uniform.assert_called_once_with(0.0, 59.0)
+        self.assertEqual(server_runtime.random_archive_start_offset(None), 0.0)
+        self.assertEqual(server_runtime.random_archive_start_offset(0.5), 0.0)
+
+    def test_archive_video_pipeline_reads_file_and_sends_to_receiver_port(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        feed_state = server_runtime.VideoFeedState("tn", 7701, 7703, "tn-%05d.jpg")
+        selection = server_runtime.ArchivePlaybackSelection(
+            feed="tn",
+            file_path=Path('/archive/video_tn_sample.mp4'),
+            start_offset_seconds=3.0,
+            duration_seconds=20.0,
+        )
+
+        with patch.object(server_runtime, "_load_config", return_value=_server_config()), patch.object(
+            server_runtime.Gst, "parse_launch", side_effect=lambda pipeline: pipeline, create=True
+        ):
+            pipeline = runtime._build_archive_video_pipeline(feed_state, selection)
+
+        self.assertIn('filesrc name=tn_archive_source location="/archive/video_tn_sample.mp4"', pipeline)
+        self.assertIn("qtdemux name=tn_archive_demux", pipeline)
+        self.assertIn("mpegtsmux name=tn_archive_mux alignment=7", pipeline)
+        self.assertIn('srtsink name=tn_relay uri="srt://:7703?mode=listener', pipeline)
+        self.assertIn("h264parse name=tn_preview_h264parse", pipeline)
+
+    def test_recording_cannot_start_while_archive_playback_is_active(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        runtime._running = True
+        runtime._archive_playback_active = True
+
+        with self.assertRaisesRegex(RuntimeError, "Resume present time"):
+            runtime._start_recording_on_loop()
+
+    def test_select_archive_playback_files_requires_both_feed_directions(self) -> None:
+        runtime = ServerRuntime(
+            config_path=Path("config.yaml"),
+            recording_dir=Path("recordings"),
+            archive_dir=Path("archive"),
+            preview_dir=Path("previews"),
+        )
+        runtime._video_feeds = {
+            "tn": server_runtime.VideoFeedState("tn", 7701, 7703, "tn-%05d.jpg"),
+            "dk": server_runtime.VideoFeedState("dk", 7702, 7704, "dk-%05d.jpg"),
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            archive_dir = Path(tmpdir)
+            tn_file = archive_dir / "video_tn_a.mp4"
+            dk_file = archive_dir / "video_dk_b.mp4"
+            tn_file.write_bytes(b"tn")
+            dk_file.write_bytes(b"dk")
+            runtime._archive_dir = archive_dir
+
+            with patch.object(server_runtime, "_probe_media_duration_seconds", return_value=30.0), patch.object(
+                server_runtime.random, "choice", side_effect=lambda values: values[0]
+            ), patch.object(server_runtime.random, "uniform", return_value=7.0):
+                selections = runtime._select_archive_playback_files()
+
+        self.assertEqual(selections["tn"].file_path.name, "video_tn_a.mp4")
+        self.assertEqual(selections["dk"].file_path.name, "video_dk_b.mp4")
+        self.assertEqual(selections["tn"].start_offset_seconds, 7.0)
+        self.assertEqual(selections["dk"].duration_seconds, 30.0)
 
 
 if __name__ == "__main__":

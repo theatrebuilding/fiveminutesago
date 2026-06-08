@@ -396,6 +396,25 @@ async def server_recording_action(action: str, request: Request) -> dict[str, An
     return {"message": message, "runtime": status}
 
 
+@app.post("/api/server/archive-playback/{action}")
+async def server_archive_playback_action(action: str, request: Request) -> dict[str, Any]:
+    services = _services(request)
+
+    try:
+        if action == "start":
+            status = services.runtime_service.start_archive_playback()
+            message = "Going back in time."
+        elif action == "stop":
+            status = services.runtime_service.stop_archive_playback()
+            message = "Present time resumed."
+        else:
+            raise HTTPException(status_code=404, detail="Unknown archive playback action.")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"message": message, "runtime": status}
+
+
 @app.get("/api/server/preview/{feed}.jpg")
 async def server_preview(feed: str, request: Request) -> FileResponse:
     feed = feed.strip().lower()

@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import datetime as dt
+import json
 from pathlib import Path
+import random
+import shutil
+import subprocess
 import threading
 import time
 from typing import Any, Callable
@@ -51,6 +55,14 @@ class VideoFeedState:
     recording_session: RecordingSession | None = None
 
 
+@dataclass(frozen=True)
+class ArchivePlaybackSelection:
+    feed: str
+    file_path: Path
+    start_offset_seconds: float
+    duration_seconds: float | None
+
+
 class ServerRuntime:
     def __init__(
         self,
@@ -76,6 +88,9 @@ class ServerRuntime:
         self._recording_active = False
         self._recording_started_at: float | None = None
         self._recording_files: dict[str, RecordingPaths] = {}
+        self._archive_playback_active = False
+        self._archive_playback_started_at: float | None = None
+        self._archive_playback_files: dict[str, ArchivePlaybackSelection] = {}
         self._finalization_active_count = 0
         self._started_at: float | None = None
         self._stopped_at: float | None = None
@@ -134,6 +149,14 @@ class ServerRuntime:
         self._run_on_loop(self._stop_recording_on_loop, timeout=300)
         return self.snapshot()
 
+    def start_archive_playback(self) -> dict[str, Any]:
+        self._run_on_loop(self._start_archive_playback_on_loop, timeout=60)
+        return self.snapshot()
+
+    def stop_archive_playback(self) -> dict[str, Any]:
+        self._run_on_loop(self._stop_archive_playback_on_loop, timeout=60)
+        return self.snapshot()
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             packet_activity = self._packet_monitor.snapshot() if self._packet_monitor is not None else {}
@@ -156,6 +179,24 @@ class ServerRuntime:
                     "started_at_ts": self._recording_started_at,
                     "files": {
                         feed: str(paths.temp_path) for feed, paths in self._recording_files.items()
+                    },
+                },
+                "archive_playback": {
+                    "active": self._archive_playback_active,
+                    "started_at": _to_iso(self._archive_playback_started_at),
+                    "started_at_ts": self._archive_playback_started_at,
+                    "files": {
+                        feed: {
+                            "path": str(selection.file_path),
+                            "name": selection.file_path.name,
+                            "start_offset_seconds": round(selection.start_offset_seconds, 3),
+                            "duration_seconds": (
+                                round(selection.duration_seconds, 3)
+                                if selection.duration_seconds is not None
+                                else None
+                            ),
+                        }
+                        for feed, selection in self._archive_playback_files.items()
                     },
                 },
                 "packet_activity": packet_activity,
@@ -318,6 +359,10 @@ class ServerRuntime:
             self._last_exit_code = 0
 
         self._stop_recording_on_loop()
+        with self._lock:
+            self._archive_playback_active = False
+            self._archive_playback_started_at = None
+            self._archive_playback_files = {}
 
         for feed_state in self._video_feeds.values():
             if feed_state.pipeline is not None:
@@ -394,8 +439,181 @@ class ServerRuntime:
             self._last_decoded_frame_at.pop(feed, None)
             self._video_decode_missing_since.pop(feed, None)
 
-        self._start_video_feed(feed_state)
+        if self._archive_playback_active:
+            selection = self._archive_playback_files.get(feed)
+            if selection is None:
+                self._log(f"[{feed}] Archive playback selection missing; leaving feed stopped.")
+                return False
+            self._start_archive_video_feed(feed_state, selection)
+        else:
+            self._start_video_feed(feed_state)
         return False
+
+    def _start_archive_playback_on_loop(self) -> None:
+        if not self._running:
+            raise RuntimeError("Server runtime is not running.")
+        if self._archive_playback_active:
+            return
+        if self._recording_active:
+            raise RuntimeError("Stop recording before going back in time.")
+
+        selections = self._select_archive_playback_files()
+
+        stopped_feeds: list[VideoFeedState] = []
+        try:
+            for feed_state in self._video_feeds.values():
+                if feed_state.pipeline is not None:
+                    self._detach_recording_probe(feed_state)
+                    self._teardown_pipeline(
+                        feed_state.pipeline,
+                        f"video-{feed_state.feed}",
+                        timeout_seconds=10,
+                        suppress_errors=True,
+                    )
+                    feed_state.pipeline = None
+                    feed_state.tee = None
+                    feed_state.recording_session = None
+                    stopped_feeds.append(feed_state)
+                self._next_preview_frame_at.pop(feed_state.feed, None)
+                self._last_decoded_frame_at.pop(feed_state.feed, None)
+                self._video_decode_missing_since.pop(feed_state.feed, None)
+
+            for feed_state in self._video_feeds.values():
+                self._start_archive_video_feed(feed_state, selections[feed_state.feed])
+        except Exception:
+            for feed_state in self._video_feeds.values():
+                if feed_state.pipeline is not None:
+                    self._teardown_pipeline(
+                        feed_state.pipeline,
+                        f"video-{feed_state.feed}",
+                        timeout_seconds=5,
+                        suppress_errors=True,
+                    )
+                    feed_state.pipeline = None
+                    feed_state.tee = None
+            for feed_state in stopped_feeds:
+                try:
+                    self._start_video_feed(feed_state)
+                except Exception as exc:  # pragma: no cover - defensive runtime recovery
+                    self._log(f"[{feed_state.feed}] ERROR: Could not restore live feed after archive start failure. {exc}")
+            raise
+
+        with self._lock:
+            self._archive_playback_active = True
+            self._archive_playback_started_at = time.time()
+            self._archive_playback_files = selections
+
+        summary = "; ".join(
+            f"{feed}-> {selection.file_path.name} @ {selection.start_offset_seconds:.1f}s"
+            for feed, selection in selections.items()
+        )
+        self._log(f"Experimental go back in time started: {summary}")
+
+    def _stop_archive_playback_on_loop(self) -> None:
+        if not self._running:
+            raise RuntimeError("Server runtime is not running.")
+        if not self._archive_playback_active:
+            return
+
+        for feed_state in self._video_feeds.values():
+            if feed_state.pipeline is not None:
+                self._teardown_pipeline(
+                    feed_state.pipeline,
+                    f"video-{feed_state.feed}",
+                    timeout_seconds=10,
+                    suppress_errors=True,
+                )
+                feed_state.pipeline = None
+                feed_state.tee = None
+            self._next_preview_frame_at.pop(feed_state.feed, None)
+            self._last_decoded_frame_at.pop(feed_state.feed, None)
+            self._video_decode_missing_since.pop(feed_state.feed, None)
+
+        with self._lock:
+            self._archive_playback_active = False
+            self._archive_playback_started_at = None
+            self._archive_playback_files = {}
+
+        for feed_state in self._video_feeds.values():
+            self._start_video_feed(feed_state)
+
+        self._log("Experimental go back in time stopped; live streams resumed.")
+
+    def _select_archive_playback_files(self) -> dict[str, ArchivePlaybackSelection]:
+        selections: dict[str, ArchivePlaybackSelection] = {}
+        for feed in self._video_feeds:
+            candidates = archive_candidates_for_feed(self._archive_dir, feed)
+            if not candidates:
+                receiver = "DK" if feed == "tn" else "TN"
+                prefix = archive_prefix_for_feed(feed)
+                raise RuntimeError(f"No archived files matching {prefix}*.mp4 are available for {receiver}.")
+
+            file_path = random.choice(candidates)
+            duration = _probe_media_duration_seconds(file_path)
+            start_offset = random_archive_start_offset(duration)
+            selections[feed] = ArchivePlaybackSelection(
+                feed=feed,
+                file_path=file_path,
+                start_offset_seconds=start_offset,
+                duration_seconds=duration,
+            )
+        return selections
+
+    def _start_archive_video_feed(
+        self,
+        feed_state: VideoFeedState,
+        selection: ArchivePlaybackSelection,
+    ) -> None:
+        pipeline = self._build_archive_video_pipeline(feed_state, selection)
+        feed_state.pipeline = pipeline
+        feed_state.tee = pipeline.get_by_name(f"{feed_state.feed}_stream_tee")
+        self._configure_bus(
+            pipeline,
+            f"video-{feed_state.feed}",
+            lambda bus, message, feed=feed_state.feed: self._on_video_message(bus, message, feed),
+        )
+        preview_parser = pipeline.get_by_name(f"{feed_state.feed}_preview_h264parse")
+        if preview_parser is None:
+            raise RuntimeError(f"Could not access archive preview parser for {feed_state.feed}.")
+        preview_pad = preview_parser.get_static_pad("src")
+        if preview_pad is None:
+            raise RuntimeError(f"Could not access archive preview parser src pad for {feed_state.feed}.")
+        self._next_preview_frame_at[feed_state.feed] = 0.0
+        preview_pad.add_probe(
+            Gst.PadProbeType.BUFFER,
+            self._throttle_preview_h264,
+            feed_state.feed,
+        )
+        self._set_pipeline_state(
+            pipeline,
+            Gst.State.PLAYING,
+            f"video-{feed_state.feed}",
+            allow_pending=True,
+        )
+        self._seek_archive_video_feed(feed_state.feed, selection.start_offset_seconds)
+
+    def _seek_archive_video_feed(self, feed: str, offset_seconds: float) -> bool:
+        feed_state = self._video_feeds.get(feed)
+        pipeline = feed_state.pipeline if feed_state is not None else None
+        if pipeline is None:
+            return False
+
+        offset_ns = int(max(0.0, offset_seconds) * Gst.SECOND)
+        flags = Gst.SeekFlags.FLUSH | Gst.SeekFlags.KEY_UNIT
+        ok = bool(pipeline.seek_simple(Gst.Format.TIME, flags, offset_ns))
+        if not ok:
+            self._log(f"[{feed}] WARNING: Could not seek archive playback to {offset_seconds:.1f}s.")
+        else:
+            pipeline.set_state(Gst.State.PLAYING)
+        return ok
+
+    def _loop_archive_video_feed(self, feed: str) -> bool:
+        if not self._archive_playback_active:
+            return False
+        if feed not in self._archive_playback_files:
+            return False
+        self._log(f"[{feed}] Archive playback reached end; looping to beginning.")
+        return self._seek_archive_video_feed(feed, 0.0)
 
     def _restart_audio_pipeline(self, label: str) -> bool:
         if not self._running:
@@ -454,6 +672,8 @@ class ServerRuntime:
                 self._log(f"[{feed}] WARNING: {err}. {debug or ''}".strip())
         elif message.type == Gst.MessageType.EOS:
             self._log(f"[{feed}] End of stream detected.")
+            if self._archive_playback_active and self._loop_archive_video_feed(feed):
+                return True
             GLib.timeout_add_seconds(3, self._restart_video_feed, feed)
         elif message.type == Gst.MessageType.ELEMENT:
             structure = message.get_structure()
@@ -508,6 +728,8 @@ class ServerRuntime:
             raise RuntimeError("Server runtime is not running.")
         if self._recording_active:
             return
+        if self._archive_playback_active:
+            raise RuntimeError("Resume present time before starting a recording.")
 
         recording_config = _resolve_recording_config(_load_config(self._config_path))
 
@@ -881,6 +1103,79 @@ class ServerRuntime:
         """
         return Gst.parse_launch(pipeline_str.strip())
 
+    def _build_archive_video_pipeline(
+        self,
+        feed_state: VideoFeedState,
+        selection: ArchivePlaybackSelection,
+    ) -> Gst.Pipeline:
+        config = _load_config(self._config_path)
+        video_streaming_settings = str(config.get("streaming_settings_video", "") or "").strip()
+        video_srt_suffix = f"&{video_streaming_settings}" if video_streaming_settings else ""
+        relay_output_queue = build_queue_element(
+            config,
+            ("server", "relay_output"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        preview_branch_queue = build_queue_element(
+            config,
+            ("server", "preview_branch"),
+            {
+                "max_size_buffers": 120,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        preview_demux_queue = build_queue_element(
+            config,
+            ("server", "preview_demux"),
+            {
+                "max_size_buffers": 60,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        preview_output_queue = build_queue_element(
+            config,
+            ("server", "preview_output"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 5,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        location = _gst_escape(selection.file_path)
+        pipeline_str = f"""
+            filesrc name={feed_state.feed}_archive_source location="{location}" !
+            qtdemux name={feed_state.feed}_archive_demux
+
+            mpegtsmux name={feed_state.feed}_archive_mux alignment=7 !
+            tee name={feed_state.feed}_stream_tee
+
+            {feed_state.feed}_archive_demux. ! queue !
+            h264parse config-interval=1 !
+            video/x-h264,stream-format=byte-stream,alignment=au !
+            {feed_state.feed}_archive_mux.
+
+            {feed_state.feed}_stream_tee. ! {relay_output_queue} !
+            srtsink name={feed_state.feed}_relay uri="srt://:{feed_state.receive_port}?mode=listener{video_srt_suffix}" wait-for-connection=false
+
+            {feed_state.feed}_stream_tee. ! {preview_branch_queue} !
+            tsdemux latency=50 name={feed_state.feed}_preview_demux
+            {feed_state.feed}_preview_demux. ! {preview_demux_queue} ! h264parse name={feed_state.feed}_preview_h264parse config-interval=1 !
+            avdec_h264 !
+            {preview_output_queue} !
+            videoconvert ! videoscale ! videorate drop-only=true !
+            video/x-raw,width=640,height=360,framerate=1/5 !
+            jpegenc quality=70 !
+            multifilesink location="{feed_state.preview_pattern}" max-files=2 post-messages=true sync=false async=false
+        """
+        return Gst.parse_launch(pipeline_str.strip())
+
     def _log(self, message: str) -> None:
         if self._log_callback is not None:
             self._log_callback(message)
@@ -937,6 +1232,75 @@ def _load_config(config_path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise RuntimeError("Config must be a top-level YAML mapping.")
     return data
+
+
+def archive_prefix_for_feed(feed: str) -> str:
+    normalized = str(feed).strip().lower()
+    if normalized == "tn":
+        return "video_tn_"
+    if normalized == "dk":
+        return "video_dk_"
+    raise ValueError(f"Unknown video feed: {feed}")
+
+
+def archive_candidates_for_feed(archive_dir: Path, feed: str) -> list[Path]:
+    prefix = archive_prefix_for_feed(feed)
+    return sorted(
+        path
+        for path in archive_dir.glob(f"{prefix}*.mp4")
+        if path.is_file()
+        and not path.name.endswith(".failed.mp4")
+        and not path.name.endswith(".recording.mp4")
+    )
+
+
+def random_archive_start_offset(duration_seconds: float | None) -> float:
+    if duration_seconds is None or duration_seconds <= 1.0:
+        return 0.0
+    return random.uniform(0.0, max(0.0, duration_seconds - 1.0))
+
+
+def _probe_media_duration_seconds(path: Path) -> float | None:
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                ffprobe,
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "json",
+                str(path),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    try:
+        data = json.loads(result.stdout or "{}")
+        duration = float((data.get("format") or {}).get("duration"))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+    if duration <= 0:
+        return None
+    return duration
+
+
+def _gst_escape(value: Path | str) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
 
 
 def build_audio_relay_pipeline_strings(config: dict[str, Any]) -> dict[str, str]:
