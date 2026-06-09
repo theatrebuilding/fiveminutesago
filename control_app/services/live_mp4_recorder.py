@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 import threading
-from typing import Callable
+from typing import BinaryIO, Callable
 
 import gi
 
@@ -18,6 +19,9 @@ class RecordingPaths:
     temp_path: Path
     final_path: Path
     failed_path: Path
+    raw_temp_path: Path
+    raw_final_path: Path
+    audio_fallback_path: Path
 
 
 class LiveMp4Recorder:
@@ -45,11 +49,14 @@ class LiveMp4Recorder:
         self._demux: Gst.Element | None = None
         self._mux: Gst.Element | None = None
         self._bus_thread: threading.Thread | None = None
+        self._raw_file: BinaryIO | None = None
         self._finished = threading.Event()
         self._accepting_data = False
+        self._accepting_mp4_data = False
         self._start_pts_ns: int | None = None
         self._error_message: str | None = None
         self._logged_push_failure = False
+        self._logged_raw_write_failure = False
         self._logged_missing_h264_timestamper = False
         self._audio_branch_linked = False
         self._video_branch_linked = False
@@ -64,8 +71,12 @@ class LiveMp4Recorder:
 
         self._paths.temp_path.parent.mkdir(parents=True, exist_ok=True)
         self._paths.final_path.parent.mkdir(parents=True, exist_ok=True)
+        self._paths.raw_temp_path.parent.mkdir(parents=True, exist_ok=True)
         _safe_unlink(self._paths.temp_path)
         _safe_unlink(self._paths.failed_path)
+        _safe_unlink(self._paths.raw_temp_path)
+        _safe_unlink(self._paths.raw_final_path)
+        _safe_unlink(self._paths.audio_fallback_path)
 
         pipeline = Gst.Pipeline.new(f"{self._feed}_mp4_recording")
         appsrc = Gst.ElementFactory.make("appsrc", f"{self._feed}_record_source")
@@ -106,16 +117,21 @@ class LiveMp4Recorder:
         if not mux.link(sink):
             raise RuntimeError(f"Could not link mp4mux to filesink for {self._feed} recording.")
 
+        raw_file = self._paths.raw_temp_path.open("wb")
+
         with self._lock:
             self._pipeline = pipeline
             self._appsrc = appsrc
             self._demux = demux
             self._mux = mux
+            self._raw_file = raw_file
             self._accepting_data = True
+            self._accepting_mp4_data = True
             self._finished.clear()
             self._error_message = None
             self._start_pts_ns = None
             self._logged_push_failure = False
+            self._logged_raw_write_failure = False
             self._audio_branch_linked = False
             self._video_branch_linked = False
 
@@ -124,12 +140,15 @@ class LiveMp4Recorder:
         state_change = pipeline.set_state(Gst.State.PLAYING)
         if state_change == Gst.StateChangeReturn.FAILURE:
             pipeline.set_state(Gst.State.NULL)
+            raw_file.close()
             with self._lock:
                 self._pipeline = None
                 self._appsrc = None
                 self._demux = None
                 self._mux = None
+                self._raw_file = None
                 self._accepting_data = False
+                self._accepting_mp4_data = False
             raise RuntimeError(f"Could not start MP4 recording pipeline for {self._feed}.")
 
         bus_thread = threading.Thread(
@@ -145,30 +164,52 @@ class LiveMp4Recorder:
 
     def push_ts_buffer(self, buffer: Gst.Buffer) -> None:
         with self._lock:
-            if not self._accepting_data or self._appsrc is None:
+            if not self._accepting_data:
                 return
-            appsrc = self._appsrc
+            raw_file = self._raw_file
+            appsrc = self._appsrc if self._accepting_mp4_data else None
+            if raw_file is not None:
+                try:
+                    raw_file.write(_buffer_bytes(buffer))
+                except Exception as exc:  # pragma: no cover - filesystem/runtime only
+                    if not self._logged_raw_write_failure:
+                        self._logged_raw_write_failure = True
+                        self._log(f"[{self._feed}] WARNING: Could not write raw TS recording data. {exc}")
+
+        if appsrc is None:
+            return
 
         flow = appsrc.emit("push-buffer", buffer.copy_deep())
         if flow == Gst.FlowReturn.OK:
             return
+
+        flow_label = _enum_label(flow)
+        with self._lock:
+            self._accepting_mp4_data = False
+            if self._error_message is None:
+                self._error_message = f"MP4 recorder push-buffer returned {flow_label}."
 
         if flow != Gst.FlowReturn.FLUSHING and not self._logged_push_failure:
             with self._lock:
                 if self._logged_push_failure:
                     return
                 self._logged_push_failure = True
-            flow_label = getattr(flow, "value_nick", str(int(flow)))
             self._log(f"[{self._feed}] WARNING: MP4 recorder dropped TS data ({flow_label}).")
 
     def stop(self, timeout: float = 30.0) -> None:
         with self._lock:
             self._accepting_data = False
+            self._accepting_mp4_data = False
             appsrc = self._appsrc
             pipeline = self._pipeline
+            raw_file = self._raw_file
+            self._raw_file = None
 
         if appsrc is not None:
             appsrc.emit("end-of-stream")
+
+        if raw_file is not None:
+            raw_file.close()
 
         finished = self._finished.wait(timeout=timeout)
         if not finished:
@@ -195,21 +236,28 @@ class LiveMp4Recorder:
             bus_thread.join(timeout=2)
 
         if error_message is not None:
-            self._preserve_failed_recording()
+            self._finalize_with_raw_fallback(error_message)
             return
 
         if start_pts_ns is None:
-            _safe_unlink(self._paths.temp_path)
-            self._log(f"[{self._feed}] Recording stopped before the next IDR frame; no MP4 was written.")
+            if self._has_raw_recording():
+                self._finalize_with_raw_fallback("Recording stopped before the live MP4 muxer aligned on an IDR frame.")
+            else:
+                _safe_unlink(self._paths.temp_path)
+                self._log(f"[{self._feed}] Recording stopped before the next IDR frame; no MP4 was written.")
             return
 
         if not self._paths.temp_path.exists() or self._paths.temp_path.stat().st_size == 0:
             _safe_unlink(self._paths.temp_path)
-            self._log(f"[{self._feed}] Recording produced no MP4 output.")
+            if self._has_raw_recording():
+                self._finalize_with_raw_fallback("Live MP4 muxer produced no output.")
+            else:
+                self._log(f"[{self._feed}] Recording produced no MP4 output.")
             return
 
         _safe_unlink(self._paths.final_path)
         self._paths.temp_path.replace(self._paths.final_path)
+        _safe_unlink(self._paths.raw_temp_path)
         self._log(f"[{self._feed}] Final archive ready: {self._paths.final_path}")
 
     def _watch_bus(self) -> None:
@@ -234,7 +282,7 @@ class LiveMp4Recorder:
                 with self._lock:
                     if self._error_message is None:
                         self._error_message = f"{err}. {debug or ''}".strip()
-                    self._accepting_data = False
+                    self._accepting_mp4_data = False
                 self._log(f"[{self._feed}] ERROR: MP4 recorder failed. {err}. {debug or ''}".strip())
                 self._finished.set()
                 return
@@ -266,7 +314,7 @@ class LiveMp4Recorder:
             with self._lock:
                 if self._error_message is None:
                     self._error_message = str(exc)
-                self._accepting_data = False
+                self._accepting_mp4_data = False
             self._log(f"[{self._feed}] ERROR: Could not attach recorder branch. {exc}")
             self._finished.set()
 
@@ -495,6 +543,101 @@ class LiveMp4Recorder:
         self._paths.temp_path.replace(self._paths.failed_path)
         self._log(f"[{self._feed}] Preserved failed MP4 artifact: {self._paths.failed_path}")
 
+    def _has_raw_recording(self) -> bool:
+        return self._paths.raw_temp_path.exists() and self._paths.raw_temp_path.stat().st_size > 0
+
+    def _finalize_with_raw_fallback(self, reason: str) -> None:
+        if not self._has_raw_recording():
+            self._preserve_failed_recording()
+            self._log(f"[{self._feed}] ERROR: No raw TS data was available for MP4 fallback. {reason}")
+            return
+
+        _safe_unlink(self._paths.raw_final_path)
+        self._paths.raw_temp_path.replace(self._paths.raw_final_path)
+        self._log(f"[{self._feed}] Falling back to raw TS remux after MP4 recorder failure. {reason}")
+
+        if self._create_video_mp4_from_raw(copy_video=True) or self._create_video_mp4_from_raw(copy_video=False):
+            _safe_unlink(self._paths.temp_path)
+            self._extract_audio_fallback()
+            self._log(f"[{self._feed}] Final video-only archive ready: {self._paths.final_path}")
+            return
+
+        self._preserve_failed_recording()
+        self._log(
+            f"[{self._feed}] ERROR: Could not create fallback video MP4; raw TS preserved: {self._paths.raw_final_path}"
+        )
+
+    def _create_video_mp4_from_raw(self, *, copy_video: bool) -> bool:
+        _safe_unlink(self._paths.final_path)
+        command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(self._paths.raw_final_path),
+            "-map",
+            "0:v:0",
+            "-an",
+        ]
+        if copy_video:
+            command.extend(["-c:v", "copy"])
+        else:
+            command.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"])
+        command.extend(["-movflags", "+faststart", str(self._paths.final_path)])
+
+        if self._run_ffmpeg(command, "video copy remux" if copy_video else "video transcode"):
+            if self._paths.final_path.exists() and self._paths.final_path.stat().st_size > 0:
+                return True
+        _safe_unlink(self._paths.final_path)
+        return False
+
+    def _extract_audio_fallback(self) -> None:
+        _safe_unlink(self._paths.audio_fallback_path)
+        bitrate_kbps = max(1, self._audio_bitrate // 1000)
+        command = [
+            "ffmpeg",
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(self._paths.raw_final_path),
+            "-map",
+            "0:a:0",
+            "-vn",
+            "-c:a",
+            "aac",
+            "-b:a",
+            f"{bitrate_kbps}k",
+            str(self._paths.audio_fallback_path),
+        ]
+        if self._run_ffmpeg(command, "audio fallback extract"):
+            if self._paths.audio_fallback_path.exists() and self._paths.audio_fallback_path.stat().st_size > 0:
+                self._log(f"[{self._feed}] Separate fallback audio ready: {self._paths.audio_fallback_path}")
+                return
+        _safe_unlink(self._paths.audio_fallback_path)
+        self._log(f"[{self._feed}] WARNING: Raw TS fallback did not produce separate audio.")
+
+    def _run_ffmpeg(self, command: list[str], label: str) -> bool:
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            self._log(f"[{self._feed}] ERROR: ffmpeg is required for {label} fallback but was not found.")
+            return False
+        except Exception as exc:  # pragma: no cover - subprocess/runtime only
+            self._log(f"[{self._feed}] ERROR: ffmpeg {label} fallback could not run. {exc}")
+            return False
+
+        if result.returncode == 0:
+            return True
+
+        stderr = (result.stderr or "").strip()
+        detail = f" {stderr}" if stderr else ""
+        self._log(f"[{self._feed}] WARNING: ffmpeg {label} fallback failed with code {result.returncode}.{detail}")
+        return False
+
     def _log(self, message: str) -> None:
         if self._log_callback is not None:
             self._log_callback(message)
@@ -553,6 +696,27 @@ def _buffer_timestamp_ns(buffer: Gst.Buffer) -> int | None:
     if buffer.dts != Gst.CLOCK_TIME_NONE:
         return int(buffer.dts)
     return None
+
+
+def _buffer_bytes(buffer: Gst.Buffer) -> bytes:
+    success, map_info = buffer.map(Gst.MapFlags.READ)
+    if not success:
+        raise RuntimeError("Could not map GStreamer buffer.")
+
+    try:
+        return bytes(map_info.data)
+    finally:
+        buffer.unmap(map_info)
+
+
+def _enum_label(value: object) -> str:
+    value_nick = getattr(value, "value_nick", None)
+    if value_nick:
+        return str(value_nick)
+    try:
+        return str(int(value))  # type: ignore[arg-type]
+    except Exception:
+        return str(value)
 
 
 def _is_idr_candidate(buffer: Gst.Buffer) -> bool:

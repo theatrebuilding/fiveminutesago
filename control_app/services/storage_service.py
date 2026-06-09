@@ -8,7 +8,7 @@ import threading
 from typing import Any
 
 
-ARCHIVE_MEDIA_SUFFIXES = {".ts", ".mp4"}
+ARCHIVE_MEDIA_SUFFIXES = {".m4a", ".mp4", ".ts"}
 
 
 class StorageService:
@@ -153,6 +153,8 @@ class StorageService:
     def media_type_for(self, path: Path) -> str:
         if path.suffix.lower() == ".mp4":
             return "video/mp4"
+        if path.suffix.lower() == ".m4a":
+            return "audio/mp4"
         if path.suffix.lower() == ".ts":
             return "video/mp2t"
         return "application/octet-stream"
@@ -191,6 +193,7 @@ class StorageService:
             path.suffix.lower() in ARCHIVE_MEDIA_SUFFIXES
             and not path.name.endswith(".recording.ts")
             and not path.name.endswith(".recording.mp4")
+            and not path.name.endswith(".recording.m4a")
         )
 
     def _resolve_archive_candidate(self, filename: str) -> Path | None:

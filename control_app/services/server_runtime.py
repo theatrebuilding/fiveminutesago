@@ -763,11 +763,17 @@ class ServerRuntime:
                 temp_path=self._recording_dir / f"video_tn_{timestamp}.recording.mp4",
                 final_path=self._archive_dir / f"video_tn_{timestamp}.mp4",
                 failed_path=self._archive_dir / f"video_tn_{timestamp}.failed.mp4",
+                raw_temp_path=self._recording_dir / f"video_tn_{timestamp}.recording.ts",
+                raw_final_path=self._archive_dir / f"video_tn_{timestamp}.ts",
+                audio_fallback_path=self._archive_dir / f"video_tn_{timestamp}.audio.m4a",
             ),
             "dk": RecordingPaths(
                 temp_path=self._recording_dir / f"video_dk_{timestamp}.recording.mp4",
                 final_path=self._archive_dir / f"video_dk_{timestamp}.mp4",
                 failed_path=self._archive_dir / f"video_dk_{timestamp}.failed.mp4",
+                raw_temp_path=self._recording_dir / f"video_dk_{timestamp}.recording.ts",
+                raw_final_path=self._archive_dir / f"video_dk_{timestamp}.ts",
+                audio_fallback_path=self._archive_dir / f"video_dk_{timestamp}.audio.m4a",
             ),
         }
 
