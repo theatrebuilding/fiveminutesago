@@ -1,0 +1,701 @@
+#!/usr/bin/env python3
+import gi
+gi.require_version("Gst", "1.0")
+from gi.repository import Gst, GLib
+import signal
+import sys
+import argparse
+import threading
+import time
+import os
+from pathlib import Path
+
+# Insert parent directory for config_loader
+script_dir = os.path.dirname(os.path.realpath(__file__))
+parent_dir = os.path.abspath(os.path.join(script_dir, ".."))
+if parent_dir not in sys.path:
+    sys.path.insert(0, parent_dir)
+root_dir = os.path.abspath(os.path.join(script_dir, "..", ".."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+# Import configuration loader (assumes a config_loader.py module is available)
+from config_loader import load_config
+from live_queue_settings import build_queue_element
+from control_app.services.disconnect_fallback import DisconnectFallbackFrameSource
+
+
+DEFAULT_VIDEO_SINK = "auto"
+KMS_VIDEO_SINK = "kmssink sync=false async=false"
+HEADLESS_VIDEO_SINK = "fakesink sync=false async=false"
+DEFAULT_AUDIO_TRANSPORT = "config"
+MAX_SYNC_DELAY_MS = 3000
+DELAY_QUEUE_MAX_TIME_NS = 3_500_000_000
+SYNC_DELAY_POLL_MS = 500
+FALLBACK_FRAMERATE = 1
+
+
+def gst_escape(value):
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def parse_sync_delay_ms(value):
+    try:
+        delay_ms = int(value)
+    except (TypeError, ValueError):
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be an integer from 0 to {MAX_SYNC_DELAY_MS} ms"
+        )
+    if delay_ms < 0 or delay_ms > MAX_SYNC_DELAY_MS:
+        raise argparse.ArgumentTypeError(
+            f"sync delay must be between 0 and {MAX_SYNC_DELAY_MS} ms"
+        )
+    return delay_ms
+
+
+class VideoReceiver:
+    def __init__(
+        self,
+        country,
+        preview_pattern=None,
+        video_sink=DEFAULT_VIDEO_SINK,
+        audio_transport=DEFAULT_AUDIO_TRANSPORT,
+        playback_device=None,
+        video_output=None,
+        video_delay_ms=0,
+        sync_delay_file=None,
+        fallback_text_file=None,
+    ):
+        self.country = country
+        self.preview_pattern = preview_pattern
+        self.video_sink = video_sink
+        self.audio_transport = audio_transport
+        self.playback_device = playback_device
+        self.video_output = video_output
+        self.video_delay_ms = video_delay_ms
+        self.sync_delay_file = sync_delay_file
+        self.fallback_text_file = fallback_text_file
+        self.pipeline = None
+        self.loop = None
+        self.server_address = None
+        self.receive_port = None
+        self.audio_receive_port = None
+        # True if fallback is active; false if primary is active.
+        self.fallback_active = False
+        self.fallback_started_at = None
+        self.primary_selector_pad = None
+        self.fallback_selector_pad = None
+        self.fallback_src = None
+        self.fallback_frame_source = None
+        self.fallback_frame_count = 0
+        self.fallback_frames_running = False
+        # Last time (seconds) a buffer was seen on the primary monitor branch.
+        self.last_primary_buffer_time = None
+        # Timeout threshold (seconds) after which primary is considered down.
+        self.primary_timeout_threshold = 5
+        self.clock = None
+
+    def set_clock(self, clock):
+        self.clock = clock
+
+    def build_pipeline(self):
+        config = load_config()
+        self.server_address = config.get("server_ip", "127.0.0.1")
+        if self.country.lower() == "tn":
+            self.receive_port = config.get("ports", {}).get("video_receive_tn")
+            self.audio_receive_port = config.get("ports", {}).get("audio_receive_tn")
+        else:
+            self.receive_port = config.get("ports", {}).get("video_receive_dk")
+            self.audio_receive_port = config.get("ports", {}).get("audio_receive_dk")
+
+        sink_name, sink_pipeline, sink_reason = self.resolve_video_sink()
+        print(f"VideoReceiver: Using video sink '{sink_name}' ({sink_reason}).")
+        audio_transport = self.resolve_audio_transport(config)
+        print(f"VideoReceiver: Using audio transport '{audio_transport}'.")
+        audio_branch = self.build_audio_branch(config, audio_transport)
+        video_streaming_settings = str(config.get("streaming_settings_video", "") or "").strip()
+        video_srt_suffix = f"&{video_streaming_settings}" if video_streaming_settings else ""
+        receiver_preview_queue = build_queue_element(
+            config,
+            ("receiver", "preview"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 0,
+            },
+        )
+        receiver_video_input_queue = build_queue_element(
+            config,
+            ("receiver", "video_input"),
+            {
+                "max_size_buffers": 120,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 150,
+            },
+        )
+        receiver_video_demux_queue = build_queue_element(
+            config,
+            ("receiver", "video_demux"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_in_queue = build_queue_element(
+            config,
+            ("receiver", "primary_in"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_selector_queue = build_queue_element(
+            config,
+            ("receiver", "primary_selector"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_primary_monitor_queue = build_queue_element(
+            config,
+            ("receiver", "primary_monitor"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_selector_output_queue = build_queue_element(
+            config,
+            ("receiver", "selector_output"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_fallback_queue = build_queue_element(
+            config,
+            ("receiver", "fallback"),
+            {
+                "leaky": "downstream",
+                "max_size_buffers": 10,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        video_delay_ns = self.video_delay_ms * 1_000_000
+        receiver_video_delay_queue = (
+            "queue name=video_delay_queue "
+            "max-size-buffers=0 max-size-bytes=0 "
+            f"max-size-time={DELAY_QUEUE_MAX_TIME_NS} "
+            f"min-threshold-time={video_delay_ns}"
+        )
+
+        print(f"VideoReceiver: Video delay: {self.video_delay_ms} ms.")
+
+        selector_output = f"input-selector name=selector ! {receiver_video_delay_queue} ! {receiver_selector_output_queue} ! {sink_pipeline}"
+        if self.preview_pattern:
+            preview_location = self.preview_pattern.replace("\\", "\\\\").replace('"', '\\"')
+            selector_output = f"""
+                input-selector name=selector ! {receiver_video_delay_queue} ! tee name=output_tee
+                output_tee. ! {receiver_selector_output_queue} ! {sink_pipeline}
+                output_tee. ! {receiver_preview_queue} !
+                videoconvert ! videoscale ! videorate drop-only=true !
+                video/x-raw,width=640,height=360,framerate=1/5 !
+                jpegenc quality=70 !
+                multifilesink location="{preview_location}" max-files=2 sync=false async=false
+            """.strip()
+
+        pipeline_str = f"""
+            {selector_output}
+            srtsrc uri="srt://{self.server_address}:{self.receive_port}?mode=caller{video_srt_suffix}" wait-for-connection=false
+                ! {receiver_video_input_queue}
+                ! tsparse set-timestamps=true
+                ! tsdemux latency=50 name=demux
+                demux. ! {receiver_video_demux_queue} ! h264parse config-interval=1
+                ! avdec_h264
+                ! videoconvert
+                ! videoscale
+                ! video/x-raw,width=1920,height=1080
+                ! {receiver_primary_in_queue} name=primary_in
+                ! tee name=primary_tee
+                primary_tee. ! {receiver_primary_selector_queue} name=primary_selector ! selector.
+                primary_tee. ! {receiver_primary_monitor_queue} name=primary_monitor ! fakesink sync=false async=false
+                {audio_branch}
+                appsrc name=disconnect_fallback_src is-live=true format=time do-timestamp=true block=false
+                    caps=video/x-raw,format=RGB,width=1920,height=1080,framerate={FALLBACK_FRAMERATE}/1
+                ! videoconvert
+                ! videoscale
+                ! video/x-raw,width=1920,height=1080
+                ! {receiver_fallback_queue} name=fallback ! selector.
+        """
+        return pipeline_str.strip()
+
+    def resolve_video_sink(self):
+        requested_sink = (self.video_sink or DEFAULT_VIDEO_SINK).strip().lower()
+        if self.video_output:
+            if requested_sink in {"fake", "fakesink", "headless"}:
+                raise ValueError("Cannot select a receiver HDMI output while using the fake video sink.")
+            self.require_kms_sink()
+            connector_id = self.parse_connector_id(self.video_output)
+            return (
+                "kmssink",
+                f"kmssink connector-id={connector_id} sync=false async=false",
+                f"using explicit DRM connector id {connector_id}",
+            )
+        if requested_sink in {"", DEFAULT_VIDEO_SINK}:
+            return self.auto_select_video_sink()
+        if requested_sink == "kms":
+            self.require_kms_sink()
+            return "kmssink", KMS_VIDEO_SINK, "explicitly requested"
+        if requested_sink in {"fake", "fakesink", "headless"}:
+            return "fakesink", HEADLESS_VIDEO_SINK, "headless mode requested"
+        raise ValueError("Unsupported video sink. Use one of: auto, kms, fake.")
+
+    def auto_select_video_sink(self):
+        if Gst.ElementFactory.find("kmssink") is None:
+            return "fakesink", HEADLESS_VIDEO_SINK, "kmssink plugin unavailable; running headless"
+
+        drm_cards = sorted(Path("/dev/dri").glob("card*"))
+        if not drm_cards:
+            return "fakesink", HEADLESS_VIDEO_SINK, "no /dev/dri/card* device is available; running headless"
+
+        accessible_cards = [path for path in drm_cards if os.access(path, os.R_OK | os.W_OK)]
+        if not accessible_cards:
+            return "fakesink", HEADLESS_VIDEO_SINK, "DRM devices exist but are not readable and writable; running headless"
+
+        return "kmssink", KMS_VIDEO_SINK, f"using {accessible_cards[0]}"
+
+    def require_kms_sink(self):
+        if Gst.ElementFactory.find("kmssink") is None:
+            raise RuntimeError("kmssink is not available in this environment.")
+
+        drm_cards = sorted(Path("/dev/dri").glob("card*"))
+        if not drm_cards:
+            raise RuntimeError("No DRM device is available under /dev/dri. Use --video-sink fake to run the receiver headless.")
+
+        if not any(os.access(path, os.R_OK | os.W_OK) for path in drm_cards):
+            raise RuntimeError("DRM devices are present but not readable and writable. Use --video-sink fake to run the receiver headless.")
+
+    def parse_connector_id(self, value):
+        try:
+            return int(str(value).strip())
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Receiver video output must be a numeric DRM connector id.") from exc
+
+    def resolve_audio_transport(self, config):
+        requested_transport = (self.audio_transport or DEFAULT_AUDIO_TRANSPORT).strip().lower()
+        if requested_transport == "config":
+            requested_transport = str(config.get("receiver_audio", {}).get("transport", "off")).strip().lower()
+        if requested_transport in {"pcm", "uncompressed"}:
+            requested_transport = "l16"
+        if requested_transport == "muxed":
+            requested_transport = "aac"
+        if requested_transport not in {"off", "aac", "l16"}:
+            raise ValueError("Unsupported audio transport. Use one of: off, aac, l16, config.")
+        return requested_transport
+
+    def build_audio_branch(self, config, audio_transport):
+        if audio_transport == "off":
+            return ""
+
+        playback_device = self.playback_device or config.get("receiver_audio", {}).get("playback_device", "default")
+        audio_cfg = config.get("audio", {})
+        audio_rate = int(audio_cfg.get("rate", 32000))
+        channels = int(audio_cfg.get("channels", 2))
+        encoding_name = str(audio_cfg.get("encoding_name", "L16")).strip() or "L16"
+        audio_streaming_settings = str(config.get("streaming_settings_audio", "") or "").strip()
+        audio_srt_suffix = f"&{audio_streaming_settings}" if audio_streaming_settings else ""
+        escaped_device = gst_escape(playback_device)
+        receiver_l16_input_queue = build_queue_element(
+            config,
+            ("receiver", "l16_input"),
+            {
+                "max_size_buffers": 0,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 500,
+            },
+        )
+        receiver_aac_input_queue = build_queue_element(
+            config,
+            ("receiver", "aac_input"),
+            {
+                "max_size_buffers": 30,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 100,
+            },
+        )
+        receiver_audio_output_queue = build_queue_element(
+            config,
+            ("receiver", "audio_output"),
+            {
+                "max_size_buffers": 0,
+                "max_size_bytes": 0,
+                "max_size_time_ms": 500,
+            },
+        )
+
+        print(f"VideoReceiver: Using playback device '{playback_device}'.")
+
+        if audio_transport == "aac":
+            return f"""
+                demux. ! {receiver_aac_input_queue} !
+                    decodebin !
+                    audioconvert !
+                    audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
+                    {receiver_audio_output_queue} !
+                    alsasink device="{escaped_device}" async=true
+            """.strip()
+
+        if not self.audio_receive_port:
+            raise RuntimeError("Receiver uncompressed audio transport requires an audio_receive_* port in the config.")
+
+        return f"""
+            srtsrc uri="srt://{self.server_address}:{self.audio_receive_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
+                {receiver_l16_input_queue} !
+                application/x-rtp,media=audio,clock-rate={audio_rate},encoding-name={encoding_name},channels={channels} !
+                rtpjitterbuffer latency=200 do-lost=true !
+                rtpL16depay !
+                audioconvert !
+                audio/x-raw,format=S16LE,layout=interleaved,channels={channels},rate={audio_rate} !
+                {receiver_audio_output_queue} !
+                alsasink device="{escaped_device}" async=true
+        """.strip()
+
+    def primary_buffer_probe(self, pad, info):
+        if info.type & Gst.PadProbeType.BUFFER:
+            self.last_primary_buffer_time = time.monotonic()
+            if self.fallback_active:
+                GLib.idle_add(self.switch_to_primary)
+        return Gst.PadProbeReturn.OK
+
+    def primary_is_healthy(self, now=None):
+        now = time.monotonic() if now is None else now
+        return (
+            self.last_primary_buffer_time is not None
+            and (now - self.last_primary_buffer_time) < self.primary_timeout_threshold
+        )
+
+    def monitor_primary(self):
+        """Periodically check if the primary branch is healthy and switch if needed."""
+        now = time.monotonic()
+        primary_healthy = self.primary_is_healthy(now)
+        if primary_healthy and self.fallback_active:
+            print("VideoReceiver: Primary stream recovered; switching to primary.")
+            self.switch_to_primary()
+        elif not primary_healthy and not self.fallback_active:
+            print("VideoReceiver: Primary stream down; switching to fallback.")
+            self.switch_to_fallback()
+        return True  # Continue calling this callback
+
+    def resolve_selector_pads(self):
+        selector = self.pipeline.get_by_name("selector") if self.pipeline else None
+        if not selector:
+            return
+
+        for pad in selector.sinkpads:
+            peer = pad.get_peer()
+            if peer is None:
+                continue
+            parent = peer.get_parent_element()
+            name = parent.get_name() if parent is not None else ""
+            if name == "primary_selector":
+                self.primary_selector_pad = pad
+            elif name == "fallback":
+                self.fallback_selector_pad = pad
+
+    def switch_to_primary(self):
+        selector = self.pipeline.get_by_name("selector")
+        if not selector:
+            return
+        if self.primary_selector_pad is None:
+            self.resolve_selector_pads()
+        if self.primary_selector_pad is None:
+            return
+        selector.set_property("active-pad", self.primary_selector_pad)
+        self.fallback_active = False
+        self.fallback_started_at = None
+
+    def switch_to_fallback(self):
+        selector = self.pipeline.get_by_name("selector")
+        if not selector:
+            return
+        if self.fallback_selector_pad is None:
+            self.resolve_selector_pads()
+        if self.fallback_selector_pad is None:
+            return
+        selector.set_property("active-pad", self.fallback_selector_pad)
+        self.fallback_active = True
+        self.fallback_started_at = time.monotonic()
+        self.start_fallback_frames()
+
+    def on_message(self, bus, message):
+        if message.type == Gst.MessageType.EOS:
+            print("VideoReceiver: End of Stream")
+            self.stop()
+        elif message.type == Gst.MessageType.ERROR:
+            err, debug = message.parse_error()
+            print(f"VideoReceiver: ERROR -> {err}")
+            if debug:
+                print(f"Debug info: {debug}")
+            self.stop()
+
+    def poll_sync_delay_file(self):
+        if self.pipeline is None or not self.sync_delay_file:
+            return True
+
+        try:
+            with open(self.sync_delay_file, encoding="utf-8") as delay_file:
+                raw_value = delay_file.read().strip()
+        except OSError:
+            return True
+
+        try:
+            next_delay_ms = parse_sync_delay_ms(raw_value or 0)
+        except argparse.ArgumentTypeError as exc:
+            print(f"VideoReceiver: Ignoring invalid sync delay file value: {exc}", flush=True)
+            return True
+
+        if next_delay_ms != self.video_delay_ms:
+            self.apply_video_delay(next_delay_ms)
+        return True
+
+    def apply_video_delay(self, delay_ms):
+        if self.pipeline is None:
+            self.video_delay_ms = delay_ms
+            return
+
+        delay_queue = self.pipeline.get_by_name("video_delay_queue")
+        if delay_queue is None:
+            self.video_delay_ms = delay_ms
+            return
+
+        delay_queue.set_property("min-threshold-time", delay_ms * 1_000_000)
+        self.video_delay_ms = delay_ms
+        print(f"VideoReceiver: Video delay updated to {delay_ms} ms.", flush=True)
+
+    def start_fallback_frames(self):
+        if self.fallback_frames_running:
+            return
+        self.fallback_src = self.pipeline.get_by_name("disconnect_fallback_src") if self.pipeline else None
+        if self.fallback_src is None:
+            print("VideoReceiver: disconnect_fallback_src element not found!", flush=True)
+            return
+
+        self.fallback_frame_source = DisconnectFallbackFrameSource(
+            width=1920,
+            height=1080,
+            fallback_text_file=self.fallback_text_file,
+        )
+        self.fallback_frame_count = 0
+        self.fallback_frames_running = True
+        GLib.timeout_add(int(1000 / FALLBACK_FRAMERATE), self.push_fallback_frame)
+
+    def push_fallback_frame(self):
+        if (
+            self.pipeline is None
+            or self.fallback_src is None
+            or self.fallback_frame_source is None
+            or not self.fallback_active
+        ):
+            self.fallback_frames_running = False
+            return False
+
+        try:
+            frame = self.fallback_frame_source.frame()
+        except Exception as exc:
+            print(f"VideoReceiver: Could not render disconnect fallback frame: {exc}", flush=True)
+            return True
+
+        buffer = Gst.Buffer.new_allocate(None, len(frame), None)
+        buffer.fill(0, frame)
+        frame_duration = Gst.SECOND // FALLBACK_FRAMERATE
+        buffer.pts = self.fallback_frame_count * frame_duration
+        buffer.duration = frame_duration
+        self.fallback_frame_count += 1
+
+        result = self.fallback_src.emit("push-buffer", buffer)
+        if result == Gst.FlowReturn.OK:
+            return True
+        if result != Gst.FlowReturn.FLUSHING:
+            print(f"VideoReceiver: Disconnect fallback frame push returned {result}.", flush=True)
+        return True
+
+    def run(self):
+        pipeline_str = self.build_pipeline()
+        print("VideoReceiver: Pipeline:\n", pipeline_str, "\n")
+        if self.preview_pattern:
+            os.makedirs(os.path.dirname(os.path.abspath(self.preview_pattern)), exist_ok=True)
+        self.pipeline = Gst.parse_launch(pipeline_str)
+
+        if self.clock is not None:
+            self.pipeline.use_clock(self.clock)
+        
+        bus = self.pipeline.get_bus()
+        bus.add_signal_watch()
+        bus.connect("message", self.on_message)
+        
+        # Set initial active pad to primary branch.
+        selector = self.pipeline.get_by_name("selector")
+        self.resolve_selector_pads()
+        if selector and self.primary_selector_pad is not None:
+            selector.set_property("active-pad", self.primary_selector_pad)
+            self.fallback_active = False
+            self.fallback_started_at = None
+            print("VideoReceiver: Starting with primary video source.")
+        else:
+            print("VideoReceiver: Could not set initial active pad.")
+        
+        # Attach pad probe to the 'primary_monitor' queue's src pad.
+        primary_monitor_queue = self.pipeline.get_by_name("primary_monitor")
+        if primary_monitor_queue:
+            pad = primary_monitor_queue.get_static_pad("src")
+            if pad:
+                pad.add_probe(Gst.PadProbeType.BUFFER, self.primary_buffer_probe)
+            else:
+                print("VideoReceiver: Could not get src pad on primary_monitor.")
+        else:
+            print("VideoReceiver: primary_monitor element not found!")
+        
+        # Set up a periodic timer (every 2 seconds) to monitor primary health.
+        GLib.timeout_add_seconds(2, self.monitor_primary)
+        if self.sync_delay_file:
+            GLib.timeout_add(SYNC_DELAY_POLL_MS, self.poll_sync_delay_file)
+        
+        self.pipeline.set_state(Gst.State.PLAYING)
+        self.loop = GLib.MainLoop()
+        try:
+            self.loop.run()
+        except Exception as e:
+            print(f"VideoReceiver: Exception -> {e}")
+        finally:
+            self.pipeline.set_state(Gst.State.NULL)
+            self.pipeline = None
+            self.fallback_src = None
+            self.fallback_frame_source = None
+            self.fallback_frames_running = False
+            print("VideoReceiver: Pipeline stopped.")
+
+    def stop(self):
+        if self.loop and self.loop.is_running():
+            print("VideoReceiver: Quitting main loop...")
+            self.loop.quit()
+
+class ReceiverManager:
+    def __init__(
+        self,
+        country,
+        preview_pattern=None,
+        video_sink=DEFAULT_VIDEO_SINK,
+        audio_transport=DEFAULT_AUDIO_TRANSPORT,
+        playback_device=None,
+        video_output=None,
+        video_delay_ms=0,
+        sync_delay_file=None,
+        fallback_text_file=None,
+    ):
+        self.country = country
+        self.preview_pattern = preview_pattern
+        self.video_sink = video_sink
+        self.audio_transport = audio_transport
+        self.playback_device = playback_device
+        self.video_output = video_output
+        self.video_delay_ms = video_delay_ms
+        self.sync_delay_file = sync_delay_file
+        self.fallback_text_file = fallback_text_file
+        self.shutdown_event = threading.Event()
+        self.video_receiver = None
+        # Create a shared system clock for synchronization.
+        self.shared_clock = Gst.SystemClock.obtain()
+
+    def run_video_worker(self):
+        while not self.shutdown_event.is_set():
+            print("ReceiverManager: Starting video receiver...")
+            video_receiver = VideoReceiver(
+                self.country,
+                preview_pattern=self.preview_pattern,
+                video_sink=self.video_sink,
+                audio_transport=self.audio_transport,
+                playback_device=self.playback_device,
+                video_output=self.video_output,
+                video_delay_ms=self.video_delay_ms,
+                sync_delay_file=self.sync_delay_file,
+                fallback_text_file=self.fallback_text_file,
+            )
+            self.video_receiver = video_receiver  # Store reference.
+            video_receiver.set_clock(self.shared_clock)
+            try:
+                # This call blocks until the pipeline stops (EOS or error)
+                video_receiver.run()
+            except Exception as e:
+                print(f"ReceiverManager: Video receiver encountered an exception: {e}")
+            self.video_receiver = None
+            if self.shutdown_event.is_set():
+                break
+            print("ReceiverManager: Video receiver stopped unexpectedly. Restarting in 5 seconds...")
+            time.sleep(5)
+
+    def start(self):
+        self.video_thread = threading.Thread(target=self.run_video_worker)
+        self.video_thread.start()
+
+    def stop(self):
+        print("ReceiverManager: Stopping receiver manager...")
+        self.shutdown_event.set()
+        if self.video_receiver is not None:
+            self.video_receiver.stop()
+        self.video_thread.join()
+        print("ReceiverManager: Video receiver worker stopped.")
+
+def signal_handler(sig, frame, manager):
+    print("ReceiverManager: Interrupt received, shutting down...")
+    manager.stop()
+    sys.exit(0)
+
+def main():
+    parser = argparse.ArgumentParser(description="Video Receiver Manager Script")
+    parser.add_argument("--country", required=True, help="Country code (e.g., tn, dk)")
+    parser.add_argument("--preview-pattern", help="Optional JPEG snapshot output pattern, for example /mnt/tbdrive/previews/receiver-tn-preview-%05d.jpg.")
+    parser.add_argument("--video-sink", default=os.getenv("RECEIVER_VIDEO_SINK", DEFAULT_VIDEO_SINK), help="Video sink mode: auto, kms, or fake. Defaults to RECEIVER_VIDEO_SINK or auto.")
+    parser.add_argument("--video-output", help="Optional DRM connector id override for kmssink, for example 32.")
+    parser.add_argument("--playback-device", help="Optional ALSA playback device override, for example hw:0,0.")
+    parser.add_argument("--audio-transport", choices=["config", "off", "aac", "l16"], default=DEFAULT_AUDIO_TRANSPORT, help="Receiver audio playback transport. Use 'l16' for the separate uncompressed return audio or 'aac' for audio from the live MPEG-TS stream.")
+    parser.add_argument("--video-delay-ms", type=parse_sync_delay_ms, default=0, help="Initial receiver video delay in milliseconds for A/V sync calibration.")
+    parser.add_argument("--sync-delay-file", help="Optional control file containing the live receiver video delay in milliseconds.")
+    parser.add_argument("--fallback-text-file", help="Optional text file for disconnect fallback paragraphs.")
+    args = parser.parse_args()
+
+    manager = ReceiverManager(
+        args.country,
+        preview_pattern=args.preview_pattern,
+        video_sink=args.video_sink,
+        audio_transport=args.audio_transport,
+        playback_device=args.playback_device,
+        video_output=args.video_output,
+        video_delay_ms=args.video_delay_ms,
+        sync_delay_file=args.sync_delay_file,
+        fallback_text_file=args.fallback_text_file,
+    )
+    signal.signal(signal.SIGINT, lambda sig, frame: signal_handler(sig, frame, manager))
+    signal.signal(signal.SIGTERM, lambda sig, frame: signal_handler(sig, frame, manager))
+    manager.start()
+
+    # Keep the main thread alive.
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        manager.stop()
+
+if __name__ == "__main__":
+    Gst.init(None)
+    main()

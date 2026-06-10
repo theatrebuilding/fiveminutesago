@@ -1,0 +1,4 @@
+fastapi
+PyYAML
+uvicorn
+pygame

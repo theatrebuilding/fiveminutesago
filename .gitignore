@@ -1,1 +1,20 @@
-env.json
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment folders and variables
+.env
+env/
+venv/
+.venv/
+
+# Tailscale runtime state
+tailscale/state/*
+!tailscale/state/.gitkeep
+tailscale/config/generated/*
+!tailscale/config/generated/.gitkeep
+tailscale/config/config.yaml
+tailscale/config/.config.yaml.tmp
+.omx/

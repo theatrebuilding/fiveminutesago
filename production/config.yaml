@@ -1,0 +1,157 @@
+server_ip: 100.119.85.108
+streaming_settings_audio: "rbuf=1048576&wbuf=1048576&tsbpdDelay=500"  # Separate RTP L16 audio transport settings; larger buffers smooth raw PCM jitter.
+streaming_settings_video: "rbuf=327680&wbuf=327680&tsbpdDelay=100"
+
+ports:
+  audio_send_tn: 8805      # Sender TN -> server RTP L16 audio
+  audio_send_dk: 8806      # Sender DK -> server RTP L16 audio
+  audio_receive_dk: 8807   # Server -> DK sender RTP L16 return audio
+  audio_receive_tn: 8808   # Server -> TN sender RTP L16 return audio
+  video_send_tn: 7701
+  video_send_dk: 7702
+  video_receive_dk: 7703
+  video_receive_tn: 7704
+
+
+audio:
+  source: "alsasrc"              # Sender audio source element
+  device: "default"              # Sender Pi microphone capture device when audio_source=device
+  playback_device: "default"     # Sender Pi speaker output used for remote audio playback and the WebRTC AEC reference
+  format: "S16BE"                # Separate RTP L16 transport sample format. The current path requires S16BE.
+  rate: 48000                    # Shared exact hw/transport rate. Match the ALSA device rate; the UI no longer overrides/resamples this.
+  channels: 2
+  encoding_name: "L16"           # Separate RTP L16 transport encoding name.
+  aac_bitrate: 320000            # AAC bitrate for the sender's muxed MPEG-TS audio stream.
+  test_source_wave: "sine"       # Sender test audio options include: sine, square, saw, triangle, silence, white-noise, pink-noise, ticks, gaussian-noise, red-noise, blue-noise, violet-noise
+  test_source_freq: 440          # Sender test tone frequency in Hz
+  test_source_volume: 0.2        # Sender test tone linear volume (0.0 to 1.0)
+
+receiver_audio:
+  transport: "off"               # Receiver Pi is video-only in normal operation. Debug options: aac, l16, off
+  playback_device: "default"     # Receiver Pi speaker output device
+
+recording:
+  video:
+    mode: "copy"                 # MP4 video recording mode. Only "copy" is currently supported.
+  audio:
+    codec: "aac"                 # MP4 audio recording codec. Only "aac" is currently supported.
+    bitrate: 320000              # Used when the recorder must encode AAC itself; AAC transport is otherwise copied through.
+
+live_queues:
+  # Queue timings are in milliseconds
+  sender:
+    preview:
+      leaky: "downstream"
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    video_encode:
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 100
+    mux_input:
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 100
+    playback_input:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    playback_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_capture:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_l16_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+  receiver:
+    preview:
+      leaky: "downstream"
+      max_size_buffers: 30
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    video_input:
+      max_size_buffers: 120
+      max_size_bytes: 0
+      max_size_time_ms: 150
+    l16_input:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+  server:
+    relay_input:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_input:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    audio_output:
+      max_size_buffers: 0
+      max_size_bytes: 0
+      max_size_time_ms: 500
+    preview_branch:
+      max_size_buffers: 120
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    preview_demux:
+      max_size_buffers: 60
+      max_size_bytes: 0
+      max_size_time_ms: 0
+    preview_output:
+      leaky: "downstream"
+      max_size_buffers: 5
+      max_size_bytes: 0
+      max_size_time_ms: 0
+
+video:
+  source: "v4l2src device=/dev/video0"
+  test_source_pattern: "ball"
+  width: 1920
+  height: 1080
+  encoder: "x264enc"
+  tune: "zerolatency"
+  bitrate: 20000
+  key_int_max: 30
+  framerate: 30
+  bframes: 0
+  aud: true
+  byte_stream: true
+  profile: "high"
+  speed_preset: "ultrafast"
+  pass: ""
+  quantizer:
+  option_string: ""
+  config_interval: 1
+  alignment: 7
+
+webrtcdsp_settings:
+  # These settings are applied by the sender-side audio capture pipeline in production/1_sender/send.py.
+  # For AEC to work, the same sender Pi must both play the remote audio and capture the local microphone.
+  compression-gain-db: 5               # Sets the maximum gain the digital compression stage may apply, in dB.
+  delay-agnostic: true                  # Enable or disable delay agnostic mode. This is a configuration option for the echo cancellation algorithm that makes it less dependent on an exact, fixed delay between the playback signal and the capture signal which should help account for network jitter and delays.
+  echo-cancel: true                     # Enable or disable the echo cancellation algorithm. 
+  echo-suppression-level: high          # Options: low, moderate, high. (Controls the aggressiveness of echo suppression)
+  extended-filter: true                 # This is an additional filtering stage built into the echo cancellation algorithm. When enabled, it applies extra processing on top of the standard echo cancellation to further reduce residual echo—especially in acoustically challenging or reverberant environments.
+  experimental-agc: false                # Enable or disable experimental automatic gain control.
+  gain-control: false                    # Enable or disable automatic digital gain control.
+  gain-control-mode: adaptive-digital   # Options: adaptive-digital, fixed-digital, adaptive-analog (Controls the mode of the automatic gain control algorithm.)
+  high-pass-filter: true                # Enable or disable high pass filtering.
+  limiter: true                         # When enabled, the compression stage will hard limit the signal to the target level. Otherwise, the signal will be compressed but not limited above the target level.
+  noise-suppression: true               # Enable or disable noise suppression.  
+  noise-suppression-level: high         # Options: low, moderate, high, very-high. (Controls the aggressiveness of noise suppression.)
+  startup-min-volume: 12                # At startup, the experimental AGC will boost the microphone volume up to this level if too low.
+  target-level-dbfs: 3                  # Sets the target peak |level| (or envelope) of the gain control in dBFS (decibels from digital full-scale).
+  voice-detection: false                # Enable or disable the voice activity detector.
+  voice-detection-frame-size-ms: 0      # Sets the |size| of the frames in ms on which the VAD will operate. Larger frames will improve detection accuracy, but reduce the frequency of updates
+  voice-detection-likelihood: low       # # Options: very-low, low, moderate, high. (Specifies the likelihood that a frame will be declared to contain voice).

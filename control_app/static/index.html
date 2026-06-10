@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Crying By the Sea Control</title>
+    <link rel="stylesheet" href="/static/styles.css?v=20260525-audio-tests" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="header">
+        <div>
+          <h1>Crying By the Sea</h1>
+        </div>
+        <div class="header-status">
+          <span id="runtime-pill" class="status-pill">Unknown</span>
+          <p id="refresh-label">Waiting for first status refresh…</p>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <section class="panel command-panel">
+          <div class="panel-heading">
+            <h2>Role Launcher</h2>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="field-label">Role</span>
+              <select id="role-select">
+                <option value="server">Server</option>
+                <option value="sender">Sender</option>
+                <option value="receiver">Receiver</option>
+              </select>
+            </label>
+
+            <label id="country-field" class="field">
+              <span class="field-label">Country / Site</span>
+              <select id="country-select">
+                <option value="tn">Tunisia (TN)</option>
+                <option value="dk">Denmark (DK)</option>
+              </select>
+            </label>
+
+            <label id="video-device-field" class="field">
+              <span class="field-label">Camera</span>
+              <select id="video-device-select">
+                <option value="__video_config__">Use config video source</option>
+                <option value="__video_test__">Test signal</option>
+              </select>
+              <p id="video-device-message" class="field-help">Scanning container-visible cameras…</p>
+            </label>
+
+            <label id="audio-device-field" class="field">
+              <span class="field-label">Audio Input</span>
+              <select id="audio-device-select">
+                <option value="">No audio input</option>
+              </select>
+              <p id="audio-device-message" class="field-help">Selected hardware inputs are opened through ALSA compatibility mode so different USB soundcards are less likely to break the stream.</p>
+            </label>
+
+            <label id="sender-capture-pair-field" class="field hidden">
+              <span class="field-label">Input Channels</span>
+              <select id="sender-capture-pair-select">
+                <option value="1/2">Channels 1/2</option>
+              </select>
+              <p id="sender-capture-pair-message" class="field-help">Choose which physical input pair from the selected local soundcard becomes sender stereo audio.</p>
+            </label>
+
+            <div id="sender-mic-test-field" class="field hidden">
+              <span class="field-label">Mic Input Test</span>
+              <button id="sender-mic-test-button" type="button" class="button-muted">Run 10s Mic Test</button>
+              <div class="signal-meter" aria-live="polite">
+                <div class="signal-row">
+                  <span>L</span>
+                  <div class="signal-bar" aria-hidden="true"><span id="sender-mic-left-bar" class="signal-bar-fill"></span></div>
+                  <span id="sender-mic-left-value">0%</span>
+                </div>
+                <div class="signal-row">
+                  <span>R</span>
+                  <div class="signal-bar" aria-hidden="true"><span id="sender-mic-right-bar" class="signal-bar-fill"></span></div>
+                  <span id="sender-mic-right-value">0%</span>
+                </div>
+              </div>
+              <p id="sender-mic-test-message" class="field-help">Tap the mic after starting; levels update for 10 seconds.</p>
+            </div>
+
+            <label id="sender-audio-mode-field" class="field">
+              <span class="field-label">Sender Audio Mode</span>
+              <select id="sender-audio-mode-select">
+                <option value="aec">Playback + DSP</option>
+                <option value="playback-only">Playback only (no DSP)</option>
+                <option value="capture-only">Capture only</option>
+              </select>
+              <p id="sender-audio-mode-message" class="field-help">Playback + DSP returns remote audio for local playback and echo cancellation. Playback only returns remote audio without WebRTC DSP/echo probe. Capture only disables sender playback.</p>
+            </label>
+
+            <label id="sender-playback-device-field" class="field hidden">
+              <span class="field-label">Playback Output</span>
+              <select id="sender-playback-device-select">
+                <option value="__audio_playback_default__">Default output from config</option>
+              </select>
+              <p id="sender-playback-device-message" class="field-help">Choose the ALSA playback device for sender playback modes. Hardware outputs are opened through ALSA compatibility mode.</p>
+            </label>
+
+            <label id="sender-playback-output-pair-field" class="field hidden">
+              <span class="field-label">Output Channels</span>
+              <select id="sender-playback-output-pair-select">
+                <option value="1/2">Channels 1/2</option>
+              </select>
+              <p id="sender-playback-output-pair-message" class="field-help">Choose which physical output pair on the selected local soundcard receives returned audio.</p>
+            </label>
+
+            <div id="sender-output-test-field" class="field hidden">
+              <span class="field-label">Speaker Output Test</span>
+              <button id="sender-output-test-button" type="button" class="button-muted">Play Speaker Test</button>
+              <p id="sender-output-test-message" class="field-help">Plays a short bounded tone on the selected left channel, then right channel.</p>
+            </div>
+
+            <label id="sender-audio-delay-field" class="field hidden">
+              <span class="field-label">Audio Delay <span id="sender-audio-delay-value">0 ms</span></span>
+              <input id="sender-audio-delay-input" type="range" min="0" max="3000" step="10" value="0" />
+              <p id="sender-audio-delay-message" class="field-help">Use when returned audio is early. Delays sender playback and the echo probe together.</p>
+            </label>
+
+            <label id="receiver-audio-field" class="field hidden">
+              <span class="field-label">Receiver Audio</span>
+              <select id="receiver-audio-select">
+                <option value="off">Off — video only</option>
+                <option value="config">Use config default</option>
+                <option value="l16">Uncompressed separate audio</option>
+                <option value="aac">AAC from muxed stream</option>
+              </select>
+              <p id="receiver-audio-message" class="field-help">Normal operation is video-only. Audio is handled by the sender Pi playback path.</p>
+            </label>
+
+            <label id="receiver-playback-device-field" class="field hidden">
+              <span class="field-label">Receiver Audio Output</span>
+              <select id="receiver-playback-device-select">
+                <option value="__receiver_audio_playback_default__">Default output from config</option>
+              </select>
+              <p id="receiver-playback-device-message" class="field-help">Choose the ALSA playback device for receiver audio output.</p>
+            </label>
+
+            <label id="receiver-video-output-field" class="field hidden">
+              <span class="field-label">Display Output</span>
+              <select id="receiver-video-output-select">
+                <option value="__receiver_video_output_auto__">Automatic output</option>
+              </select>
+              <p id="receiver-video-output-message" class="field-help">Choose the DRM / HDMI output for kmssink, or leave it on automatic selection.</p>
+            </label>
+
+            <label id="receiver-video-delay-field" class="field hidden">
+              <span class="field-label">Video Delay <span id="receiver-video-delay-value">0 ms</span></span>
+              <input id="receiver-video-delay-input" type="range" min="0" max="3000" step="10" value="0" />
+              <p id="receiver-video-delay-message" class="field-help">Use when projector video is early. Adjust live during clap/slate calibration.</p>
+            </label>
+          </div>
+          <div class="button-row">
+            <button id="start-role" class="button-accent">Start Selected Role</button>
+          </div>
+          <p id="action-message" class="action-message"></p>
+        </section>
+
+        <section class="panel metrics-panel">
+          <div class="metric-grid">
+            <article class="metric-card">
+              <p class="metric-label">Active Role</p>
+              <p id="role-state" class="metric-value">Unknown</p>
+              <p id="role-meta" class="metric-meta"></p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Runtime</p>
+              <p id="process-state" class="metric-value">Unknown</p>
+              <p id="process-meta" class="metric-meta"></p>
+            </article>
+            <article class="metric-card">
+              <p class="metric-label">Config</p>
+              <p id="config-state" class="metric-value">Unknown</p>
+              <p id="config-meta" class="metric-meta"></p>
+            </article>
+            <article id="recording-metric" class="metric-card hidden">
+              <p class="metric-label">Recording</p>
+              <p id="recording-state" class="metric-value">Unknown</p>
+              <p id="recording-meta" class="metric-meta"></p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel logs-panel">
+          <div class="panel-heading">
+            <h2>Terminal Output</h2>
+          </div>
+          <pre id="log-output" class="log-output">Loading logs…</pre>
+        </section>
+
+        <section id="config-panel" class="panel config-panel">
+          <div class="panel-heading">
+            <h2 id="config-panel-title">Config Editor</h2>
+          </div>
+          <div id="config-editor-actions" class="button-row">
+            <button id="dsp-settings-button" class="button-muted">DSP Settings</button>
+            <button id="apply-config" class="button-accent">Save</button>
+            <button id="show-config" class="button-muted hidden">Show Config</button>
+          </div>
+          <textarea id="config-editor" spellcheck="false"></textarea>
+          <p id="config-message" class="action-message"></p>
+        </section>
+
+        <div id="dsp-settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="dsp-settings-title">
+          <section class="modal-card dsp-settings-card">
+            <div class="modal-heading">
+              <div>
+                <p class="field-label">Sender audio DSP</p>
+                <h2 id="dsp-settings-title">DSP Settings</h2>
+              </div>
+              <div class="button-row modal-actions modal-actions-top">
+                <button id="dsp-settings-save" class="button-accent" type="button">Save</button>
+                <button id="dsp-settings-cancel" class="button-muted" type="button">Cancel</button>
+              </div>
+            </div>
+            <div class="dsp-settings-grid">
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-echo-cancel" type="checkbox" data-dsp-key="echo-cancel" />
+                  <span>Echo cancellation</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <span class="field-label">Suppression level</span>
+                  <select data-dsp-key="echo-suppression-level">
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <input type="checkbox" data-dsp-key="delay-agnostic" />
+                  <span>Delay agnostic</span>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="echo-cancel">
+                  <input type="checkbox" data-dsp-key="extended-filter" />
+                  <span>Extended filter</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-noise-suppression" type="checkbox" data-dsp-key="noise-suppression" />
+                  <span>Noise suppression</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="noise-suppression">
+                  <span class="field-label">Noise level</span>
+                  <select data-dsp-key="noise-suppression-level">
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                    <option value="very-high">Very high</option>
+                  </select>
+                </label>
+                <label class="toggle-field">
+                  <input type="checkbox" data-dsp-key="high-pass-filter" />
+                  <span>High-pass filter</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-gain-control" type="checkbox" data-dsp-key="gain-control" />
+                  <span>Gain control</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Gain mode</span>
+                  <select data-dsp-key="gain-control-mode">
+                    <option value="adaptive-digital">Adaptive digital</option>
+                    <option value="fixed-digital">Fixed digital</option>
+                    <option value="adaptive-analog">Adaptive analog</option>
+                  </select>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Target level dBFS</span>
+                  <input type="number" min="0" max="31" step="1" data-dsp-key="target-level-dbfs" />
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Compression gain dB</span>
+                  <input type="number" min="0" max="90" step="1" data-dsp-key="compression-gain-db" />
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="gain-control">
+                  <span class="field-label">Startup min volume</span>
+                  <input type="number" min="0" max="255" step="1" data-dsp-key="startup-min-volume" />
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="gain-control">
+                  <input type="checkbox" data-dsp-key="limiter" />
+                  <span>Limiter</span>
+                </label>
+                <label class="toggle-field dsp-dependent" data-dsp-parent="gain-control">
+                  <input type="checkbox" data-dsp-key="experimental-agc" />
+                  <span>Experimental AGC</span>
+                </label>
+              </article>
+
+              <article class="dsp-card">
+                <label class="toggle-field">
+                  <input id="dsp-voice-detection" type="checkbox" data-dsp-key="voice-detection" />
+                  <span>Voice detection</span>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="voice-detection">
+                  <span class="field-label">Detection likelihood</span>
+                  <select data-dsp-key="voice-detection-likelihood">
+                    <option value="very-low">Very low</option>
+                    <option value="low">Low</option>
+                    <option value="moderate">Moderate</option>
+                    <option value="high">High</option>
+                  </select>
+                </label>
+                <label class="field dsp-dependent" data-dsp-parent="voice-detection">
+                  <span class="field-label">Frame size ms</span>
+                  <input type="number" min="0" max="1000" step="1" data-dsp-key="voice-detection-frame-size-ms" />
+                </label>
+              </article>
+            </div>
+            <p id="dsp-settings-message" class="action-message"></p>
+          </section>
+        </div>
+
+        <section id="server-panel" class="panel storage-panel hidden">
+          <div class="panel-heading">
+            <h2>Server Preview</h2>
+            <p>Snapshot previews update automatically while the server role is active.</p>
+          </div>
+          <div class="button-row">
+            <button id="record-toggle" class="button-accent">Start Recording</button>
+            <button id="time-shift-toggle">go back in time</button>
+          </div>
+          <p id="record-message" class="action-message"></p>
+          <p id="time-shift-message" class="action-message"></p>
+          <div class="preview-grid">
+            <article class="preview-card">
+              <div class="panel-heading-inline">
+                <h3>Tunisia Feed</h3>
+                <p id="preview-tn-meta" class="storage-meta">Waiting for preview…</p>
+              </div>
+              <div class="preview-frame">
+                <img id="preview-tn-image" alt="Tunisia preview" />
+                <p id="preview-tn-empty" class="preview-empty">No snapshot yet.</p>
+              </div>
+            </article>
+            <article class="preview-card">
+              <div class="panel-heading-inline">
+                <h3>Denmark Feed</h3>
+                <p id="preview-dk-meta" class="storage-meta">Waiting for preview…</p>
+              </div>
+              <div class="preview-frame">
+                <img id="preview-dk-image" alt="Denmark preview" />
+                <p id="preview-dk-empty" class="preview-empty">No snapshot yet.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="sender-panel" class="panel storage-panel hidden">
+          <div class="panel-heading">
+            <h2>Sender Preview</h2>
+          </div>
+          <div class="preview-grid preview-grid-single">
+            <article class="preview-card">
+              <div class="panel-heading-inline">
+                <h3 id="sender-preview-title">Sender Feed</h3>
+                <p id="sender-preview-meta" class="storage-meta">Waiting for preview…</p>
+              </div>
+              <div class="preview-frame">
+                <img id="sender-preview-image" alt="Sender preview" />
+                <p id="sender-preview-empty" class="preview-empty">No snapshot yet.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="receiver-panel" class="panel storage-panel hidden">
+          <div class="panel-heading">
+            <h2>Receiver Preview</h2>
+          </div>
+          <div class="preview-grid preview-grid-single">
+            <article class="preview-card">
+              <div class="panel-heading-inline">
+                <h3 id="receiver-preview-title">Receiver Feed</h3>
+                <p id="receiver-preview-meta" class="storage-meta">Waiting for preview…</p>
+              </div>
+              <div class="preview-frame">
+                <img id="receiver-preview-image" alt="Receiver preview" />
+                <p id="receiver-preview-empty" class="preview-empty">No snapshot yet.</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="archive-panel" class="panel storage-panel hidden">
+          <div class="panel-heading">
+            <h2>Recording Archive</h2>
+            <p>TS and MP4 recordings stored on the machine.</p>
+          </div>
+          <div class="archive-block">
+            <div class="button-row">
+              <button id="archive-refresh-button" type="button" class="button-muted">Refresh Archive</button>
+            </div>
+            <p id="archive-summary" class="archive-summary"></p>
+            <p id="archive-warning" class="storage-warning hidden"></p>
+            <div class="archive-preview">
+              <div class="archive-preview-meta">
+                <strong id="archive-selected-name">No file selected</strong>
+                <p id="archive-selected-meta" class="storage-meta">Select a file and open it in a new tab.</p>
+                <div class="button-row archive-action-row">
+                  <a id="archive-open-link" class="archive-open-link hidden" target="_blank" rel="noopener noreferrer">Open selected file</a>
+                  <a id="archive-download-link" class="archive-open-link hidden">Download selected file</a>
+                  <button id="archive-rename-button" type="button" class="button-muted" disabled>Rename selected file</button>
+                  <button id="archive-delete-button" type="button" class="button-danger" disabled>Delete selected file</button>
+                </div>
+                <p id="archive-action-message" class="action-message"></p>
+              </div>
+            </div>
+            <ul id="archive-files" class="archive-files"></ul>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/static/app.js?v=20260525-audio-tests" defer></script>
+  </body>
+</html>
