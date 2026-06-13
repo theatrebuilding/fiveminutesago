@@ -452,7 +452,7 @@ class SenderRuntime:
                 srtsrc uri="srt://{self.server_ip}:{self.audio_recv_port}?mode=caller{audio_srt_suffix}" wait-for-connection=false !
                     {playback_input_queue}
                     ! application/x-rtp,media=audio,clock-rate={transport_audio_rate},encoding-name={encoding_name},channels={channels}
-                    ! rtpjitterbuffer latency=2000 do-lost=true
+                    ! rtpjitterbuffer latency=200 do-lost=true
                     ! rtpL16depay
                     ! audioconvert
                     ! capsfilter caps={remote_stereo_caps}
